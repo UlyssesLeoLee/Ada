@@ -1,10 +1,10 @@
 # Ada 无限画布跨平台数据集成系统 詳細設計書
 
-版本：1.0.0
+版本：1.1.0
 制定日：2026-08-18
 文档语言：中文（简体）
 密级：内部
-上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.0.0）
+上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.1.0）
 
 ---
 
@@ -56,8 +56,8 @@
 | M-08 | 定时/事件触发器（Trigger Service） | F-13 | Rust | M-05 |
 | M-09 | 输出/导出模块（Exporter） | F-14 | Rust | M-02 |
 | M-10 | 多租户中间件（Tenant Middleware） | F-17 | Rust | データベース層 |
-| M-11 | 权限与协作模块（RBAC & Collab） | F-11 | Rust + Yjs (前端側) | M-10 |
-| M-12 | 前端画布编辑器（Canvas Editor） | F-01 | TypeScript/React | API Gateway 経由で全モジュール |
+| M-11 | 权限与协作模块（RBAC & Collab） | F-11 | Rust + yrs (前端側) | M-10 |
+| M-12 | 前端画布编辑器（Canvas Editor） | F-01 | Rust (Bevy + bevy_egui, WASM) + TypeScript(HTML Overlay 胶水层) | API Gateway 経由で全モジュール |
 | M-13 | API Gateway | 横断 | Rust (Actix-web) | M-10, M-11 |
 
 ### 2.1 モジュール依存図（テキスト表現）
@@ -1022,62 +1022,227 @@ async fn record_audit_log(
 
 ## 12. フロントエンド 詳細設計（M-12）
 
-### 12.1 组件层级
+### 12.1 混合渲染架构总览
+
+前端采用 **Bevy（ECS 游戏引擎）+ bevy_egui（即时模式 GUI）渲染画布本体，HTML Overlay（原生 DOM）承载中文输入密集的表单**，两套渲染管线在同一浏览器页面内并存，通过共享的视口变换状态保持视觉对齐。选型理由与风险应对详见基本設計書 3.2.1 节。
 
 ```
-<CanvasApp>
- ├─ <CanvasViewport>           // 缩放/平移容器，管理视口变换矩阵
- │   ├─ <NodeLayer>            // 虚拟化渲染：仅渲染视口内 + buffer 区域的节点
- │   │   └─ <NodeCard node={...}> × N
- │   ├─ <EdgeLayer>            // SVG/Canvas 渲染连线，含流光动效
- │   └─ <SelectionOverlay>     // 框选、多选高亮
- ├─ <NodeConfigPanel>          // 选中节点的参数配置表单（依 JsonSchema 动态生成）
- ├─ <DebugPanel>                // 执行日志时间轴、数据快照 JSON 树
- ├─ <CollaboratorCursors>      // 实时显示其他协作者的光标位置（Yjs Awareness）
- └─ <TenantWorkspaceSwitcher>  // 工作空间/租户切换器
+浏览器页面
+ ├─ <canvas id="bevy-canvas">                    // Bevy WASM 应用挂载点，占满视口
+ │   （由 Bevy ECS 系统驱动，非 DOM 树，以下为 ECS 实体/系统结构，非 HTML 组件）
+ │
+ └─ <div id="html-overlay-root">                 // 与 bevy-canvas 同尺寸叠加的 DOM 层，pointer-events 默认穿透
+     ├─ <NodeConfigForm />                        // 节点配置表单，仅当前选中节点打开配置时挂载
+     ├─ <ExpressionEditor />                      // 表达式/JSON 映射规则编辑器（CodeMirror）
+     ├─ <DebugPanel />                             // 执行日志时间轴、数据快照 JSON 树
+     └─ <TenantWorkspaceSwitcher />                // 工作空间/租户切换器（顶部固定栏，非画布跟随）
 ```
 
-### 12.2 视口虚拟化渲染算法（対応 7.2 性能要件：1000 节点 30fps）
+### 12.2 Bevy ECS 画布数据模型
+
+```rust
+// ===== Component 定义 =====
+
+#[derive(Component)]
+struct CanvasNode {
+    node_id: String,
+    node_type: NodeType,
+}
+
+#[derive(Component)]
+struct CanvasPosition(Vec2);          // 画布逻辑坐标系（非屏幕像素坐标）
+
+#[derive(Component)]
+struct NodeVisualState {
+    status: NodeStatus,               // 驱动节点边框颜色（Pending灰/Running蓝/Success绿/Failed红）
+    selected: bool,
+}
+
+#[derive(Component)]
+struct CanvasEdge {
+    edge_id: String,
+    from_entity: Entity,
+    to_entity: Entity,
+    edge_kind: EdgeKind,              // DataFlow(血液，实线流光) | ControlFlow(肌肉，虚线箭头)
+}
+
+#[derive(Component)]
+struct DataFlowAnimation {
+    throughput: f32,                  // 来自 ChannelMetrics，驱动流光粒子速度
+    queue_pressure: f32,              // 0.0~1.0，驱动连线颜色渐变（绿→红）
+}
+
+// ===== Resource（全局单例状态）=====
+
+#[derive(Resource)]
+struct ViewportTransform {
+    pan: Vec2,
+    zoom: f32,                        // 限制范围 0.1 ~ 10.0（对应需求 10%～1000%）
+}
+
+#[derive(Resource)]
+struct SpatialIndex {
+    // R-tree 空间索引，加速视锥裁剪查询与框选命中检测
+    tree: rstar::RTree<IndexedNode>,
+}
+
+#[derive(Resource)]
+struct SelectionState {
+    selected_node_ids: HashSet<String>,
+}
+
+#[derive(Resource)]
+struct OpenConfigPanel {
+    // 非 None 时，通知 HTML Overlay 层挂载对应节点的配置表单
+    node_id: Option<String>,
+    anchor_screen_pos: Vec2,           // 用于 Overlay 定位
+}
+```
+
+### 12.3 核心 ECS 系统（Systems）
+
+```rust
+/// 每帧执行：将画布逻辑坐标转换为屏幕像素坐标，驱动 Bevy Transform
+fn sync_node_screen_position(
+    viewport: Res<ViewportTransform>,
+    mut query: Query<(&CanvasPosition, &mut Transform), With<CanvasNode>>,
+) {
+    for (canvas_pos, mut transform) in query.iter_mut() {
+        let screen_pos = (canvas_pos.0 - viewport.pan) * viewport.zoom;
+        transform.translation = screen_pos.extend(0.0);
+    }
+}
+
+/// 视锥裁剪：仅渲染视口 + buffer 区域内的节点，非可见节点组件标记为休眠
+fn frustum_culling_system(
+    viewport: Res<ViewportTransform>,
+    spatial_index: Res<SpatialIndex>,
+    mut query: Query<(&CanvasNode, &mut Visibility)>,
+) {
+    let buffer_margin = 200.0; // 画布单位，视口外缓冲区，避免快速平移时的闪烁
+    let visible_bounds = expand_bounds(viewport.visible_bounds(), buffer_margin);
+    let visible_ids: HashSet<String> = spatial_index.tree
+        .locate_in_envelope(&visible_bounds)
+        .map(|n| n.node_id.clone())
+        .collect();
+
+    for (node, mut visibility) in query.iter_mut() {
+        *visibility = if visible_ids.contains(&node.node_id) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// 双击节点时，向 OpenConfigPanel Resource 写入请求，由 JS 胶水代码桥接挂载 HTML Overlay 表单
+fn handle_node_double_click(
+    mut open_panel: ResMut<OpenConfigPanel>,
+    mut click_events: EventReader<NodeDoubleClickEvent>,
+    query: Query<(&CanvasNode, &GlobalTransform)>,
+) {
+    for ev in click_events.read() {
+        if let Ok((node, transform)) = query.get(ev.entity) {
+            open_panel.node_id = Some(node.node_id.clone());
+            open_panel.anchor_screen_pos = transform.translation().truncate();
+        }
+    }
+}
+
+/// 数据流吞吐指标驱动连线流光动效速度与颜色（対応 6.4 节 ChannelMetrics）
+fn update_dataflow_animation(
+    metrics: Res<DataFlowMetricsCache>,   // WebSocket 推送更新
+    mut query: Query<(&CanvasEdge, &mut DataFlowAnimation)>,
+) {
+    for (edge, mut anim) in query.iter_mut() {
+        if let Some(m) = metrics.get(&edge.edge_id) {
+            anim.throughput = m.throughput as f32;
+            anim.queue_pressure = (m.current_queue_depth as f32 / m.capacity as f32).clamp(0.0, 1.0);
+        }
+    }
+}
+```
+
+### 12.4 HTML Overlay 桥接机制（中文输入表单）
+
+```rust
+// Bevy 侧：通过 wasm-bindgen 暴露状态变化事件给 JS 胶水层
+#[wasm_bindgen]
+pub fn get_open_config_panel_state() -> JsValue {
+    // 序列化 OpenConfigPanel Resource 当前状态，供 JS 端轮询或由 Bevy 主动 postMessage
+}
+
+#[wasm_bindgen]
+pub fn submit_config_panel_form(node_id: String, config_json: String) {
+    // HTML 表单提交后回调此函数，将配置写回 ECS World 中对应 NodeDefinition.config
+    // 并触发画布重渲染 + 通过 WebSocket 同步至后端持久化
+}
+```
 
 ```typescript
-function getVisibleNodes(allNodes: NodeDefinition[], viewport: Viewport): NodeDefinition[] {
-  const bufferMargin = 200; // px，视口外缓冲区，避免快速滚动时闪烁
-  const visibleBounds = expandBounds(viewport.bounds, bufferMargin);
+// JS/TS 胶水层：监听 Bevy 侧的面板打开请求，动态挂载/卸载 React 组件到 Overlay 层
+bevyModule.onConfigPanelOpen((state: OpenConfigPanelState) => {
+  if (state.node_id) {
+    mountConfigForm(state.node_id, state.anchor_screen_pos); // ReactDOM.createRoot 挂载
+  } else {
+    unmountConfigForm();  // 关闭面板时立即卸载，避免常驻 DOM 增加开销
+  }
+});
 
-  // 使用空间索引（R-tree，通过 rbush 库）加速大规模节点的视口查询
-  return spatialIndex.search(visibleBounds);
-}
-
-// 关键性能优化点：
-// 1. 节点位置变更时仅更新 R-tree 局部索引，不整体重建
-// 2. React 渲染层使用 React.memo + 浅比较，避免视口外节点的无谓重渲染
-// 3. 连线渲染使用 Canvas 2D（而非 SVG DOM）以支持大量连线的高帧率绘制
-```
-
-### 12.3 状态管理架构
-
-```typescript
-// Zustand store 分片设计，避免单一大 store 导致的无谓重渲染
-interface CanvasStore {
-  nodes: Map<string, NodeDefinition>;
-  edges: Map<string, EdgeDefinition>;
-  viewport: Viewport;
-  selection: Set<string>;
-}
-
-interface ExecutionStore {
-  executionId: string | null;
-  nodeStatuses: Map<string, NodeStatus>;   // WebSocket 推送实时更新
-  dataFlowMetrics: Map<string, ChannelMetrics>;
-}
-
-interface TenantStore {
-  currentTenantId: string;
-  currentWorkspaceId: string;
-  userRole: Role;
-  quota: TenantQuotaView;
+// 表单提交时调用回 Bevy WASM 导出函数，写回 ECS 状态
+function onFormSubmit(nodeId: string, configJson: string) {
+  bevyModule.submit_config_panel_form(nodeId, configJson);
 }
 ```
+
+**坐标同步细节**：Overlay 表单容器使用 `position: absolute`，其 `left/top` 由 `OpenConfigPanel.anchor_screen_pos` 决定；Bevy 侧 `ViewportTransform` 每帧变化时，通过同一份共享状态（`SharedArrayBuffer` 或高频 `postMessage`，视浏览器兼容性选择）同步给 JS 层，Overlay 位置随画布平移/缩放实时跟随，视觉上表现为"挂在节点旁边的浮动面板"。
+
+**技术选型**：Overlay 表单内的富文本/表达式编辑场景使用 CodeMirror 6（原生支持 IME 组合输入事件 `compositionstart`/`compositionupdate`/`compositionend`），普通字段使用原生 `<input>`/`<textarea>`。
+
+### 12.5 视口虚拟化渲染性能保证（対応 7.2 性能要件：1000 节点 30fps）
+
+| 优化点 | 实现方式 |
+|---|---|
+| 视锥裁剪 | R-tree 空间索引（12.3 节 `frustum_culling_system`），节点位置变更时仅更新局部索引节点，不整体重建 |
+| 渲染批处理 | Bevy 的 Sprite Batching：同材质节点卡片合批绘制，减少 draw call |
+| 连线渲染 | 使用 Bevy 的 `Gizmos` 或自定义 Mesh 而非逐帧生成新几何体，流光动效通过 Shader uniform 参数驱动（避免 CPU 端逐帧重算顶点） |
+| ECS 查询优化 | 高频系统（如 `sync_node_screen_position`）使用 `Changed<T>` 过滤器，仅处理本帧发生变化的实体 |
+| WASM 包体积 | 裁剪 Bevy 默认 feature（禁用 3D、音频、动画等未使用模块），启用 `wasm-opt -O3` |
+
+### 12.6 状态管理架构
+
+```rust
+// Bevy Resource 承担传统前端框架中"全局 Store"的角色，按关注点分离为多个 Resource
+
+#[derive(Resource, Default)]
+struct CanvasState {
+    canvas_id: Option<String>,
+    version: u32,
+}
+
+#[derive(Resource, Default)]
+struct ExecutionState {
+    execution_id: Option<String>,
+    node_statuses: HashMap<String, NodeStatus>,   // WebSocket 推送实时更新
+}
+
+#[derive(Resource, Default)]
+struct TenantState {
+    current_tenant_id: String,
+    current_workspace_id: String,
+    user_role: Role,
+    quota: TenantQuotaView,
+}
+
+#[derive(Resource, Default)]
+struct CollaborationState {
+    // yrs（Yjs Rust 移植）文档句柄，协作者感知状态（Awareness）
+    doc: Option<yrs::Doc>,
+    remote_cursors: HashMap<String, RemoteCursor>,  // 驱动其他协作者光标实体的渲染
+}
+```
+
+**本地状态与服务端权威状态的一致性策略**：客户端对节点位置拖拽等高频操作采用乐观更新（本地 ECS 立即响应），通过 WebSocket 异步同步至服务端；服务端为最终权威源，若同步失败或与其他协作者的 CRDT 合并结果冲突，客户端接收服务端校正后的状态并静默纠正本地渲染（不打断用户当前操作）。
 
 ---
 
@@ -1281,12 +1446,16 @@ UPDATE canvas SET dag_json = ?, version = 6 WHERE canvas_id = ? AND version = 5
 | 令牌桶（Token Bucket） | 一种限流算法，本系统用于控制采集适配器的访问频率 |
 | 燃料计量（Fuel Metering） | WASM 沙箱中用于限制代码执行步数的机制，防止插件死循环耗尽资源 |
 | 乐观锁（Optimistic Lock） | 基于版本号比对的并发控制方式，用于非实时协作场景下的画布配置更新 |
+| ECS | Entity-Component-System，Bevy 的核心架构模式：实体（Entity）仅为 ID，组件（Component）为纯数据，系统（System）为无状态函数，本系统用其表达画布中的节点/连线/视口等运行时对象 |
+| HTML Overlay | 叠加在 Bevy WASM Canvas 之上的独立 DOM 层，用于承载依赖浏览器原生能力（尤其中文输入法 IME）的表单类交互 |
+| 视锥裁剪（Frustum Culling） | 仅渲染可视区域内实体的优化技术，源自游戏引擎术语，本系统用于大规模节点画布的性能优化 |
 
 ### 18.2 变更履历
 
 | バージョン | 日付 | 変更内容 | 作成者 |
 |---|---|---|---|
 | 1.0.0 | 2026-08-18 | 初版制定：基于要件定義書 v1.2.0 与基本設計書 v1.0.0，完成 M-01～M-13 全模块详细设计，涵盖数据结构、核心算法、状态机、并发控制、API 规格、错误码体系与测试观点 | Ada プロジェクトチーム |
+| 1.1.0 | 2026-08-18 | 前端（M-12）详细设计改为 Bevy + bevy_egui（画布 ECS 渲染）+ HTML Overlay（中文输入表单）混合架构：新增 ECS 数据模型、核心系统（视锥裁剪/坐标同步/流光动效）、Overlay 桥接机制（wasm-bindgen 双向调用）、状态管理架构；协作模块技术栈由 Yjs 调整为 yrs（Rust 移植版） | Ada プロジェクトチーム |
 
 ---
 
