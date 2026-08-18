@@ -1,10 +1,10 @@
 # Ada 无限画布跨平台数据集成系统 詳細設計書
 
-版本：1.1.0
+版本：1.2.0
 制定日：2026-08-18
 文档语言：中文（简体）
 密级：内部
-上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.1.0）
+上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.2.0）
 
 ---
 
@@ -27,7 +27,9 @@
 15. 状態遷移設計
 16. 並行性・排他制御設計
 17. テスト観点（単体・結合）
-18. 用語索引・変更履歴
+18. プロジェクト構成（Cargo Workspace 設計）
+19. 可観測性設計（ログ・メトリクス・トレース）
+20. 用語索引・変更履歴
 
 ---
 
@@ -1435,9 +1437,160 @@ UPDATE canvas SET dag_json = ?, version = 6 WHERE canvas_id = ? AND version = 5
 
 ---
 
-## 18. 用語索引・変更履歴
+## 18. プロジェクト構成（Cargo Workspace 設計）
 
-### 18.1 本文档特有术语补充
+### 18.1 Workspace 目录结构与 crate 划分
+
+模块清单（第 2 章）中的 M-01～M-13 对应到实际代码库，采用 Cargo Workspace 组织为多个独立 crate，边界与模块边界一一对应，便于独立编译、独立测试、未来可选的独立部署（如将 M-01 采集适配器拆为独立微服务）：
+
+```
+ada/
+├─ Cargo.toml                      # workspace 根，members 列出所有子 crate
+├─ crates/
+│  ├─ ada-core-types/              # 対応第 3 章数据类型：NJson, CanvasDefinition, ExecutionState 等
+│  │                                 # 被几乎所有其他 crate 依赖，故独立为最底层 crate，避免循环依赖
+│  ├─ ada-acquisition/             # M-01 采集适配器（AcquisitionAdapter trait、Playwright 绑定、API 连接器）
+│  ├─ ada-normalizer/              # M-02 标准化转换（字段映射、表达式引擎）
+│  ├─ ada-dataflow/                # M-03 数据流引擎（Channel、背压、持久化溢出缓存）
+│  ├─ ada-orchestration/           # M-04 编排引擎（状态机核心循环、StateStore trait）
+│  ├─ ada-control-flow/            # M-05 控制流执行器（并发调度、暂停恢复）
+│  ├─ ada-node-runtime/            # M-06 节点运行时/插件 SDK（NodePlugin trait、WASM 沙箱宿主）
+│  ├─ ada-debug/                   # M-07 可视化调试服务
+│  ├─ ada-trigger/                 # M-08 定时/事件触发器
+│  ├─ ada-exporter/                # M-09 输出/导出模块
+│  ├─ ada-tenant/                  # M-10 多租户中间件（TenantContext、QuotaEnforcer、RLS 会话管理）
+│  ├─ ada-collab/                  # M-11 权限与协作模块（RBAC、yrs 集成、审计日志写入）
+│  ├─ ada-frontend/                # M-12 前端（Bevy + bevy_egui，独立 wasm32-unknown-unknown 编译目标）
+│  ├─ ada-api-gateway/             # M-13 API Gateway（Actix-web，二进制 crate，依赖以上除 ada-frontend 外的全部）
+│  └─ ada-plugin-sdk/              # 面向第三方插件开发者发布的独立 SDK crate（対応 F-07-02），
+│                                    # 仅包含 NodePlugin trait 与必要类型，不携带内部实现细节，可独立发版至 crates.io 或私有 registry
+│
+├─ plugins/                        # 官方内置插件的示例实现（各自独立 crate，依赖 ada-plugin-sdk）
+│  ├─ plugin-lark-adapter/
+│  ├─ plugin-slack-adapter/
+│  └─ plugin-jira-connector/
+│
+├─ migrations/                     # sqlx/refinery 数据库迁移脚本，対応基本設計書第 5 章表结构
+├─ deploy/                         # Kubernetes manifests / Helm chart / docker-compose（対応基本設計書 8 章部署策略）
+└─ xtask/                          # 自定义构建脚本 crate（如 WASM 打包、wasm-opt 压缩流水线）
+```
+
+### 18.2 依赖方向约束
+
+为避免模块边界在实现阶段被腐蚀（如 M-01 直接依赖 M-04 的内部类型），workspace 强制以下依赖方向：
+
+```
+ada-core-types  ← 被所有 crate 依赖，自身不依赖任何业务 crate
+
+ada-acquisition, ada-normalizer, ada-exporter
+      ↓ 依赖
+ada-dataflow
+      ↓ 依赖
+ada-orchestration ← ada-control-flow（双向协作，但通过 trait 抽象解耦，
+                                       ada-orchestration 只依赖 ada-control-flow 暴露的 trait，不依赖具体实现）
+      ↓ 依赖
+ada-node-runtime
+
+ada-tenant, ada-collab  ← 横切关注点，被 ada-api-gateway 与各业务 crate 依赖，
+                            但 ada-tenant/ada-collab 自身不反向依赖业务 crate
+
+ada-api-gateway  ← 唯一的二进制 crate 入口，依赖除 ada-frontend 外的全部
+ada-frontend     ← 独立 wasm32 编译目标，仅依赖 ada-core-types（数据结构共享），
+                     不依赖任何服务端 crate，通过 HTTP/WebSocket 与 ada-api-gateway 通信而非直接函数调用
+```
+
+**CI 强制检查**：在 `xtask` 中实现一个依赖方向校验命令（基于 `cargo metadata` 解析依赖图），在 CI 流水线中作为强制检查项，禁止违反上述方向的新增依赖被合入主干。
+
+### 18.3 关键 crate 的 Cargo.toml 特性标记（feature flags）
+
+```toml
+# crates/ada-node-runtime/Cargo.toml
+[features]
+default = ["native-plugins"]
+native-plugins = ["libloading"]        # Rust 原生插件加载能力，服务端场景启用
+wasm-plugins = ["wasmtime"]            # WASM 沙箱插件能力，两者可同时启用
+
+# crates/ada-frontend/Cargo.toml
+[features]
+default = []
+dev-inspector = ["bevy-inspector-egui"]  # 仅开发环境启用的 ECS 状态调试面板，生产构建禁用以控制包体积
+```
+
+---
+
+## 19. 可観測性設計（ログ・メトリクス・トレース）
+
+### 19.1 三大支柱与技术选型
+
+| 支柱 | 技术选型 | 用途 |
+|---|---|---|
+| 结构化日志 | `tracing` + `tracing-subscriber`（JSON Lines 输出） | 対応要件文档 7.3 節日志要求，按节点/画布/租户过滤 |
+| 指标（Metrics） | `metrics` crate + Prometheus exporter | 対応第 6.4 節 `ChannelMetrics` 等运行时指标暴露 |
+| 分布式追踪（Tracing） | `tracing-opentelemetry` + OTLP exporter → Jaeger/Tempo | 跨模块调用链追踪，定位跨 M-01→M-02→M-03→M-04 的延迟瓶颈 |
+
+### 19.2 统一追踪上下文传播
+
+每个画布执行从触发入口起生成一个 `trace_id`（复用第 3.1 節 `NJson.trace_id` 的设计，二者共享同一追踪体系），贯穿编排引擎、数据流引擎、节点运行时的所有跨 crate 调用：
+
+```rust
+#[tracing::instrument(
+    skip(state, control_flow_executor),
+    fields(tenant_id = %state.tenant_id.unwrap_or_default(), execution_id = %state.execution_id)
+)]
+pub async fn run_orchestration_step(
+    state: &ExecutionState,
+    control_flow_executor: &ControlFlowExecutor,
+) -> Result<ExecutionState, OrchestrationError> {
+    // tracing::instrument 宏自动创建 Span，并将 tenant_id/execution_id 作为结构化字段附加
+    // 所有该函数内部产生的日志与子 Span 自动继承这些字段，无需手动透传
+}
+```
+
+**跨进程边界传播**（如 API Gateway → 通过消息队列异步触发的 Worker）：追踪上下文按 W3C Trace Context 标准（`traceparent` header）序列化，写入队列消息的 metadata 字段，Worker 端反序列化后恢复 Span 链路。
+
+### 19.3 关键指标清单
+
+```
+# 対応需求文档 7.2 節性能要件的可观测化
+ada_canvas_execution_duration_seconds{tenant_id, canvas_id, status}          (Histogram)
+ada_node_execution_duration_seconds{tenant_id, node_type, status}            (Histogram)
+ada_dataflow_throughput_total{tenant_id, canvas_id, edge_id}                 (Counter，已见 6.4 節)
+ada_dataflow_queue_depth{tenant_id, canvas_id, edge_id}                      (Gauge)
+ada_browser_pool_active_instances{tenant_id}                                 (Gauge，対応 4.4 節 BrowserPool)
+ada_browser_pool_wait_duration_seconds{tenant_id}                            (Histogram)
+ada_tenant_quota_usage_ratio{tenant_id, resource}                            (Gauge，対応 10.2 節 QuotaEnforcer)
+ada_plugin_execution_errors_total{plugin_id, error_type}                     (Counter)
+ada_websocket_active_connections{tenant_id}                                  (Gauge)
+```
+
+**告警规则示例**（Prometheus AlertManager）：
+
+```yaml
+- alert: TenantQuotaNearLimit
+  expr: ada_tenant_quota_usage_ratio > 0.8
+  for: 5m
+  labels: { severity: warning }
+  annotations:
+    summary: "租户 {{ $labels.tenant_id }} 的 {{ $labels.resource }} 配额使用超过 80%"
+    # 対応需求文档 7.5 節 tenant.quota_warning WebSocket 事件的服务端触发源
+
+- alert: DataflowQueueBacklog
+  expr: ada_dataflow_queue_depth / ada_dataflow_queue_capacity > 0.9
+  for: 2m
+  labels: { severity: critical }
+  annotations:
+    summary: "画布 {{ $labels.canvas_id }} 连线 {{ $labels.edge_id }} 数据积压严重，可能触发背压阻塞"
+```
+
+### 19.4 日志脱敏与多租户隔离
+
+结构化日志中禁止直接记录 `NJson.payload.fields` 的原始内容（可能含用户敏感数据），仅记录元信息（`trace_id`、`node_type`、`record_count`、耗时）；若调试场景确需记录数据内容，须先经过与第 5.1 節 `MaskSensitive` 相同的脱敏规则处理。日志系统本身也需按 `tenant_id` 做访问隔离——日志查询 API 强制注入租户过滤条件，与第 10 章 M-10 多租户中间件的 RLS 思路一致（日志存储若使用 Loki，则通过 label `tenant_id` 实现等效隔离）。
+
+---
+
+## 20. 用語索引・変更履歴
+
+### 20.1 本文档特有术语补充
 
 | 用語 | 定義 |
 |---|---|
@@ -1449,13 +1602,16 @@ UPDATE canvas SET dag_json = ?, version = 6 WHERE canvas_id = ? AND version = 5
 | ECS | Entity-Component-System，Bevy 的核心架构模式：实体（Entity）仅为 ID，组件（Component）为纯数据，系统（System）为无状态函数，本系统用其表达画布中的节点/连线/视口等运行时对象 |
 | HTML Overlay | 叠加在 Bevy WASM Canvas 之上的独立 DOM 层，用于承载依赖浏览器原生能力（尤其中文输入法 IME）的表单类交互 |
 | 视锥裁剪（Frustum Culling） | 仅渲染可视区域内实体的优化技术，源自游戏引擎术语，本系统用于大规模节点画布的性能优化 |
+| OTLP | OpenTelemetry Protocol，分布式追踪数据的标准传输协议，本系统用于跨模块调用链追踪的数据导出 |
+| W3C Trace Context | 跨进程/跨服务传播追踪上下文的标准 HTTP Header 格式（`traceparent`），本系统用于消息队列场景下的追踪链路延续 |
 
-### 18.2 变更履历
+### 20.2 变更履历
 
 | バージョン | 日付 | 変更内容 | 作成者 |
 |---|---|---|---|
 | 1.0.0 | 2026-08-18 | 初版制定：基于要件定義書 v1.2.0 与基本設計書 v1.0.0，完成 M-01～M-13 全模块详细设计，涵盖数据结构、核心算法、状态机、并发控制、API 规格、错误码体系与测试观点 | Ada プロジェクトチーム |
 | 1.1.0 | 2026-08-18 | 前端（M-12）详细设计改为 Bevy + bevy_egui（画布 ECS 渲染）+ HTML Overlay（中文输入表单）混合架构：新增 ECS 数据模型、核心系统（视锥裁剪/坐标同步/流光动效）、Overlay 桥接机制（wasm-bindgen 双向调用）、状态管理架构；协作模块技术栈由 Yjs 调整为 yrs（Rust 移植版） | Ada プロジェクトチーム |
+| 1.2.0 | 2026-08-18 | 新增第 18 章 Cargo Workspace 工程结构设计（crate 划分、依赖方向约束、feature flags）；新增第 19 章可观测性设计（tracing/metrics/OpenTelemetry 三支柱、统一追踪上下文传播、关键指标清单与告警规则、日志脱敏与多租户隔离）；补充术语索引 | Ada プロジェクトチーム |
 
 ---
 

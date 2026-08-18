@@ -1,6 +1,6 @@
 # Ada 无限画布跨平台数据集成系统 基本設計書
 
-版本：1.1.0
+版本：1.2.0
 制定日：2026-08-18
 文档语言：中文（简体）
 密级：内部
@@ -13,6 +13,7 @@
 |---|---|---|
 | 1.0.0 | 2026-08-17 | 初版制定 |
 | 1.1.0 | 2026-08-18 | 前端技术栈调整为 Bevy + bevy_egui（画布渲染）+ HTML Overlay（中文输入表单）混合架构；更新 3.2.1 节、第 9 章技术栈表、第 10 章风险清单 |
+| 1.2.0 | 2026-08-18 | 补全第 5 章数据库设计中此前仅在 ER 图提及但未定义的表：Workspace、AppUser/TenantUser、Team/TeamUser、Credential、ConnectorTemplate、ConnectorSyncState、CanvasVersion、ExecutionNodeSnapshot、ExecutionLog；更新 5.1 节 ER 图概览与整体/归一化存储的设计取舍说明 |
 
 ---
 
@@ -303,23 +304,25 @@ struct TenantQuota {
 
 ```
 Tenant
-  ├─ TenantUser (多对多关系，含角色)
+  ├─ TenantUser (与 AppUser 多对多，含角色) ─── AppUser (全局账号，可跨租户)
+  ├─ ConnectorTemplate (F-16 通用连接器模板)
+  ├─ ConnectorSyncState (F-15 增量同步游标，按 adapter_id 维度)
   ├─ Workspace
-  │  ├─ WorkspaceUser (多对多)
   │  ├─ Canvas
-  │  │  ├─ Node (节点定义)
-  │  │  ├─ Edge (连线定义)
+  │  │  ├─ Node (节点定义，内嵌于 dag_json)
+  │  │  ├─ Edge (连线定义，内嵌于 dag_json)
   │  │  ├─ CanvasVersion (版本快照)
   │  │  └─ CanvasExecution (执行记录)
   │  │      ├─ ExecutionNodeSnapshot (节点快照)
   │  │      └─ ExecutionLog (日志)
   │  ├─ Team
-  │  │  └─ TeamUser
-  │  ├─ Credential (凭证库)
-  │  └─ ConnectorConfig (连接器配置)
+  │  │  └─ TeamUser (与 AppUser 多对多)
+  │  └─ Credential (凭证库，加密存储)
   │
   └─ AuditLog (审计日志)
 ```
+
+> 注：`Node`/`Edge` 未独立建表，而是作为 `CanvasDefinition`（詳細設計書 3.2 节）整体序列化存入 `canvas.dag_json`（JSONB）。选择整体存储而非归一化拆表的理由：画布编辑是"整体读写"场景（前端一次性加载/保存全部节点连线），拆表会引入不必要的 JOIN 与事务复杂度；`CanvasVersion` 表（见下）通过存储每次发布的 `dag_json` 快照来支持版本回滚。
 
 ### 5.2 关键表设计
 
@@ -344,6 +347,171 @@ CREATE TABLE tenant (
   sso_enabled BOOLEAN DEFAULT false,
   sso_config_json JSONB
 );
+```
+
+#### Workspace 表
+
+```sql
+CREATE TABLE workspace (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenant(id),
+
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+
+  created_by UUID,
+  created_at TIMESTAMP WITH TIME ZONE,
+  updated_at TIMESTAMP WITH TIME ZONE,
+  deleted_at TIMESTAMP WITH TIME ZONE,  -- 软删除
+
+  UNIQUE(tenant_id, id)
+);
+
+ALTER TABLE workspace ENABLE ROW LEVEL SECURITY;
+CREATE POLICY workspace_rls ON workspace
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+```
+
+#### User / TenantUser 表
+
+```sql
+-- User 为全局账号表（一个自然人可跨多个租户，如同一邮箱受邀加入不同企业租户）
+CREATE TABLE app_user (
+  id UUID PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  display_name VARCHAR(255),
+  password_hash VARCHAR(255),         -- 若启用 SSO/OAuth 登录则可为空
+  mfa_enabled BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE,
+  last_login_at TIMESTAMP WITH TIME ZONE
+);
+
+-- TenantUser 为用户与租户的多对多关系，携带该用户在该租户下的角色（対応 F-11 RBAC）
+CREATE TABLE tenant_user (
+  tenant_id UUID NOT NULL REFERENCES tenant(id),
+  user_id UUID NOT NULL REFERENCES app_user(id),
+  role VARCHAR(20) NOT NULL,          -- 'owner' | 'admin' | 'editor' | 'executor' | 'viewer'
+  invited_by UUID,
+  joined_at TIMESTAMP WITH TIME ZONE,
+  status VARCHAR(20) DEFAULT 'active', -- 'invited' | 'active' | 'suspended'
+
+  PRIMARY KEY (tenant_id, user_id)
+);
+
+ALTER TABLE tenant_user ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_user_rls ON tenant_user
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+```
+
+#### Team / TeamUser 表
+
+```sql
+CREATE TABLE team (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenant(id),
+  workspace_id UUID NOT NULL,
+
+  name VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE,
+
+  FOREIGN KEY (tenant_id, workspace_id) REFERENCES workspace(tenant_id, id)
+);
+
+CREATE TABLE team_user (
+  team_id UUID NOT NULL REFERENCES team(id),
+  tenant_id UUID NOT NULL,            -- 冗余存储，便于 RLS 直接过滤，避免 JOIN
+  user_id UUID NOT NULL REFERENCES app_user(id),
+  role_override VARCHAR(20),          -- 可选：团队内角色覆盖租户级默认角色
+
+  PRIMARY KEY (team_id, user_id)
+);
+
+ALTER TABLE team ENABLE ROW LEVEL SECURITY;
+CREATE POLICY team_rls ON team
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+
+ALTER TABLE team_user ENABLE ROW LEVEL SECURITY;
+CREATE POLICY team_user_rls ON team_user
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+```
+
+#### Credential 表（凭证库，対応 F-02-02/7.5 安全要件）
+
+```sql
+CREATE TABLE credential (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenant(id),
+  workspace_id UUID NOT NULL,
+
+  name VARCHAR(255) NOT NULL,          -- 用户可读标识，如"飞书-市场部账号"
+  platform VARCHAR(50) NOT NULL,       -- 'lark' | 'slack' | 'jira' | ...
+  credential_type VARCHAR(20) NOT NULL, -- 'oauth2_token' | 'api_key' | 'cookie_session'
+
+  -- 加密存储：仅存密文，密钥由 KMS 管理（対応基本設計書 6.2 節）
+  encrypted_payload BYTEA NOT NULL,
+  encryption_key_id VARCHAR(100) NOT NULL,  -- KMS 中的密钥引用，非密钥本身
+
+  -- OAuth2 场景的过期与刷新
+  expires_at TIMESTAMP WITH TIME ZONE,
+  refresh_token_encrypted BYTEA,
+
+  created_by UUID,
+  created_at TIMESTAMP WITH TIME ZONE,
+  last_used_at TIMESTAMP WITH TIME ZONE,
+  last_rotated_at TIMESTAMP WITH TIME ZONE,
+
+  FOREIGN KEY (tenant_id, workspace_id) REFERENCES workspace(tenant_id, id)
+);
+
+ALTER TABLE credential ENABLE ROW LEVEL SECURITY;
+CREATE POLICY credential_rls ON credential
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+
+-- 凭证访问需强制审计（应用层在每次读取 encrypted_payload 前调用 M-11 record_audit_log）
+```
+
+#### ConnectorTemplate 表（対応 F-16 通用 CRM/企业系统适配框架）
+
+```sql
+CREATE TABLE connector_template (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenant(id),
+
+  name VARCHAR(255) NOT NULL,
+  base_url VARCHAR(500) NOT NULL,
+  auth_method_json JSONB NOT NULL,     -- AuthMethod 序列化（詳細設計書 4.6 節）
+  endpoints_json JSONB NOT NULL,        -- Vec<EndpointSpec> 序列化
+  field_mapping_json JSONB NOT NULL,    -- FieldMappingRules 序列化
+
+  created_by UUID,
+  created_at TIMESTAMP WITH TIME ZONE,
+  updated_at TIMESTAMP WITH TIME ZONE
+);
+
+ALTER TABLE connector_template ENABLE ROW LEVEL SECURITY;
+CREATE POLICY connector_template_rls ON connector_template
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+```
+
+#### ConnectorSyncState 表（対応 F-15-03 增量同步）
+
+```sql
+CREATE TABLE connector_sync_state (
+  tenant_id UUID NOT NULL,
+  adapter_id VARCHAR(100) NOT NULL,
+  credential_id UUID REFERENCES credential(id),
+
+  cursor_json JSONB,                    -- Cursor 序列化，NULL 表示尚未首次同步
+  last_synced_at TIMESTAMP WITH TIME ZONE,
+  sync_status VARCHAR(20) DEFAULT 'idle', -- 'idle' | 'syncing' | 'error'
+  last_error TEXT,
+
+  PRIMARY KEY (tenant_id, adapter_id, credential_id)
+);
+
+ALTER TABLE connector_sync_state ENABLE ROW LEVEL SECURITY;
+CREATE POLICY connector_sync_state_rls ON connector_sync_state
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 ```
 
 #### Canvas 表
@@ -381,6 +549,33 @@ CREATE POLICY canvas_rls ON canvas
   FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
 ```
 
+#### CanvasVersion 表（対応 F-10 版本管理与回滚）
+
+```sql
+CREATE TABLE canvas_version (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  canvas_id UUID NOT NULL,
+
+  version_number INT NOT NULL,
+  dag_json JSONB NOT NULL,             -- 该版本的完整画布快照（整体存储，理由见 5.1 節注）
+  change_summary TEXT,                  -- 可选的人工/自动生成变更摘要
+
+  created_by UUID,
+  created_at TIMESTAMP WITH TIME ZONE,
+
+  UNIQUE(tenant_id, canvas_id, version_number),
+  FOREIGN KEY (tenant_id, canvas_id) REFERENCES canvas(tenant_id, id)
+);
+
+ALTER TABLE canvas_version ENABLE ROW LEVEL SECURITY;
+CREATE POLICY canvas_version_rls ON canvas_version
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+
+-- canvas.current_version_id 指向本表，回滚操作即将 current_version_id 指回历史版本
+-- 并将该历史版本的 dag_json 复制为新的 version_number（回滚本身也生成一条新版本记录，保留完整历史）
+```
+
 #### CanvasExecution 表
 
 ```sql
@@ -412,6 +607,68 @@ CREATE TABLE canvas_execution (
   FOREIGN KEY (tenant_id) REFERENCES tenant(id),
   FOREIGN KEY (tenant_id, canvas_id) REFERENCES canvas(tenant_id, id)
 );
+
+ALTER TABLE canvas_execution ENABLE ROW LEVEL SECURITY;
+CREATE POLICY canvas_execution_rls ON canvas_execution
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+```
+
+#### ExecutionNodeSnapshot 表（対応 F-08 可视化调试）
+
+```sql
+CREATE TABLE execution_node_snapshot (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  execution_id UUID NOT NULL,
+  node_id VARCHAR(100) NOT NULL,       -- 对应 CanvasDefinition 内的 node_id，非全局 UUID
+
+  attempt INT NOT NULL DEFAULT 1,       -- 重试次数编号
+  status VARCHAR(20) NOT NULL,          -- 対応詳細設計書 NodeStatus
+
+  input_ref VARCHAR(500),               -- 输入数据的对象存储引用（大体积数据不入库，仅存引用）
+  output_ref VARCHAR(500),
+  error_message TEXT,
+
+  started_at TIMESTAMP WITH TIME ZONE,
+  completed_at TIMESTAMP WITH TIME ZONE,
+  duration_ms INT,
+
+  FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+  FOREIGN KEY (tenant_id, execution_id) REFERENCES canvas_execution(tenant_id, id)
+);
+
+ALTER TABLE execution_node_snapshot ENABLE ROW LEVEL SECURITY;
+CREATE POLICY execution_node_snapshot_rls ON execution_node_snapshot
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+
+-- 対応 F-08-01：每个节点仅保留最近 N 次（默认 20 次）快照，超出部分由定时任务清理
+CREATE INDEX idx_exec_node_snapshot_retention
+  ON execution_node_snapshot (tenant_id, execution_id, node_id, started_at DESC);
+```
+
+#### ExecutionLog 表
+
+```sql
+CREATE TABLE execution_log (
+  id BIGSERIAL PRIMARY KEY,            -- 高频写入场景，用自增而非 UUID 降低索引开销
+  tenant_id UUID NOT NULL,
+  execution_id UUID NOT NULL,
+  node_id VARCHAR(100),                 -- 可为空：整体执行级别的日志
+
+  log_level VARCHAR(10) NOT NULL,       -- 'debug' | 'info' | 'warn' | 'error'
+  message TEXT NOT NULL,
+  logged_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+  FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+  FOREIGN KEY (tenant_id, execution_id) REFERENCES canvas_execution(tenant_id, id)
+);
+
+ALTER TABLE execution_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY execution_log_rls ON execution_log
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+
+-- 対応 8.1 節（要件定義書）日志结构化要求；生产环境建议按月分区（PARTITION BY RANGE (logged_at)）
+-- 以支撑 7.5 節审计日志保留期策略的高效批量清理
 ```
 
 #### AuditLog 表
