@@ -1,6 +1,6 @@
 # Ada 无限画布跨平台数据集成系统 基本設計書
 
-版本：1.2.0
+版本：1.3.0
 制定日：2026-08-18
 文档语言：中文（简体）
 密级：内部
@@ -14,6 +14,7 @@
 | 1.0.0 | 2026-08-17 | 初版制定 |
 | 1.1.0 | 2026-08-18 | 前端技术栈调整为 Bevy + bevy_egui（画布渲染）+ HTML Overlay（中文输入表单）混合架构；更新 3.2.1 节、第 9 章技术栈表、第 10 章风险清单 |
 | 1.2.0 | 2026-08-18 | 补全第 5 章数据库设计中此前仅在 ER 图提及但未定义的表：Workspace、AppUser/TenantUser、Team/TeamUser、Credential、ConnectorTemplate、ConnectorSyncState、CanvasVersion、ExecutionNodeSnapshot、ExecutionLog；更新 5.1 节 ER 图概览与整体/归一化存储的设计取舍说明 |
+| 1.3.0 | 2026-08-18 | **自审修正**：修复 4.1 節示意代码与 5.2 節实际建表 RLS 策略之间的会话变量命名不一致（`app.current_tenant_id` vs `app.current_tenant`，统一为后者）；修复 canvas 表 RLS 策略缺少 `missing_ok` 参数导致的行为不一致；为 `canvas.current_version_id` 补充循环外键的设计说明（应用层保证一致性，不声明物理 FK） |
 
 ---
 
@@ -237,12 +238,13 @@ async fn get_canvas(
 **行级安全（RLS，Row-Level Security）** 在 PostgreSQL 中实现：
 
 ```sql
--- Canvas 表
+-- Canvas 表（会话变量统一命名为 app.current_tenant，与 5.2 节全部建表语句及
+-- 詳細設計書 10.1 節 TenantContextMiddleware 的实现保持一致，避免变量名不匹配导致 RLS 静默失效）
 CREATE POLICY canvas_tenant_isolation ON canvas
-  USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+  USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
 -- 查询前设置租户上下文
-SET app.current_tenant_id TO 'uuid-of-tenant-1';
+SET app.current_tenant TO 'uuid-of-tenant-1';
 SELECT * FROM canvas;  -- 自动过滤
 ```
 
@@ -529,6 +531,9 @@ CREATE TABLE canvas (
   dag_json JSONB,  -- DAG/StateGraph 定义
   
   -- 版本与状态
+  -- current_version_id 有意不声明 FK：与下方 canvas_version.canvas_id → canvas.id 互相引用会形成循环外键，
+  -- 建表顺序上 canvas_version 表此时还不存在。一致性由应用层保证（写入前必须先插入 canvas_version 行），
+  -- 如需数据库级强制，可在两表都建好后执行 ALTER TABLE canvas ADD CONSTRAINT ... DEFERRABLE INITIALLY DEFERRED
   current_version_id UUID,
   status ENUM('draft', 'published', 'archived'),
   
@@ -546,7 +551,7 @@ CREATE TABLE canvas (
 -- 启用行级安全
 ALTER TABLE canvas ENABLE ROW LEVEL SECURITY;
 CREATE POLICY canvas_rls ON canvas 
-  FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid);
+  FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 ```
 
 #### CanvasVersion 表（対応 F-10 版本管理与回滚）
