@@ -1,10 +1,10 @@
 # Ada 无限画布跨平台数据集成系统 詳細設計書
 
-版本：1.2.0
+版本：1.3.0
 制定日：2026-08-18
 文档语言：中文（简体）
 密级：内部
-上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.2.0）
+上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.3.0）
 
 ---
 
@@ -280,6 +280,25 @@ pub trait AcquisitionAdapter: Send + Sync {
         -> Result<(), AdapterError> {
         Err(AdapterError::Unsupported)
     }
+}
+
+/// 采集适配器统一错误类型，供 4.8 節异常处理表与 M-05 编排引擎的异常分支路由消费
+#[derive(Debug, thiserror::Error)]
+pub enum AdapterError {
+    #[error("该适配器不支持此操作")]
+    Unsupported,
+    #[error("API 与浏览器模式均不可用")]
+    NoAvailableMode,
+    #[error("登录态/凭证已过期")]
+    AuthExpired,
+    #[error("页面选择器未匹配到元素: {selector}")]
+    SelectorNotFound { selector: String },
+    #[error("浏览器实例池获取超时或配额耗尽")]
+    PoolExhausted,
+    #[error("上游平台返回错误: {status_code} {message}")]
+    UpstreamError { status_code: u16, message: String },
+    #[error("网络请求失败: {0}")]
+    NetworkError(String),
 }
 
 pub struct FetchBatch {
@@ -706,6 +725,21 @@ pub trait StateStore: Send + Sync {
 ### 8.1 并发调度器
 
 ```rust
+/// 单个节点一次执行尝试的结果，供编排引擎（M-04 transition）与调试服务（M-07）消费
+pub struct NodeExecutionResult {
+    pub node_id: String,
+    pub attempt: u32,
+    pub outcome: NodeExecutionOutcome,
+    pub started_at: DateTime<Utc>,
+    pub duration_ms: u64,
+}
+
+pub enum NodeExecutionOutcome {
+    Success { output: NJson },
+    Failure { error: AdapterError },   // 或其他模块自身的 Error 类型，经统一 trait 收敛
+    Aborted { reason: String },
+}
+
 pub struct ControlFlowExecutor {
     // 按租户隔离的并发度限制信号量
     tenant_semaphores: DashMap<TenantId, Arc<Semaphore>>,
@@ -864,13 +898,39 @@ where S: Service<ServiceRequest, Response = ServiceResponse, Error = Error>
             roles: claims.roles,
         });
 
-        // 4. 设置数据库连接的 RLS session 变量（关键：数据库层兜底隔离）
-        db_pool.execute(&format!("SET app.current_tenant = '{}'", claims.tenant_id)).await?;
-
         self.service.call(req)
     }
 }
 ```
+
+**关键修正：RLS 会话变量的正确设置位置与方式**
+
+上一版设计中间件直接对连接池调用 `SET`，存在两个缺陷需要修正：（1）字符串拼接 SQL 是注入反面写法；（2）`SET` 是连接级状态，从池中任取一条连接执行后无法保证请求后续的实际查询复用同一条连接，等于没设置。正确做法是**在每次数据库访问的事务开始处**，用参数化的 `set_config()` 加 `SET LOCAL` 语义（第三参数 `is_local = true`，仅在当前事务内生效，事务结束自动重置，天然避免连接池残留问题）：
+
+```rust
+/// 每次数据库操作在获取连接、开启事务后，事务内第一步调用本函数，
+/// 而不是在中间件里对连接池整体调用 —— 从根本上避免连接复用导致的 RLS 失效
+async fn with_tenant_scope<T>(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    f: impl FnOnce(&mut Transaction<'_, Postgres>) -> BoxFuture<'_, Result<T, DbError>>,
+) -> Result<T, DbError> {
+    let mut tx = pool.begin().await?;
+
+    // set_config 为参数化函数调用，非字符串拼接；is_local=true 等价于 SET LOCAL，
+    // 仅在本事务内生效，COMMIT/ROLLBACK 后自动清除，无需手动 RESET
+    sqlx::query("SELECT set_config('app.current_tenant', $1, true)")
+        .bind(tenant_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+
+    let result = f(&mut tx).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+```
+
+由于该方案以事务为作用域自动重置，第 10.4 節「连接池防御设计」中原本担心的"归还连接前忘记 `RESET`"风险不再存在——即便忘记 `RESET`，`SET LOCAL` 的作用域也不会跨事务泄漏。17.2 節 TC-MT-002 测试用例应相应调整为验证"跨事务边界的会话变量不残留"，而非依赖连接归还钩子。
 
 ### 10.2 配额检查与限流
 
@@ -925,6 +985,14 @@ impl QuotaEnforcer {
 ```
 
 ```rust
+/// 対応 8.3 節数据保留策略中的租户清理合规性审计要求
+pub struct DeletionReport {
+    pub tenant_id: TenantId,
+    pub deleted_at: DateTime<Utc>,
+    pub rows_deleted_by_table: HashMap<String, u64>,   // 表名 → 删除行数，逐表统计供审计
+    pub credential_keys_revoked: Vec<String>,           // 已通知 KMS 吊销的密钥引用列表
+}
+
 pub async fn hard_delete_tenant_data(tenant_id: TenantId) -> Result<DeletionReport, DeletionError> {
     // 事务性删除，按外键依赖倒序执行：
     // 1. execution_node_snapshot, execution_log
@@ -950,11 +1018,11 @@ CREATE POLICY {table_name}_tenant_isolation ON {table_name}
   USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
   WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
--- 关键：数据库连接池的每个连接在归还前必须 RESET app.current_tenant，
--- 防止连接复用时残留上一租户的会话变量导致隔离失效
+-- app.current_tenant 通过 10.1 節 with_tenant_scope 以 SET LOCAL 语义（set_config 第三参数 true）
+-- 在事务开始处设置，事务提交/回滚后由 PostgreSQL 自动清除，天然不会跨事务/跨连接归还残留
 ```
 
-**连接池防御设计**：使用 `deadpool-postgres` 时，在连接归还钩子（`RecycleMethod`）中显式执行 `RESET app.current_tenant`，并在单元测试中加入"连接复用后残留状态检测"用例（见第 17 章）。
+**连接池防御设计**：不依赖连接归还钩子手动 `RESET`（该方式在钩子被跳过、异常路径未触发时仍有残留风险），而是从设计上让会话变量的生命周期与事务严格绑定（`SET LOCAL`）。这样即使连接池实现遗漏归还钩子，残留也不可能跨越事务边界。单元测试仍需覆盖"连接复用后前一事务的会话变量不可见"这一场景（见 17.2 節 TC-MT-002），作为该设计假设的回归验证，而非依赖钩子本身。
 
 ---
 
@@ -1320,6 +1388,89 @@ Response 202:
 
 ## 14. エラーコード体系
 
+### 14.1 各模块内部 Rust 错误类型
+
+前述章节的函数签名中引用了多个模块专属的 `Error` 类型（如 `PoolError`、`PluginError`、`StoreError` 等），此处统一补齐定义，均采用 `thiserror` 派生，并在 API Gateway 层统一转换为 14.2 節的 HTTP Error Code：
+
+```rust
+// M-01 采集适配器
+#[derive(Debug, thiserror::Error)]
+pub enum PoolError {
+    #[error("浏览器实例池等待超时（{waited_ms}ms）")]
+    AcquireTimeout { waited_ms: u64 },
+    #[error("租户配额已耗尽，当前占用 {current}/{limit}")]
+    QuotaExceeded { current: u32, limit: u32 },
+}
+
+// M-04 编排引擎
+#[derive(Debug, thiserror::Error)]
+pub enum OrchestrationError {
+    #[error("状态持久化失败: {0}")]
+    PersistenceFailed(#[from] StoreError),
+    #[error("节点 {node_id} 的条件/循环表达式求值失败: {0}")]
+    EvalFailed { node_id: String, source: EvalError },
+    #[error("检测到无法恢复的循环依赖，涉及节点: {0:?}")]
+    CyclicDependency(Vec<String>),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EvalError {
+    #[error("表达式语法错误: {0}")]
+    SyntaxError(String),
+    #[error("表达式求值超时（>{limit_ms}ms）")]
+    Timeout { limit_ms: u64 },
+    #[error("引用了不存在的变量: {0}")]
+    UndefinedVariable(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("数据库连接失败: {0}")]
+    ConnectionFailed(String),
+    #[error("乐观锁冲突：版本 {expected} 已被更新为其他版本")]
+    VersionConflict { expected: u64 },
+    #[error("序列化/反序列化失败: {0}")]
+    SerdeError(String),
+}
+
+// M-06 节点运行时/插件 SDK
+#[derive(Debug, thiserror::Error)]
+pub enum PluginError {
+    #[error("插件执行超出资源限制: {resource}")]
+    ResourceLimitExceeded { resource: String },
+    #[error("插件加载失败: {0}")]
+    LoadFailed(String),
+    #[error("插件返回的输出未通过 output_schema 校验: {0}")]
+    OutputSchemaViolation(String),
+}
+
+// M-07 调试服务
+#[derive(Debug, thiserror::Error)]
+pub enum DebugError {
+    #[error("目标节点不存在于当前画布")]
+    NodeNotFound,
+    #[error("无可用于重放的历史快照")]
+    NoSnapshotAvailable,
+}
+
+// M-10 多租户中间件
+#[derive(Debug, thiserror::Error)]
+pub enum QuotaError {
+    #[error("配额超限: {resource} 当前 {current}/{limit}")]
+    Exceeded { resource: String, current: u32, limit: u32 },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeletionError {
+    #[error("删除过程中断，已完成步骤: {completed_steps:?}，需人工介入核实数据一致性")]
+    PartialFailure { completed_steps: Vec<String> },
+}
+```
+
+**命名约定**：模块内部 `Error` 枚举变体名与 14.2 節 Error Code 的对应关系遵循 `{EnumVariant}` → `{SCREAMING_SNAKE_ERROR_CODE}` 的机械转换（如 `AdapterError::AuthExpired` → `ADAPTER_AUTH_EXPIRED`），由 API Gateway 层的统一 `From<XxxError> for ApiError` 实现完成转换，避免各 handler 手写重复的映射逻辑。
+
+### 14.2 対外 HTTP Error Code
+
 | Error Code | HTTP Status | 説明 | 対応する処理層 |
 |---|---|---|---|
 | `TENANT_MISMATCH` | 403 | 请求路径租户与 Token 租户不一致 | M-10 |
@@ -1419,12 +1570,15 @@ UPDATE canvas SET dag_json = ?, version = 6 WHERE canvas_id = ? AND version = 5
     步骤 2 → 403 TENANT_MISMATCH
     步骤 3 → 404（RLS 层面查询不到，不应用 403 以避免信息泄露资源存在性）
 
-测试用例 TC-MT-002（连接池残留状态）：
+测试用例 TC-MT-002（事务边界会话变量不残留）：
   步骤：
-    1. 连接池连接 C1 处理租户 A 的请求（SET app.current_tenant = 'A'）
-    2. C1 归还连接池
-    3. 若归还钩子未正确 RESET，则 C1 被复用于租户 B 的请求时会残留 'A' 的会话变量
-  期望结果：C1 复用前必须观测到 app.current_tenant 已被 RESET 为默认值
+    1. 连接池连接 C1 在事务 T1 中通过 with_tenant_scope 处理租户 A 的请求
+       （SELECT set_config('app.current_tenant', 'A', true)）
+    2. T1 提交（COMMIT），C1 归还连接池
+    3. C1 被复用于租户 B 的请求，在新事务 T2 中查询 current_setting('app.current_tenant', true)
+  期望结果：
+    步骤 3 中 T2 提交前、set_config 调用前，current_setting 应返回 NULL（而非残留的 'A'）——
+    验证 SET LOCAL 语义随 T1 的 COMMIT 自动清除，不依赖连接归还钩子是否正确执行
 ```
 
 ### 17.3 性能测试基准（対応基本設計書 7.2 節）
@@ -1612,6 +1766,7 @@ ada_websocket_active_connections{tenant_id}                                  (Ga
 | 1.0.0 | 2026-08-18 | 初版制定：基于要件定義書 v1.2.0 与基本設計書 v1.0.0，完成 M-01～M-13 全模块详细设计，涵盖数据结构、核心算法、状态机、并发控制、API 规格、错误码体系与测试观点 | Ada プロジェクトチーム |
 | 1.1.0 | 2026-08-18 | 前端（M-12）详细设计改为 Bevy + bevy_egui（画布 ECS 渲染）+ HTML Overlay（中文输入表单）混合架构：新增 ECS 数据模型、核心系统（视锥裁剪/坐标同步/流光动效）、Overlay 桥接机制（wasm-bindgen 双向调用）、状态管理架构；协作模块技术栈由 Yjs 调整为 yrs（Rust 移植版） | Ada プロジェクトチーム |
 | 1.2.0 | 2026-08-18 | 新增第 18 章 Cargo Workspace 工程结构设计（crate 划分、依赖方向约束、feature flags）；新增第 19 章可观测性设计（tracing/metrics/OpenTelemetry 三支柱、统一追踪上下文传播、关键指标清单与告警规则、日志脱敏与多租户隔离）；补充术语索引 | Ada プロジェクトチーム |
+| 1.3.0 | 2026-08-18 | **自审修正**：(1) M-10 中间件 RLS 会话变量设置从"对连接池执行 SET + 字符串拼接 SQL"修正为"以 set_config 参数化调用 + SET LOCAL 语义绑定事务作用域"，修复连接池复用导致隔离失效与 SQL 注入反面写法两个问题，并同步更新 10.4 節连接池防御设计与 17.2 節 TC-MT-002 测试用例；(2) 补齐此前被引用但未定义的类型：`NodeExecutionResult`/`NodeExecutionOutcome`（§8.1）、`AdapterError`（§4.2）、`DeletionReport`（§10.3）；(3) 新增 14.1 節，补齐 `PoolError`/`OrchestrationError`/`EvalError`/`StoreError`/`PluginError`/`DebugError`/`QuotaError`/`DeletionError` 等此前仅在函数签名中出现、从未定义的模块内部错误类型，并说明其与 14.2 節 HTTP Error Code 的映射约定 | Ada プロジェクトチーム |
 
 ---
 
