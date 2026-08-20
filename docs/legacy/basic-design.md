@@ -1,20 +1,38 @@
 # Ada 无限画布跨平台数据集成系统 基本設計書
 
-版本：1.3.0
-制定日：2026-08-18
-文档语言：中文（简体）
-密级：内部
+> **ドキュメントID**：DOC-BSC-001
+> **文書分類**：基本設計書
+> **バージョン**：v1.3.0
+> **制定日**：2026-08-18
+> **最終更新日**：2026-08-18
+> **作成者**：Ada プロジェクトチーム
+> **レビュー**：TBD
+> **承認**：TBD
+> **上位文書**：`docs/legacy/requirements.md`（DOC-REQ-001）
+> **下位文書**：`docs/legacy/detailed-design.md`（DOC-DTL-001）、`docs/architecture/*`、`docs/modules/*`
+> **関連文書**：`docs/template.md`（DOC-TPL-001）
+> **適用 IPA 標準**：
+> - IPA「共通フレーム2018」(SLCP-JCF2018) 第 5 章「要件定義プロセス」後半・第 6 章「システム開発プロセス」前半
+> - IPA「非機能要求グレード2018」
+> **機密区分**：社内
+> **言語**：中文（简体）
 
 ---
 
 ## 変更履歴
 
-| バージョン | 日付 | 変更内容 |
-|---|---|---|
-| 1.0.0 | 2026-08-17 | 初版制定 |
-| 1.1.0 | 2026-08-18 | 前端技术栈调整为 Bevy + bevy_egui（画布渲染）+ HTML Overlay（中文输入表单）混合架构；更新 3.2.1 节、第 9 章技术栈表、第 10 章风险清单 |
-| 1.2.0 | 2026-08-18 | 补全第 5 章数据库设计中此前仅在 ER 图提及但未定义的表：Workspace、AppUser/TenantUser、Team/TeamUser、Credential、ConnectorTemplate、ConnectorSyncState、CanvasVersion、ExecutionNodeSnapshot、ExecutionLog；更新 5.1 节 ER 图概览与整体/归一化存储的设计取舍说明 |
-| 1.3.0 | 2026-08-18 | **自审修正**：修复 4.1 節示意代码与 5.2 節实际建表 RLS 策略之间的会话变量命名不一致（`app.current_tenant_id` vs `app.current_tenant`，统一为后者）；修复 canvas 表 RLS 策略缺少 `missing_ok` 参数导致的行为不一致；为 `canvas.current_version_id` 补充循环外键的设计说明（应用层保证一致性，不声明物理 FK） |
+| バージョン | 日付 | 変更内容 | 起草 | レビュー | 承認 |
+|---|---|---|---|---|---|
+| 1.0.0 | 2026-08-17 | 初版制定 | Ada プロジェクトチーム | TBD | TBD |
+| 1.1.0 | 2026-08-18 | Bevy + bevy_egui + HTML Overlay 混合架构採用 | Ada プロジェクトチーム | TBD | TBD |
+| 1.2.0 | 2026-08-18 | 5 章 DB 設計不足表補完 | Ada プロジェクトチーム | TBD | TBD |
+| 1.3.0 | 2026-08-18 | RLS 命名統一 + canvas 循環外鍵説明；IPA 準拠メタデータ追加 | Ada プロジェクトチーム | TBD | TBD |
+
+---
+
+## 改訂履歴
+
+（旧版では「変更履歴」として記録。本版以降は IPA 準拠の「改訂履歴」テーブルに移行。）
 
 ---
 
@@ -893,3 +911,36 @@ User PC
 ---
 
 *本文档为基本設計書，后续需制定各模块的詳細設計書与具体编码规范。*
+
+---
+
+## 11. 用語集
+
+| 用語 | 説明 | 出典 / 参照 |
+|---|---|---|
+| 生体仿生モデル | 骨/血/神经/肌肉 四层架构隐喻 | §2.1、DOC-ARCH-001 |
+| 混合渲染 | Bevy（GPU 渲染）+ HTML Overlay（DOM 表单）的双层架构 | §3.2.1 |
+| 行级安全 (RLS) | PostgreSQL Row-Level Security，行级访问控制 | §4.1、DOC-MOD-010 |
+| 三层隔离模型 | 逻辑隔离/数据库隔离/物理隔离 | §4.1 |
+| TenantQuota | 多租户场景下的资源配额模型 | §4.2 |
+| 免安装分发 | 单一可执行文件 + 网页前端，无系统级安装 | §8.1、F-09 |
+| Kubernetes 命名空间隔离 | 基于 k8s namespace 的多租户隔离 | §4.1.3 |
+| yrs | Yjs 的 Rust 移植版 CRDT 库 | §9 |
+| Bevy ECS | 基于 Entity-Component-System 的游戏引擎 | §3.2.1 |
+| 跨租户数据穿透 | 租户 A 读取到租户 B 数据的严重安全漏洞 | §4.1、§6.4 |
+
+## 12. 参考文献
+
+1. IPA「共通フレーム2018 (SLCP-JCF2018)」、独立行政法人情報処理推進機構、2018年3月
+2. IPA「非機能要求グレード2018」、独立行政法人情報処理推進機構、2018年4月
+3. IPA「ソフトウェア開発データ白書」、独立行政法人情報処理推進機構、各年度版
+4. JIS X 0160:2012「ソフトウェアライフサイクルプロセス」、日本工業標準調査会、2012年
+5. PostgreSQL Global Development Group「PostgreSQL Documentation — Row Security Policies」
+6. Kubernetes 公式ドキュメント「Namespaces」
+7. Ada プロジェクトチーム「Ada 无限画布跨平台数据集成システム 要件定義書 v1.2.1」、2026-08-18（[DOC-REQ-001](requirements.md)）
+8. Ada プロジェクトチーム「Ada 无限画布跨平台数据集成システム 詳細設計書 v1.3.0」、2026-08-18（[DOC-DTL-001](detailed-design.md)）
+
+---
+
+*本書は IPA「共通フレーム2018」(SLCP-JCF2018) 及び IPA「非機能要求グレード」に準拠して作成された。*
+*本書の無断転載・複製を禁ずる。© Ada プロジェクトチーム*

@@ -1,10 +1,32 @@
 # Ada 无限画布跨平台数据集成系统 詳細設計書
 
-版本：1.3.0
-制定日：2026-08-18
-文档语言：中文（简体）
-密级：内部
-上位文档：`docs/requirements.md`（要件定義書 v1.2.0）、`docs/basic-design.md`（基本設計書 v1.3.0）
+> **ドキュメントID**：DOC-DTL-001
+> **文書分類**：詳細設計書
+> **バージョン**：v1.3.0
+> **制定日**：2026-08-18
+> **最終更新日**：2026-08-18
+> **作成者**：Ada プロジェクトチーム
+> **レビュー**：TBD
+> **承認**：TBD
+> **上位文書**：`docs/legacy/requirements.md`（DOC-REQ-001）、`docs/legacy/basic-design.md`（DOC-BSC-001）
+> **下位文書**：`docs/modules/M-01~M-13`（DOC-MOD-001~013）、`docs/api/*`（DOC-API-001~003）、`docs/tests/*`
+> **関連文書**：`docs/template.md`（DOC-TPL-001）
+> **適用 IPA 標準**：
+> - IPA「共通フレーム2018」(SLCP-JCF2018) 第 6 章「システム開発プロセス」
+> - IPA「非機能要求グレード2018」
+> **機密区分**：社内
+> **言語**：中文（简体）
+
+---
+
+## 改訂履歴
+
+| バージョン | 日付 | 変更内容 | 起草 | レビュー | 承認 |
+|---|---|---|---|---|---|
+| 1.0.0 | 2026-08-17 | 初版制定（basic-design v1.0.0 のモジュール划分を継承） | Ada プロジェクトチーム | TBD | TBD |
+| 1.1.0 | 2026-08-18 | 14 章 ErrorCode 体系新設 + 10.1 RLS 修正 | Ada プロジェクトチーム | TBD | TBD |
+| 1.2.0 | 2026-08-18 | 12 章前端詳細 + 13.3 WS イベント清単细化 | Ada プロジェクトチーム | TBD | TBD |
+| 1.3.0 | 2026-08-18 | RLS 命名統一、canvas 循環外鍵、14.1 Rust Error 型定義；IPA 準拠メタデータ追加 | Ada プロジェクトチーム | TBD | TBD |
 
 ---
 
@@ -1771,3 +1793,47 @@ ada_websocket_active_connections{tenant_id}                                  (Ga
 ---
 
 *本文档为詳細設計書，是编码实现与单元测试用例编写的直接依据。若后续需求或基本设计发生变更，须同步更新本文档相应章节并递增版本号。*
+
+---
+
+## 21. 用語集
+
+| 用語 | 説明 | 出典 / 参照 |
+|---|---|---|
+| NJSON | 标准化 JSON 数据包，全系统数据流转的最小单元 | §3.1 |
+| CanvasDefinition | 画布静态配置（DAG/StateGraph） | §3.2 |
+| EdgeDefinition | 连线定义，含 DataFlow / ControlFlow 类型 | §3.2 |
+| ExecutionState | 编排引擎运行时的不可变状态 | §3.3 |
+| AdapterMode | 采集适配器模式（Api / Browser） | §4.2 |
+| FetchBatch | 适配器一次采集产出的批次 | §4.2 |
+| BrowserPool | 按租户隔离的浏览器实例池 | §4.4 |
+| RateLimiter | 令牌桶算法的采集频率限流 | §4.5 |
+| DataFlowChannel | 数据流连线对应的有界队列 | §6.1 |
+| StateGraph | 编排引擎基于的状态图模型 | §7 |
+| LlmDecisionNode | 基于 LLM 语义决策的节点 | §7.4 |
+| StateStore | 状态持久化后端接口 | §7.5 |
+| with_tenant_scope | 事务级 RLS 会话变量注入辅助函数 | §10.1 |
+| RLS 策略 | PostgreSQL 行级安全策略 | §10.4 |
+| yrs | Yjs 的 Rust 移植版 CRDT 库 | §11.2 |
+| CRDT | Conflict-free Replicated Data Type | §11.2 |
+| WASM 插件 | 通过 wasmtime 沙箱执行的第三方节点 | §9.2 |
+| TenantContextMiddleware | 注入租户上下文的 Actix-web 中间件 | §10.1 |
+| ErrorCode 对外映射 | 模块内部 Error → HTTP Error Code 的转换 | §14 |
+
+## 22. 参考文献
+
+1. IPA「共通フレーム2018 (SLCP-JCF2018)」、独立行政法人情報処理推進機構、2018年3月
+2. IPA「非機能要求グレード2018」、独立行政法人情報処理推進機構、2018年4月
+3. IPA「ソフトウェア開発データ白書」、独立行政法人情報処理推進機構、各年度版
+4. JIS X 0160:2012「ソフトウェアライフサイクルプロセス」、日本工業標準調査会、2012年
+5. LangGraph 公式ドキュメント「LangGraph — Stateful Multi-Actor Applications with LLMs」
+6. Yjs 公式ドキュメント「Yjs — Shared Data Types for Building Collaborative Applications」
+7. wasmtime 公式ドキュメント「wasmtime — A fast and secure runtime for WebAssembly」
+8. PostgreSQL Global Development Group「PostgreSQL Documentation — Row Security Policies」
+9. Ada プロジェクトチーム「Ada 无限画布跨平台数据集成システム 要件定義書 v1.2.1」、2026-08-18（[DOC-REQ-001](requirements.md)）
+10. Ada プロジェクトチーム「Ada 无限画布跨平台数据集成システム 基本設計書 v1.3.0」、2026-08-18（[DOC-BSC-001](basic-design.md)）
+
+---
+
+*本書は IPA「共通フレーム2018」(SLCP-JCF2018) 及び IPA「非機能要求グレード」に準拠して作成された。*
+*本書の無断転載・複製を禁ずる。© Ada プロジェクトチーム*
