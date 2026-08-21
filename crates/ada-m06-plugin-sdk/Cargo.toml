@@ -1,0 +1,21 @@
+[package]
+name = "ada-m06-plugin-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-06: Plugin SDK. Build custom nodes and data sources. Compiles to WASM (D-02)."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m06_plugin_sdk"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

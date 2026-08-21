@@ -1,0 +1,21 @@
+[package]
+name = "ada-m05-control-flow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-05: Control flow executor. Conditional branches, loops, parallel branches."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m05_control_flow"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

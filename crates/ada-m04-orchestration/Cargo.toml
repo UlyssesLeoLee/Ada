@@ -1,0 +1,21 @@
+[package]
+name = "ada-m04-orchestration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-04: Pipeline orchestration. DAG-based dependency resolution and execution control."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m04_orchestration"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

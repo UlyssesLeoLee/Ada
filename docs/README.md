@@ -4,14 +4,14 @@
 
 > **ドキュメントID**：DOC-INDEX-001
 > **文書分類**：横断文書
-> **バージョン**：v1.7.0
+> **バージョン**：v1.8.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-20
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
 > **上位文書**：無
-> **下位文書**：`docs/template.md`、`docs/CHANGELOG.md`、`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/templates/*`、`docs/upstream/*`、`docs/requirements/*`、`docs/management/*`、`docs/business/*`
+> **下位文書**：`docs/template.md`、`docs/CHANGELOG.md`、`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/templates/*`、`docs/upstream/*`、`docs/requirements/*`、`docs/management/*`、`docs/business/*`、`docs/decisions/*`
 > **関連文書**：無
 > **適用 IPA 標準**：
 > - IPA「共通フレーム2018」(SLCP-JCF2018)
@@ -34,6 +34,7 @@
 | v1.5.0 | 2026-08-20 | IPA ワークフロー全体俯瞰（DOC-ARCH-009）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v1.6.0 | 2026-08-20 | 工程別テンプレート集（`docs/templates/`、DOC-TPL-INDEX + 8 カテゴリ × 62 テンプレート）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v1.7.0 | 2026-08-20 | 超上流/要件/管理/業務 4 新ディレクトリ追加（upstream 8 + requirements 10 + management 5 + business 1 = 24 ドキュメント） | Ada プロジェクトチーム | TBD | TBD |
+| v1.8.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 | Ada プロジェクトチーム | TBD | TBD |
 
 ---
 
@@ -160,6 +161,16 @@
 | DOC-REQ-SEC-001 | [requirements/08-security-requirements.md](requirements/08-security-requirements.md) | セキュリティ要件定義書 | 17 |
 | DOC-REQ-OPS-001 | [requirements/09-operation-requirements.md](requirements/09-operation-requirements.md) | 運用要件定義書 | 18 |
 | DOC-REQ-MIG-001 | [requirements/10-migration-requirements.md](requirements/10-migration-requirements.md) | 移行要件定義書 | 19 |
+
+## 5.7.5. 意思決定ドキュメント（decisions/）
+
+> G4 实施着手判定前に必要な 11 P0 决策 + 15 D-ADR を集約。
+
+| ドキュメントID | ファイル | タイトル | 対応 |
+|---|---|---|---|
+| DOC-DEC-INDEX | [decisions/README.md](decisions/README.md) | 意思決定総覧 | — |
+| DOC-DEC-001 | [decisions/01-p0-decision-matrix.md](decisions/01-p0-decision-matrix.md) | 11 P0 决策矩阵 | UN-P0-01〜11 |
+| DOC-DEC-002 | [decisions/02-design-adrs.md](decisions/02-design-adrs.md) | D-01〜15 設計 ADR | D-01〜15 |
 
 ## 5.8. プロジェクト管理ドキュメント（management/）
 

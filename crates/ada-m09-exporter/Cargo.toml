@@ -1,0 +1,21 @@
+[package]
+name = "ada-m09-exporter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-09: Exporter. Output results to external systems. File, REST, DB, gRPC."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m09_exporter"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

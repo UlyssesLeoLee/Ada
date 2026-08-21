@@ -1,0 +1,21 @@
+[package]
+name = "ada-m07-debug"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-07: Debug service. Breakpoints, step execution, variable watch, trace logging."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m07_debug"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "ada-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core types, error handling, and shared utilities used by all Ada crates."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_core"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

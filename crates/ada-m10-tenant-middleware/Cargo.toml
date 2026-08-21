@@ -1,0 +1,21 @@
+[package]
+name = "ada-m10-tenant-middleware"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-10: Tenant middleware. 11 tables, 6 PL/pgSQL procedures, RLS, multi-tenant isolation. [NF-SEC] required."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m10_tenant_middleware"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

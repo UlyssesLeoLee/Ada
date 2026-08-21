@@ -1,0 +1,56 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 環境
+.env
+.env.local
+*.local
+
+# シークレット（絶対にコミットしない）
+**/secrets.toml
+**/*.pem
+**/*.key
+**/id_rsa*
+
+# ビルド成果物
+/dist/
+/build/
+*.tar.gz
+*.zip
+
+# ログ
+*.log
+
+# 一時ファイル
+tmp/
+.tmp/
+*.tmp
+
+# Cargo キャッシュ（ローカル）
+.cargo/
+
+# Node（フロントエンドビルド用）
+node_modules/
+/.pnp
+.pnp.js
+yarn-error.log
+npm-debug.log*
+
+# WASM
+/wasm/target/
+/wasm/Cargo.lock
+/pkg/

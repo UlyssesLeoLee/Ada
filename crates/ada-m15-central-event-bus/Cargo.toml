@@ -1,0 +1,21 @@
+[package]
+name = "ada-m15-central-event-bus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-15: Central event bus. Pub/Sub. at-least-once + idempotent (D-07)."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m15_central_event_bus"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,81 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ada-core",
+    "crates/ada-telemetry",
+
+    "crates/ada-m01-acquisition",
+    "crates/ada-m02-normalizer",
+    "crates/ada-m03-data-flow-engine",
+    "crates/ada-m04-orchestration",
+    "crates/ada-m05-control-flow",
+    "crates/ada-m06-plugin-sdk",
+    "crates/ada-m07-debug",
+    "crates/ada-m08-trigger",
+    "crates/ada-m09-exporter",
+    "crates/ada-m10-tenant-middleware",
+    "crates/ada-m11-rbac-collab",
+    "crates/ada-m12-canvas-editor",
+    "crates/ada-m13-api-gateway",
+    "crates/ada-m14-module-registry",
+    "crates/ada-m15-central-event-bus",
+    "crates/ada-m16-cluster-coordinator",
+]
+
+# 単一 workspace version (D-09 採用)
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+license = "MIT"
+authors = ["Ada Project Team"]
+repository = "https://github.com/UlyssesLeoLee/ada"
+homepage = "https://ada.kanvas.dev"
+readme = "README.md"
+keywords = ["canvas", "etl", "data-integration", "visualization", "low-code"]
+categories = ["data-structures", "database", "visualization"]
+
+[workspace.dependencies]
+# Workspace 共有依存関係（必要時に各 crate から参照）
+# tokio = { version = "1.40", features = ["full"] }
+# axum = "0.7"
+# serde = { version = "1", features = ["derive"] }
+# sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+# tracing = "0.1"
+# tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# thiserror = "1"
+# anyhow = "1"
+# uuid = { version = "1", features = ["v4", "v7", "serde"] }
+# chrono = { version = "0.4", features = ["serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_imports = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# ビルドプロファイル
+[profile.dev]
+opt-level = 0
+debug = 1
+incremental = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+panic = "abort"
+
+# ベンチマーク用
+[profile.bench]
+opt-level = 3
+lto = "thin"
+debug = true

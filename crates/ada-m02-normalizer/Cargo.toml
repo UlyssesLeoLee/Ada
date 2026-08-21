@@ -1,0 +1,21 @@
+[package]
+name = "ada-m02-normalizer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-02: Data normalization. Convert raw messages to standard NJSON schema."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m02_normalizer"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

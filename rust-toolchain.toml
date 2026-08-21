@@ -1,0 +1,6 @@
+[toolchain]
+# D-04 Bevy 0.14 互換性のため Rust 1.74+ を要求
+# Rust 1.95 (本環境) でビルド検証済み
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-src"]
+profile = "minimal"

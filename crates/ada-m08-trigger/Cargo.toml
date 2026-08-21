@@ -1,0 +1,21 @@
+[package]
+name = "ada-m08-trigger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-08: Trigger service. Cron, Webhook, Event-driven triggers."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m08_trigger"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

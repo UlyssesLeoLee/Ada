@@ -1,0 +1,21 @@
+[package]
+name = "ada-m03-data-flow-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-03: Data flow engine. Execute canvas-defined nodes sequentially/parallelly."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m03_data_flow_engine"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

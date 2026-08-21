@@ -1,0 +1,21 @@
+[package]
+name = "ada-m14-module-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-14: Module registry. Atomic swap (D-02 WASM). Module manifest validation (D-04 JSON Schema)."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m14_module_registry"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

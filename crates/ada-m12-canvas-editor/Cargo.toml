@@ -1,0 +1,21 @@
+[package]
+name = "ada-m12-canvas-editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-12: Canvas editor frontend. Bevy 0.14 WASM (D-04). Visual ETL construction."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m12_canvas_editor"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "ada-m13-api-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "M-13: API Gateway. axum + utoipa (D-11). REST + WebSocket. JWT auth (D-07)."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_m13_api_gateway"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

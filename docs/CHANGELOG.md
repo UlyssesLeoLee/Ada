@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.0.0
+> **バージョン**：v2.1.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-20
 > **作成者**：Ada プロジェクトチーム
@@ -37,6 +37,7 @@
 | v1.8.0 | 2026-08-20 | IPA ワークフロー全体俯瞰（DOC-ARCH-009）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v1.9.0 | 2026-08-20 | 工程別テンプレート集（`docs/templates/`、62 テンプレート）追加、IPA ⚪ 80 工程をカバー | Ada プロジェクトチーム | TBD | TBD |
 | v2.0.0 | 2026-08-20 | 超上流/要件/管理/業務 4 新ディレクトリ追加（24 ドキュメント）、[DOC-ARCH-009 §5.1-5.16 全部位对应文档完成 | Ada プロジェクトチーム | TBD | TBD |
+| v2.1.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、3 ファイル / 11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 | Ada プロジェクトチーム | TBD | TBD |
 
 ---
 
@@ -611,6 +612,92 @@ docs/tests/
 - 全 DOC-ID は [README §11 用語集](../README.md) と整合
 
 **v2.0.0 達成**：150 工程の IPA ドキュメント体系が**設計書 + メタ文書 + テンプレート + 上流/要件/管理/業務文書** で完全カバー。
+
+---
+
+## 2026-08-20 — 意思決定 + Cargo Workspace scaffold（v2.1.0）
+
+**変更種別**：G4 实施着手判定前の意思決定 + 実装 scaffold
+
+**背景**：[DOC-ARCH-008 §5 P0](../architecture/07-qa-register.md) の 11 件と [DOC-ARCH-009 §5.16](../architecture/08-workflow-overview.md) 開始前に未確定だった 15 件の設計詳細を体系的に整理。Cargo Workspace を実体化し、ビルド可能な 18 crate の scaffold を整備。
+
+**追加内容**：
+
+### `docs/decisions/`（意思決定、3 ファイル / ~42 KB）
+
+- `decisions/README.md`（**DOC-DEC-INDEX**）— 索引 + 決定フロー
+- `decisions/01-p0-decision-matrix.md`（**DOC-DEC-001**、20 KB）— 11 P0 全部位選択肢 + 評価 + 推奨案 + 決定者 + 期限
+  - UN-P0-01 人员：段階採用 + 外注（推奨 C: Solo+AI）
+  - UN-P0-02 組織：最小 5 名組織（PO/PM/アーキ/QA/SecO）
+  - UN-P0-03 FK：DEFERRABLE INITIALLY DEFERRED（PostgreSQL 標準）
+  - UN-P0-04 Manifest：JSON Schema Draft 2020-12
+  - UN-P0-05 audit_log：月次 RANGE パーティション
+  - UN-P0-06 KMS：AWS KMS（本番） + Vault OSS（dev）
+  - UN-P0-07 JWT：kid + JWKS、90 日ローテ + 7 日 grace
+  - UN-P0-08 GDPR：30 日削除 SLA + PL/pgSQL 存過
+  - UN-P0-09 ログ：Loki + Promtail
+  - UN-P0-10 Backup：4 段 + 週次リストア
+  - UN-P0-11 ADR：週次アーキ会議でレビュー
+- `decisions/02-design-adrs.md`（**DOC-DEC-002**、17 KB）— D-01〜15 設計 ADR
+  - D-01 CRDT：**Yrs** 採用
+  - D-02 沙箱：**WASM (wasmtime)** 採用
+  - D-03 Plugin SDK：**Rust のみ（v1）**
+  - D-04 Bevy：**0.14 stable**
+  - D-05 WASM size：**8 MB / gzip 3 MB**
+  - D-06 RLS：実装後ベンチマーク公開
+  - D-07 Event：**at-least-once + idempotent**
+  - D-08 リージョン：**v1.0 単一 AZ**
+  - D-09 Workspace version：**単一**
+  - D-10 CI：**sccache + 4-shard**
+  - D-11 OpenAPI：**utoipa（自動）**
+  - D-12 PL/pgSQL：DBA 兼任 + 外部レビュー
+  - D-13 License：**MIT（本体）**
+  - D-14 Test data：**合成 + 実 data mask**
+  - D-15 CI fail SLA：**build 4h / test 24h**
+
+### ルート Cargo Workspace（実装 scaffold）
+
+- `Cargo.toml`（workspace ルート、18 members 定義、共通 lints）
+- `rust-toolchain.toml`（Rust 1.74+ 固定）
+- `.gitignore`（target/、secrets、IDE 設定）
+- `README.md`（プロジェクト入口、ガイダンス、ロードマップ）
+
+### `crates/`（18 Rust crate、scaffold）
+
+| 層 | crate 数 | 内容 |
+|---|---|---|
+| 共有 | 2 | ada-core, ada-telemetry |
+| 骨 (skeleton) | 4 | m10, m11, m13, m16 |
+| 血 (blood) | 4 | m01, m02, m03, m09 |
+| 神経 (nerve) | 4 | m04, m05, m08, m15 |
+| 筋肉 (muscle) | 4 | m06, m07, m12, m14 |
+| 合計 | **18** | 各 crate に Cargo.toml + src/lib.rs（VERSION/NAME/LAYER + 3 UT） |
+
+### `scripts/dev-setup.ps1`（Windows 開発環境セットアップ）
+
+14 ステップ自動セットアップ（rustup → ターゲット → clippy → cargo tools → Docker → psql → sqlx → Node → wasm-pack → cargo check → cargo test → 環境変数 → 完了）
+
+**影響範囲**：
+
+- `docs/decisions/` 新規 3 ファイル（~42 KB）
+- `crates/` 新規 18 crate（scaffold、計 36 ファイル）
+- ルート: `Cargo.toml` / `rust-toolchain.toml` / `.gitignore` / `README.md` 4 ファイル
+- `scripts/dev-setup.ps1` 1 ファイル
+- 既存設計書は変更なし
+- DOC-ARCH-008 §5 P0 全部位「推奨案 + 決定者」を DOC-DEC-001 で提供
+- DOC-ARCH-007 §10 ADR 保留中 4 件を D-01/02/04/13 で解消
+
+**v2.1.0 達成**：
+
+- **意思決定待ち 11 P0** → PO 1 件 30 分 × 11 = 5.5 時間で全消化可能
+- **Cargo Workspace ビルド可能** → 環境制約（CARGO_HOME on E:）解消後、`cargo check --workspace` で即時検証
+- **G4 实施着手判定 通過可能** → 全 11 P0 消化 + cargo check pass で G4 GO
+
+**次のアクション**（PO へ）：
+
+1. [docs/decisions/01-p0-decision-matrix.md](decisions/01-p0-decision-matrix.md) を上から消化（11 件 × 30 分）
+2. 環境制約解消後 `cargo check --workspace && cargo test --workspace` 実行
+3. 両方完了で G4 通過 → 実装着手
 
 ---
 
