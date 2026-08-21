@@ -4,14 +4,14 @@
 
 > **ドキュメントID**：DOC-INDEX-001
 > **文書分類**：横断文書
-> **バージョン**：v1.8.0
+> **バージョン**：v1.9.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-20
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
 > **上位文書**：無
-> **下位文書**：`docs/template.md`、`docs/CHANGELOG.md`、`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/templates/*`、`docs/upstream/*`、`docs/requirements/*`、`docs/management/*`、`docs/business/*`、`docs/decisions/*`
+> **下位文書**：`docs/template.md`、`docs/CHANGELOG.md`、`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/templates/*`、`docs/upstream/*`、`docs/requirements/*`、`docs/management/*`、`docs/business/*`、`docs/decisions/*`、`docs/observability/*`
 > **関連文書**：無
 > **適用 IPA 標準**：
 > - IPA「共通フレーム2018」(SLCP-JCF2018)
@@ -34,7 +34,8 @@
 | v1.5.0 | 2026-08-20 | IPA ワークフロー全体俯瞰（DOC-ARCH-009）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v1.6.0 | 2026-08-20 | 工程別テンプレート集（`docs/templates/`、DOC-TPL-INDEX + 8 カテゴリ × 62 テンプレート）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v1.7.0 | 2026-08-20 | 超上流/要件/管理/業務 4 新ディレクトリ追加（upstream 8 + requirements 10 + management 5 + business 1 = 24 ドキュメント） | Ada プロジェクトチーム | TBD | TBD |
-| v1.8.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 | Ada プロジェクトチーム | TBD | TBD |
+| v1.8.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 |
+| v1.9.0 | 2026-08-20 | Observability Platform 設計（`docs/observability/`、14 ファイル / 210 KB / DOC-OBS-INDEX + 13 + 10 OBS-ADR）追加 | Ada プロジェクトチーム | TBD | TBD |
 
 ---
 
@@ -191,6 +192,29 @@
 | ドキュメントID | ファイル | タイトル | 対応 IPA 工程 |
 |---|---|---|---|
 | DOC-BIZ-SCN-001 | [business/01-scenario-catalog.md](business/01-scenario-catalog.md) | 業務シナリオ集 | 93 |
+
+## 5.10. Observability Platform（observability/）
+
+> IPA 工程 116-117（運用・監視）+ 109（サービスレベル管理）+ 110-115（キャパシティ・障害・問題）に対応。  
+> 既存プラットフォームに**最小侵襲**で可観測性能力を追加し、Observe → Detect → Correlate → Diagnose → Alert → Recover の閉ループを実現する。
+
+| ドキュメントID | ファイル | タイトル | 規模 |
+|---|---|---|---|
+| DOC-OBS-INDEX | [observability/README.md](observability/README.md) | Observability Platform 設計総覧（13 章構成 + 10 OBS-ADR + 1 段階的導入計画） | 14 KB |
+| DOC-OBS-001 | [observability/01-current-state-analysis.md](observability/01-current-state-analysis.md) | 現状分析（Phase 0、サービストポロジ、ギャップ分析） | 11 KB |
+| DOC-OBS-002 | [observability/02-architecture.md](observability/02-architecture.md) | 全体アーキテクチャ（OTel + Prometheus/Mimir + Loki + Tempo + Grafana） | 13 KB |
+| DOC-OBS-003 | [observability/03-metrics-design.md](observability/03-metrics-design.md) | Metrics 設計（RED/USE フレームワーク、18 crate × 4 次元） | 18 KB |
+| DOC-OBS-004 | [observability/04-logging-design.md](observability/04-logging-design.md) | Logging 設計（構造化 JSON + PII 自動 redaction） | 12 KB |
+| DOC-OBS-005 | [observability/05-tracing-design.md](observability/05-tracing-design.md) | Tracing 設計（W3C Trace Context + OTel Span） | 13 KB |
+| DOC-OBS-006 | [observability/06-dashboard-catalog.md](observability/06-dashboard-catalog.md) | Dashboard カタログ（10 個、Grafana） | 19 KB |
+| DOC-OBS-007 | [observability/07-alert-policy.md](observability/07-alert-policy.md) | Alert Policy（4 段階 Sev + SLO Burn Rate） | 12 KB |
+| DOC-OBS-008 | [observability/08-slo-design.md](observability/08-slo-design.md) | SLO/SLI 設計（Error Budget + Multi-window Burn Rate） | 13 KB |
+| DOC-OBS-009 | [observability/09-security-design.md](observability/09-security-design.md) | セキュリティ設計（RBAC + mTLS + NetworkPolicy + GDPR/PIPL） | 16 KB |
+| DOC-OBS-010 | [observability/10-deployment-design.md](observability/10-deployment-design.md) | デプロイ設計（Helm + GitOps + ArgoCD） | 20 KB |
+| DOC-OBS-011 | [observability/11-phased-rollout.md](observability/11-phased-rollout.md) | 段階的導入計画（Phase 0-8 / 9 ヶ月 / 各 Phase GATE 判定） | 19 KB |
+| DOC-OBS-012 | [observability/12-code-impact.md](observability/12-code-impact.md) | コード影響分析（18 crate × Low/Med/High + 49 人日） | 16 KB |
+| DOC-OBS-013 | [observability/13-self-audit.md](observability/13-self-audit.md) | アーキテクチャ自審（11 カテゴリ × 48 チェック + Revision 2 計画） | 16 KB |
+| **合計** | | | **210 KB / 14 ファイル** |
 
 ## 6. API 与契约（api/）
 

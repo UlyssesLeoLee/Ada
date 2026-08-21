@@ -5,14 +5,14 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.1.0
+> **バージョン**：v2.2.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-20
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
 > **上位文書**：無
-> **下位文書**：`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`
+> **下位文書**：`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/observability/*`
 > **関連文書**：`docs/template.md`
 > **適用 IPA 標準**：
 > - IPA「共通フレーム2018」(SLCP-JCF2018)
@@ -37,7 +37,8 @@
 | v1.8.0 | 2026-08-20 | IPA ワークフロー全体俯瞰（DOC-ARCH-009）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v1.9.0 | 2026-08-20 | 工程別テンプレート集（`docs/templates/`、62 テンプレート）追加、IPA ⚪ 80 工程をカバー | Ada プロジェクトチーム | TBD | TBD |
 | v2.0.0 | 2026-08-20 | 超上流/要件/管理/業務 4 新ディレクトリ追加（24 ドキュメント）、[DOC-ARCH-009 §5.1-5.16 全部位对应文档完成 | Ada プロジェクトチーム | TBD | TBD |
-| v2.1.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、3 ファイル / 11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 | Ada プロジェクトチーム | TBD | TBD |
+| v2.1.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、3 ファイル / 11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 |
+| v2.2.0 | 2026-08-20 | Observability Platform 設計（`docs/observability/`、14 ファイル / 210 KB / DOC-OBS-INDEX + 13 章 + 10 OBS-ADR + Phase 0-8 9 ヶ月導入計画）追加 | Ada プロジェクトチーム | TBD | TBD |
 
 ---
 

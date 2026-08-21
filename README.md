@@ -64,6 +64,7 @@ ada/
     ├── management/            # 5 プロジェクト管理
     ├── business/              # 1 業務シナリオ集
     ├── decisions/             # 11 P0 + 15 D-ADR
+    ├── observability/         # 14 可观测性平台设计
     └── legacy/                # 旧版归档
 ```
 
@@ -178,13 +179,14 @@ curl http://localhost:8080/health
 - 🔌 **[API 仕様](docs/api/)** — 6 API 文書
 - 🧪 **[テスト設計](docs/tests/)** — UT/IT/ST/UAT
 - 🎯 **[意思決定](docs/decisions/)** — 11 P0 + 15 D-ADR
+- 📡 **[Observability Platform](docs/observability/)** — 14 可观测性平台设计（Metrics/Logs/Traces + Grafana/OTel Stack + SLO/Burn Rate）
 - 📋 **[IPA ワークフロー俯瞰](docs/architecture/08-workflow-overview.md)** — 150 工程
 
 ## 🎯 現在のステータス
 
 | 項目 | 状態 |
 |---|---|
-| ドキュメント | ✅ 73 ファイル / 905 KB / 83 DOC-ID |
+| ドキュメント | ✅ 87 ファイル / ~1305 KB / 89+ DOC-ID |
 | 設計書 | ✅ 全モジュール（16）+ 横切（9）完成 |
 | Cargo Workspace | ✅ 18 crate scaffold（v0.1.0） |
 | ビルド | ⏳ 環境制約で本機未検証 |
