@@ -1,0 +1,21 @@
+# Grafana 10.x dashboard provisioning.
+#
+# Picks up every JSON file under /var/lib/grafana/dashboards
+# (mounted from ./dashboards) and registers it with Grafana
+# at boot. Dashboard updates require a Grafana reload
+# (or a `touch` of the JSON file) — Phase 0-1 keeps the
+# file-based approach; the API-based flow lands in Phase 5.
+
+apiVersion: 1
+
+providers:
+  - name: ada-observability
+    orgId: 1
+    folder: Ada
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

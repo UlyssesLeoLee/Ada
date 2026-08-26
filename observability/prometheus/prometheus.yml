@@ -1,0 +1,126 @@
+# Prometheus 2.x configuration for Ada observability Phase 0-1.
+#
+# Phase 0 (W1-W2) scrapes: prometheus self + node_exporter.
+# Phase 1 (W3-W5) adds: ada-* application scrape jobs (the
+# 18 Rust crates exposing /metrics via ada-telemetry once WT-1
+# ships; until then the jobs are configured but receive no
+# samples — Prometheus keeps the rule files valid).
+#
+# Per DOC-OBS-002 §3 技術スタック:
+#   Prometheus 2.50+, retention 15d, single replica.
+# Per DOC-OBS-011 §3 Phase 1 インフラ監視:
+#   business namespace is **zero-impact**.
+#
+# See ../../docs/observability/11-phased-rollout.md §3
+# for the phase plan and validation commands.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: ada-dev
+    environment: dev
+    phase: "0-1"
+
+# ----------------------------------------------------------------------
+# Rule files. The four Phase 0-1 alerts live under alerts/*.yml
+# (split per file so Phase 2+ can drop in additional rule files
+# without merging YAML).
+# ----------------------------------------------------------------------
+rule_files:
+  - "alerts/*.yml"
+
+# ----------------------------------------------------------------------
+# Alertmanager. Phase 0-1 does NOT ship Alertmanager (that's
+# Phase 6 per 11-phased-rollout.md §8). When Phase 6 lands,
+# uncomment the `alerting:` block and the matching
+# `observability/alertmanager/alertmanager.yml`.
+# ----------------------------------------------------------------------
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
+
+# ----------------------------------------------------------------------
+# Scrape jobs.
+#
+# Two Phase 0-1 jobs: `prometheus` (self) and `node` (host
+# metrics from node_exporter). Phase 1 adds the `ada-app`
+# family for the 18 business crates — those targets are
+# served by the in-cluster service discovery at
+# `ada-{crate}:9100/metrics` once ada-telemetry v0.2.0 (WT-1)
+# is enabled.
+# ----------------------------------------------------------------------
+scrape_configs:
+  # Self-scrape: the Prometheus server's own health.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+        labels:
+          service: prometheus
+          layer: observability
+
+  # Node-level metrics. node_exporter runs as a DaemonSet in
+  # K3s, exposing :9100/metrics on every node.
+  - job_name: node
+    static_configs:
+      - targets:
+          - node-exporter:9100
+        labels:
+          service: node-exporter
+          layer: observability
+
+  # --------------------------------------------------------------------
+  # Phase 1 — Application RED metrics.
+  #
+  # Each of the 18 Rust crates exposes
+  #   http://{crate}:9100/metrics
+  # with the `ada.app.*` metric family defined in
+  # docs/observability/03-metrics-design.md §5.
+  #
+  # Targets are listed explicitly so a missing exporter
+  # surfaces as `up == 0` (the very signal Phase 1 alerts on)
+  # rather than silently dropping the job.
+  # --------------------------------------------------------------------
+  - job_name: ada-app
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - ada-m13-api-gateway:9100
+          - ada-m03-data-flow-engine:9100
+          - ada-m10-tenant-middleware:9100
+          - ada-m15-central-event-bus:9100
+          - ada-m11-rbac-collab:9100
+          - ada-m14-module-registry:9100
+          - ada-m16-cluster-coordinator:9100
+          - ada-m09-exporter:9100
+          - ada-m01-acquisition:9100
+          - ada-m02-normalizer:9100
+          - ada-m04-orchestration:9100
+          - ada-m05-control-flow:9100
+          - ada-m06-plugin-sdk:9100
+          - ada-m07-debug:9100
+          - ada-m08-trigger:9100
+          - ada-m12-canvas-editor:9100
+        labels:
+          service: ada-app
+          layer: application
+          env: dev
+
+  # --------------------------------------------------------------------
+  # Database. Uses postgres_exporter (see 02-architecture.md §3).
+  # Target is the in-cluster PG 18.6 primary; metrics live
+  # under the `pg_*` namespace and feed dashboards
+  # `db-overview` + `40-01 PostgreSQL Overview` later.
+  # --------------------------------------------------------------------
+  - job_name: postgres
+    static_configs:
+      - targets:
+          - postgres-exporter:9187
+        labels:
+          service: postgres-exporter
+          layer: database
+          db: postgres-18

@@ -1,0 +1,80 @@
+# Promtail 2.9+ configuration. Phase 0-1 ships one static
+# pipeline that tails the docker-compose service logs. Real
+# log shipping from the 18 Rust crates happens in Phase 3
+# (per 11-phased-rollout.md §5) via OTel → Loki.
+#
+# The pipeline below is intentionally minimal: each service
+# log line is enriched with `{service, job, level}` labels
+# so LogQL queries can filter without parsing the message.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+    # No backoff in Phase 0-1; Promtail will drop on errors
+    # rather than block the application log stream.
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+scrape_configs:
+  # --------------------------------------------------------------------
+  # Docker compose services. The static_sd_configs block
+  # enumerates the containers started by docker-compose.yml
+  # (Phase 0-1 services only — no business crates yet).
+  # --------------------------------------------------------------------
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["logging=promtail"]
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: stream
+      - source_labels: ["__meta_docker_compose_service"]
+        target_label: service
+      - source_labels: ["__meta_docker_compose_project"]
+        target_label: project
+    pipeline_stages:
+      - docker: {}
+      - labeldrop:
+          - stream
+      - stages:
+          - regex:
+              expression: '^(?P<level>(DEBUG|INFO|WARN|ERROR|FATAL|TRACE))'
+          - labels:
+              level:
+
+  # --------------------------------------------------------------------
+  # Local host journal (placeholder for Phase 3+). Disabled
+  # in Phase 0-1; uncomment when the host runs systemd and
+  # the business services start emitting journald entries.
+  # --------------------------------------------------------------------
+  # - job_name: journal
+  #   journal_sd_configs:
+  #     - journal: {}
+  #         max_age: 12h
+  #         labels:
+  #           job: systemd
+  #   relabel_configs:
+  #     - source_labels: ["__journal__systemd_unit"]
+  #       target_label: unit
+  #   pipeline_stages:
+  #     - regex:
+  #         expression: '^(?P<level>(DEBUG|INFO|WARN|ERROR|FATAL))'
+  #     - labels:
+  #         level:

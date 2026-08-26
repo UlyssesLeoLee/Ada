@@ -1,0 +1,40 @@
+# ALT-101 / HighErrorRate — Sev2 (per 07-alert-policy.md §4.2).
+#
+# Fires when the 5xx error ratio exceeds 5% sustained over
+# 5 minutes for any ada-app service.
+#
+# The metric name `ada_app_requests_total` and label
+# `status=~"5.."` come from DOC-OBS-003 §5 アプリ metrics. If
+# the service hasn't shipped its /metrics endpoint yet (WT-1
+# pending), this expression evaluates to no-data and the
+# alert stays quiet — exactly the behavior we want for the
+# Phase 0 baseline.
+#
+# Threshold rationale: 5xx > 5% is well above the M-13 SLO
+# 99.9% (which tolerates 0.1% errors). It catches *every*
+# meaningful outage without paging on a single bad request.
+
+groups:
+  - name: high_error_rate
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum by (service) (rate(ada_app_requests_total{status=~"5.."}[5m]))
+            /
+            sum by (service) (rate(ada_app_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: sev2
+          phase: "0-1"
+        annotations:
+          summary: "{{ $labels.service }} 5xx error rate > 5% for 5m"
+          description: |
+            Service {{ $labels.service }} has been returning 5xx
+            responses at > 5% for the last 5 minutes (current
+            value: {{ $value | humanizePercentage }}).
+            Threshold: 0.05. SLO target: 0.001 (M-13 = 99.9%).
+          runbook: "https://wiki.example/runbooks/high-error-rate"
+          dashboard: "http://localhost:3000/d/app-overview"
