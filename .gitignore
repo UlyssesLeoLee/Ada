@@ -65,4 +65,5 @@ clippy*.txt
 fmt*.txt
 clippy-old*.txt
 fmt-old*.txt
-push.txt
+push*.txt
+push2.txt
