@@ -89,7 +89,7 @@
 | 制約 | 影響 | 対応 |
 |---|---|---|
 | Rust 必須 | ライブラリ・人材 | [DOC-ARCH-007](../architecture/06-rust-tech-selection.md) |
-| PostgreSQL 16+ | DB ベンダ | [DOC-MOD-010](../modules/M-10-tenant-middleware.md) |
+| PostgreSQL 18.6 | DB ベンダ | [DOC-MOD-010](../modules/M-10-tenant-middleware.md) |
 | 3 OS 対応 | ビルド・配布 | [DOC-ARCH-002](../architecture/01-tech-stack.md) |
 | ブラウザ最新 | UI 互換性 | [DOC-MOD-012](../modules/M-12-canvas-editor-frontend.md) |
 | オフライン動作 | 機能制約 | 部分的制限 |
