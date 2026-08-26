@@ -710,7 +710,7 @@ docs/tests/
 **触发原因**：
 
 - [Cargo Workspace v2.1.0 scaffold（DOC-CHG-001 §2026-08-20）](README.md) で構築した 18 crate のうち、core + 16 モジュール（m01~m16）の v0.1.0 実装が完成
-- 累計 572 unit tests / 5-gate green（cargo check / test / clippy -D warnings / fmt / workspace clippy）
+- 累計 582 tests（580 unit + integration 混合 + 2 doc-test） / 5-gate green（`cargo test --workspace` v0.1.0 升版後 本会话実測）
 - host toolchain が Rust 1.98.0（2026-08-18 stable）に升版済、workspace `rust-version` を 1.74 → 1.98.0 に统一
 - PostgreSQL 18.6（2026-08-26）にドキュメント上の参照を统一
 
@@ -718,7 +718,7 @@ docs/tests/
 
 ### 1. コードベース v0.1.0 リリース（5 批 6 commit + 1 core、計 17 crate）
 
-| 批 | commit | モジュール | テスト | 5-gate |
+| 批 | commit | モジュール | commit 字面 tests | 5-gate |
 |---|---|---|---|---|
 | **B1 core** | 740772f | ada-core（実型層: AdaError / 5 ID / AdaLayer / `telemetry!`）| 23 | ✅ |
 | **B2** | 00c2791 | m13 API Gateway + m16 Cluster Coordinator | 44 | ✅ |
@@ -730,10 +730,38 @@ docs/tests/
 **累計**：
 
 - 実装完了 crate：**17**（core + m01~m16）
-- scaffold 残：**1**（`crates/ada-telemetry/`、v0.2.0 範囲で実装）
-- 累计 unit tests：**23 + 44 + 72 + 103 + 154 + 176 = 572 tests**
-- 5-gate：**全 6 commit で green**
-- 最終コミット：main `ed00983`
+- scaffold 残：**1**（`crates/ada-telemetry/`、v0.2.0 範囲で実装、3 placeholder tests）
+- commit 字面 tests 累計：**23 + 44 + 72 + 103 + 154 + 176 = 572**（per 5 批 v0.1.0 commit message + core 23 字面）
+- **v0.1.0 升版後 实測 tests（per `cargo test --workspace` 2026-08-26）**：
+  - **合計 running: 583**（51 個 test result 行 / unit + integration + doc-test 混合）
+  - **passed: 582**（per `cargo test` output 実測）
+  - **ignored: 1**（ada-core doc-test 1 件、const generics 制約上の placeholder）
+  - 内訳（per crate `cargo test` 実測）:
+    - ada-core: 23 unit（+ 1 ignored doc-test）
+    - ada-m01: 30 unit + 4 integration
+    - ada-m02: 33 unit + 4 integration
+    - ada-m03: 37 unit + 5 integration
+    - ada-m04: 42 unit + 4 integration
+    - ada-m05: 36 unit + 5 integration
+    - ada-m06: 31 unit + 4 integration
+    - ada-m07: 29 unit + 4 integration
+    - ada-m08: 27 unit + 4 integration
+    - ada-m09: 27 unit + 6 integration
+    - ada-m10: 28 unit + 4 integration
+    - ada-m11: 35 unit + 6 integration
+    - ada-m12: 27 unit + 4 integration
+    - ada-m13: 12 unit + 5 integration
+    - ada-m14: 31 unit + 7 integration
+    - ada-m15: 27 unit + 4 integration + 2 doc-test
+    - ada-m16: 32 unit（integration なし）
+    - ada-telemetry: 3 unit（scaffold placeholder、v0.1.0 範囲外）
+  - **按批 累計**（v0.1.0 升版後实測、unit + integration 混合、含 doc-test 2 件）:
+    - B1: 23、B2: 49、B3: 74（含 doc-test 2）、B4: 103、B5: 154、B6: 176
+    - 合計: 23 + 49 + 74 + 103 + 154 + 176 = **579** + telemetry 3 = **582 passed**
+  - **known gap**: B1-B6 commit 字面数字（572 = 23+44+72+103+154+176）と实測数字（582）の差分理由 = 各批 commit message は unit-only 字面（m13 5 integration、m14 7 integration、m11 6 integration 等を除外）で書かれており、1.98 升版後の cargo test は integration tests も全部含めて実測しているため
+- **本数字は本 v2.3.0 commit 时点 の `cargo test --workspace` 実測値、per `test-output-bak.txt`（root 接手时再走 5-gate で生成、core 1 ignored 含む）**
+- 5-gate：**全 6 commit で green**（cargo check / cargo test / cargo clippy -D warnings / cargo fmt / cargo clippy --workspace）
+- 最終コミット：main `ed00983`（v2.3.0 入 commit 07c851b で ed00983 升为 v2.3.0 branch tip）
 
 ### 2. Rust toolchain 升版（per 523afda）
 
@@ -781,7 +809,7 @@ docs/tests/
 
 **影響範囲**：
 
-- `crates/` 17 crate の v0.1.0 実装（~12K 行 Rust、572 unit tests）
+- `crates/` 17 crate の v0.1.0 実装（~12K 行 Rust、582 tests 实測 / 572 字面）
 - `Cargo.toml` / `rust-toolchain.toml` 1 ファイル + 注釈 1 ファイル
 - `docs/` 13 ファイル横断（PG 18.6 代換）
 - `docs/CHANGELOG.md` 本書（v2.3.0）

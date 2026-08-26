@@ -57,3 +57,7 @@ npm-debug.log*
 
 # Git worktree (一時作業ディレクトリ)
 /.worktrees/
+
+# Cargo test 出力ログ（一時検証、コミットしない）
+test-output*.txt
+test-output-*.txt
