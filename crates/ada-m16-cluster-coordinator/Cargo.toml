@@ -17,5 +17,19 @@ publish = false
 name = "ada_m16_cluster_coordinator"
 path = "src/lib.rs"
 
+[dependencies]
+ada-core = { path = "../ada-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+
 [lints]
 workspace = true
