@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "M-12: Canvas editor frontend. Bevy 0.14 WASM (D-04). Visual ETL construction."
+description = "M-12: Canvas editor. Nodes, edges, edit history with undo/redo."
 readme = "README.md"
 categories.workspace = true
 keywords.workspace = true
@@ -16,6 +16,29 @@ publish = false
 [lib]
 name = "ada_m12_canvas_editor"
 path = "src/lib.rs"
+
+# B2 lesson: Cargo 1.85+ silently drops integration test targets
+# declared only via the implicit `tests/*.rs` discovery when the [lib]
+# block also has an explicit `path = ...`. The `[[test]]` block makes
+# the test target explicit so `cargo test --workspace` actually runs
+# `tests/integration.rs`. Pre-applied here per the B2 worker retro.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[dependencies]
+ada-core = { path = "../ada-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

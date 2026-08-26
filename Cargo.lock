@@ -64,6 +64,17 @@ dependencies = [
 [[package]]
 name = "ada-m04-orchestration"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m05-control-flow"
@@ -83,14 +94,47 @@ dependencies = [
 [[package]]
 name = "ada-m06-plugin-sdk"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m07-debug"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m08-trigger"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m09-exporter"
@@ -140,6 +184,17 @@ dependencies = [
 [[package]]
 name = "ada-m12-canvas-editor"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m13-api-gateway"
