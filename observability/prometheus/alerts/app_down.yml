@@ -1,0 +1,30 @@
+# ALT-001 / ServiceDown — Sev1 (per 07-alert-policy.md §4.1).
+#
+# Fires when the `up` time series is 0 for at least 1 minute
+# for any of the ada-app or infrastructure scrape targets.
+# This is the canary: a single missing sample is enough to
+# wake on-call.
+#
+# Per 11-phased-rollout.md §3.3 G1 ゲート, all business
+# services must be `up == 1` after Phase 1 ships.
+
+groups:
+  - name: app_down
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: sev1
+          phase: "0-1"
+        annotations:
+          summary: "Target {{ $labels.job }}/{{ $labels.instance }} is down"
+          description: |
+            {{ $labels.job }} target {{ $labels.instance }} has been
+            unreachable for 1 minute. Check:
+              1. Is the Pod / container running?
+              2. Is the exporter / scrape endpoint listening?
+              3. Is the NetworkPolicy blocking the scrape?
+          runbook: "https://wiki.example/runbooks/service-down"
+          dashboard: "http://localhost:3000/d/app-overview"

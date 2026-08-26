@@ -1,0 +1,78 @@
+# Grafana 10.x datasource provisioning.
+#
+# Auto-provisions the four datasources that the Phase 0-1
+# dashboards depend on. Grafana picks this file up at boot
+# (mounted via docker-compose), so the stack is "1-key-up"
+# without any UI click.
+#
+# UID stability: the UIDs below are referenced from the
+# dashboard JSON `__inputs` blocks. Changing them breaks
+# provisioning; the four UIDs are part of the Phase 0-1
+# public surface.
+
+apiVersion: 1
+
+datasources:
+  # --------------------------------------------------------------------
+  # Prometheus. Per DOC-OBS-002 §2.3, retention 15d, single
+  # replica. URL is the docker-compose service name.
+  # --------------------------------------------------------------------
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      manageAlerts: false
+
+  # --------------------------------------------------------------------
+  # Loki. 30d retention, single node, filesystem store.
+  # --------------------------------------------------------------------
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      maxLines: 1000
+      timeout: 60
+
+  # --------------------------------------------------------------------
+  # Jaeger (UI ships inside the same service at :16686;
+  # the Grafana datasource talks to the same backend via
+  # the Jaeger HTTP API).
+  # --------------------------------------------------------------------
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: true
+    jsonData:
+      timeOut: 60
+      tracesToLogsV2:
+        datasourceUid: loki
+
+  # --------------------------------------------------------------------
+  # PostgreSQL (postgres_exporter scrape). Provisioned so
+  # the db-overview dashboard can switch datasource on the
+  # fly without a UI trip.
+  # --------------------------------------------------------------------
+  - name: Postgres
+    type: postgres
+    uid: postgres
+    access: proxy
+    url: postgres:5432
+    user: ada
+    secureJsonData:
+      password: ada
+    jsonData:
+      database: ada
+      sslmode: disable
+      postgresVersion: 1806
+      timescaledb: false

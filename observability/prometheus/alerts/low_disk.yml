@@ -1,0 +1,38 @@
+# ALT-106 / DiskSpaceLow — Sev2 (per 07-alert-policy.md §4.2).
+#
+# Fires when any node's root filesystem has less than 10%
+# free space, sustained over 5 minutes. Phrased as
+# `available / total < 0.10` which is the inverse of
+# `usage > 0.90`.
+#
+# Threshold rationale: 10% free is the absolute floor; below
+# that the kernel can refuse writes (esp. for journal logs)
+# and the next incident becomes unrecoverable. The Sev2
+# paging matches 07-alert-policy.md §4.2 row ALT-106
+# (disk > 80% for 30m). The 10% floor is the *harder* of
+# the two: it pages on-call before the filesystem wedges.
+
+groups:
+  - name: low_disk
+    interval: 30s
+    rules:
+      - alert: LowDiskSpace
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+            /
+            node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+          ) < 0.10
+        for: 5m
+        labels:
+          severity: sev2
+          phase: "0-1"
+        annotations:
+          summary: "Low disk on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: |
+            Filesystem {{ $labels.mountpoint }} on
+            {{ $labels.instance }} has only
+            {{ $value | humanizePercentage }} free space.
+            Capacity < 10% risks kernel write refusal.
+          runbook: "https://wiki.example/runbooks/low-disk"
+          dashboard: "http://localhost:3000/d/app-overview"

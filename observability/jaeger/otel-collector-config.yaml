@@ -1,0 +1,142 @@
+# OpenTelemetry Collector configuration for the Ada stack.
+#
+# Image: otel/opentelemetry-collector-contrib:0.104.0
+# Matches DOC-OBS-002 §3 技術スタック row "Collector
+# otel-collector-contrib 0.104+".
+#
+# This collector is the single ingress for all four
+# observability signals. The 18 Rust crates push OTLP
+# gRPC here on :4317. The collector then fans the data
+# out to the backends:
+#   - metrics -> Prometheus (remote_write)
+#   - logs    -> Loki
+#   - traces  -> Jaeger (gRPC :14250)
+#   - metrics -> otel-collector self-metrics -> Prometheus
+#
+# See 02-architecture.md §1 全体像 for the topology.
+# See 11-phased-rollout.md §6 Phase 4 for the rollout
+# (traces) — Phase 0-1 keeps the Jaeger exporter
+# permissive; tail-sampling lands in Phase 4.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # The collector's own Prometheus scrape. Surfaces the
+  # standard `otelcol_*` metrics to Prometheus.
+  prometheus/self:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          scrape_interval: 30s
+          static_configs:
+            - targets: [localhost:8888]
+
+processors:
+  # Memory bound. 80% of the container's 1 GiB is the
+  # soft limit; 20% is the spike headroom.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  # Batch OTLP exports. 512 samples / 5s matches the
+  # default in 02-architecture.md §4.1 step (2).
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  # Resource enrichment. Per DOC-OBS-002 §4.1 step (3),
+  # every signal carries service.name, version, env,
+  # tenant_id, k8s.*. The processor below adds the
+  # container-level env / hostname and normalizes
+  # tenant_id casing.
+  resource/env:
+    attributes:
+      - key: deployment.environment
+        value: dev
+        action: upsert
+  attributes/normalize:
+    actions:
+      - key: tenant_id
+        action: normalize
+      - key: service.name
+        action: normalize
+
+exporters:
+  # Metrics -> Prometheus. The remote_write protocol is
+  # the production target; the local Prometheus pulls
+  # from the collector's own /metrics endpoint via the
+  # `prometheus/self` receiver above. In Phase 0-1 we
+  # don't enable remote_write because Prometheus scrapes
+  # the business crates directly.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    const_labels:
+      cluster: ada-dev
+      env: dev
+    # Add resource attributes as metric labels.
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logs -> Loki. The Loki exporter is the production
+  # path; Promtail is a stop-gap (see
+  # observability/loki/promtail-config.yaml).
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    default_labels_enabled:
+      exporter: otlp
+    labels:
+      resource:
+        service.name: service
+        service.namespace: namespace
+    headers:
+      # Phase 0-1: no auth. Phase 6+ adds a service
+      # account token via the `X-Scope-OrgID` header
+      # required by the multi-tenant gateway.
+      X-Scope-OrgID: "ada-dev"
+
+  # Traces -> Jaeger. Matches jaeger-config.yaml's
+  # service.jaeger_thrift_grpc port.
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus/self]
+      processors: [memory_limiter, resource/env, attributes/normalize, batch]
+      exporters: [prometheus]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/env, attributes/normalize, batch]
+      exporters: [loki]
+
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/env, attributes/normalize, batch]
+      exporters: [jaeger]
+
+  telemetry:
+    metrics:
+      level: detailed
+    logs:
+      level: info

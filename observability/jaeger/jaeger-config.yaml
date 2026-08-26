@@ -1,0 +1,75 @@
+# Jaeger v1 all-in-one configuration.
+#
+# The image used in docker-compose.yml is
+#   jaegertracing/all-in-one:1.55.0
+# which exposes:
+#   16686  Jaeger UI
+#   14250  Jaeger gRPC (thrift, used as the canonical
+#          "OTLP gRPC" port in DOC-OBS-002 §3 技術スタック —
+#          Jaeger v1 speaks Jaeger thrift here, not OTLP)
+#   4317   OTLP gRPC receiver (native, Jaeger v1.35+)
+#   4318   OTLP HTTP receiver (native, Jaeger v1.35+)
+#   14269  Health check
+#
+# The 18 Rust crates push OTLP to otel-collector:4317
+# (per 02-architecture.md §4.1) which forwards the spans
+# to Jaeger via the gRPC exporter. In Phase 0-1 we use a
+# lightweight OTel collector (otel-collector-contrib:0.104)
+# with the rules below; the same collector also exports
+# metrics to Prometheus and logs to Loki, matching
+# DOC-OBS-002 §1 全体像.
+#
+# This file documents the Jaeger v1 environment variables
+# that docker-compose.yml sets under the `jaeger` service.
+# The `otel-collector` service has its own config under
+# observability/jaeger/otel-collector-config.yaml.
+
+# Jaeger v1 (1.55.0) — set via environment variables.
+#
+# COLLECTOR_ZIPKIN_HOST_PORT      — Zipkin compat (off)
+# COLLECTOR_OTLP_ENABLED          — true (Jaeger v1.35+)
+# METRICS_BACKEND                 — prometheus
+# METRICS_HOST                    — 0.0.0.0
+# METRICS_PORT                    — 8888
+# QUERY_BASE_PATH                 — /jaeger
+# SPAN_STORAGE_TYPE               — memory (Phase 0-1)
+#                                    badger / kafka / es
+#                                    land in Phase 6+ per
+#                                    11-phased-rollout.md §6
+# LOG_LEVEL                       — info
+#
+# The full flag list lives in
+# https://www.jaegertracing.io/docs/1.55/deployment/
+
+service:
+  # Mirrors docker-compose.yml ports block. The values
+  # are referenced from the compose file, not from this
+  # YAML — the YAML is documentation for the operator.
+  jaeger_ui: 16686
+  jaeger_thrift_grpc: 14250
+  otlp_grpc: 4317
+  otlp_http: 4318
+  metrics: 8888
+  health: 14269
+
+storage:
+  # Phase 0-1 — in-memory. Reset on container restart.
+  # The 18 Rust crates are still in development; the
+  # volume / badger backend is overkill at this stage.
+  type: memory
+  # Per-replica memory ceiling. Each span averages ~1 KiB
+  # so 8 GiB is ~8M spans, plenty for a dev stack.
+  max_traces: 100000
+
+# Sampling. Head-based 10% + tail-based 100% on errors
+# is the design target from DOC-OBS-005 §6.2; in Phase
+# 0-1 we keep the Jaeger default (adaptive 1 sample/s)
+# because no business crates are producing traces yet.
+sampling:
+  type: adaptive
+  # Adaptive parameters (1.55.0). Defaults.
+  sampling_server_url: http://jaeger:5778
+  max_traces_per_second: 1
+  # Adaptive formula: target ~1 trace per service per
+  # 100 requests. 0.01 = 1%.
+  probability: 0.01

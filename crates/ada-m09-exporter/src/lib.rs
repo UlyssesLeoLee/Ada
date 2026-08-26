@@ -18,9 +18,15 @@
 //! - [`NoopExporter`] — discards metrics (handy in tests)
 //! - [`InMemoryExporter`] — thread-safe `Vec<Metric>`
 //!   accumulator for assertions
+//! - [`OtlpPushExporter`] — Phase 0-1 OTLP/HTTP push
+//!   exporter. Targets the local `otel-collector` on
+//!   :4318 (see `observability/docker-compose.yml`).
+//!   Uses raw `std::net::TcpStream` so the workspace has
+//!   no new dependencies; the gRPC binding lands in B5+.
 //! - 5-variant [`ExporterError`] (SerializationError,
 //!   TransportError, InvalidMetric, BackendError, ShuttingDown)
-//! - 9 unit tests + 4 integration tests
+//! - 9 unit tests + 4 integration tests + 7 OtlpPushExporter
+//!   tests (Phase 0-1 addition)
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
@@ -47,7 +53,7 @@ mod otlp;
 
 pub use error::{ExporterError, Result};
 pub use metrics::{Metric, MetricKind, MetricRegistry};
-pub use otlp::{Exporter, InMemoryExporter, NoopExporter, OtlpExporter};
+pub use otlp::{Exporter, InMemoryExporter, NoopExporter, OtlpExporter, OtlpPushExporter};
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace
 /// version per D-09).
