@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "M-11: RBAC + collaboration. Role/attribute-based access control. Yrs CRDT (D-01)."
+description = "M-11: RBAC & collaboration. 5 roles, permission matrix, in-process lock manager, audit_log interface (D-07)."
 readme = "README.md"
 categories.workspace = true
 keywords.workspace = true
@@ -16,6 +16,29 @@ publish = false
 [lib]
 name = "ada_m11_rbac_collab"
 path = "src/lib.rs"
+
+# B2 lesson: Cargo 1.85+ silently drops integration test targets
+# declared only via the implicit `tests/*.rs` discovery when the [lib]
+# block also has an explicit `path = ...`. The `[[test]]` block makes
+# the test target explicit so `cargo test --workspace` actually runs
+# `tests/integration.rs`. Pre-applied here per the B2 worker retro.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[dependencies]
+ada-core = { path = "../ada-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 
 [lints]
 workspace = true

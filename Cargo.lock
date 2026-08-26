@@ -56,6 +56,17 @@ version = "0.1.0"
 [[package]]
 name = "ada-m11-rbac-collab"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m12-canvas-editor"
@@ -87,6 +98,16 @@ version = "0.1.0"
 [[package]]
 name = "ada-m15-central-event-bus"
 version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ada-m16-cluster-coordinator"
