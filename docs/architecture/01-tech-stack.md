@@ -53,7 +53,7 @@
 | 后端 API | Actix-web (Rust) | Tokio + Tonic (gRPC), Axum | [NF-PER]【必須】 |
 | 编排引擎 | Rust 自研状态机 | LangGraph (Python) 移植 | [NF-AVA]【必須】 |
 | 浏览器自动化 | Playwright Rust 绑定 | Puppeteer (Node.js) | [NF-PER]【必須】 |
-| 数据库 | PostgreSQL 12+ | MySQL 8.0+, MariaDB | [NF-SEC]【必須】 |
+| 数据库 | PostgreSQL 18.6 | MySQL 8.0+, MariaDB | [NF-SEC]【必須】 |
 | 缓存 | Redis 6+ | Memcached, Apache Druid | [NF-PER]【推奨】 |
 | 对象存储 | AWS S3 / MinIO | Azure Blob, Google Cloud Storage | [NF-ENV]【推奨】 |
 | 消息队列 | Tokio Channel / crossbeam | RabbitMQ, Apache Kafka | [NF-PER]【推奨】 |
@@ -80,7 +80,7 @@
 
 ### 3.3 数据层
 
-- PostgreSQL 12+：行级安全（RLS）是多租户隔离的关键能力。 [NF-SEC]【必須】
+- PostgreSQL 18.6：行级安全（RLS）是多租户隔离的关键能力。 [NF-SEC]【必須】
 - Redis：会话、临时数据、速率限制计数、溢出缓冲。 [NF-PER]【推奨】
 - S3/MinIO：执行快照、采集原始 HTML/截图等大体积数据。 [NF-ENV]【推奨】
 
