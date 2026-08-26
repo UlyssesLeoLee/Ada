@@ -5,9 +5,9 @@
 
 > **ドキュメントID**：DOC-DEC-INDEX
 > **文書分類**：意思決定文書
-> **バージョン**：v1.0.0
+> **バージョン**：v1.1.0
 > **制定日**：2026-08-20
-> **最終更新日**：2026-08-20
+> **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：PO
@@ -18,6 +18,7 @@
 > **下位文書**：
 > - [`docs/decisions/01-p0-decision-matrix.md`](01-p0-decision-matrix.md)（DOC-DEC-001）— 11 P0 决策矩阵
 > - [`docs/decisions/02-design-adrs.md`](02-design-adrs.md)（DOC-DEC-002）— D-01〜15 设计 ADR
+> - [`docs/decisions/03-p0-p1-detail/`](03-p0-p1-detail/)（DOC-DEC-003）— 11 P0 + 14 P1 細化決議 25 ファイル
 > **関連文書**：
 > - [`docs/upstream/08-initial-risk-assessment.md`](../upstream/08-initial-risk-assessment.md)
 > - 全 [DOC-MOD-NNN §3](../modules/M-01-acquisition-adapter.md)
@@ -34,6 +35,7 @@
 | バージョン | 日付 | 変更内容 | 起草 | レビュー | 承認 |
 |---|---|---|---|---|---|
 | v1.0.0 | 2026-08-20 | 初版制定（11 P0 + 15 D-ADR） | Ada プロジェクトチーム | TBD | PO |
+| v1.1.0 | 2026-08-27 | DOC-DEC-003 細化決議群（11 P0 + 14 P1 = 25 ファイル）追加 | Mavis (per DEC-008) | ⏳ 待 Ulysses | ⏳ 待 Ulysses |
 
 ---
 
@@ -96,6 +98,44 @@
 | DOC-DEC-INDEX | [README.md](README.md) | 本索引 | — |
 | DOC-DEC-001 | [01-p0-decision-matrix.md](01-p0-decision-matrix.md) | 11 P0 决策矩阵 + 推奨案 | PO + 全意思決定者 |
 | DOC-DEC-002 | [02-design-adrs.md](02-design-adrs.md) | D-01〜15 設計 ADR + 解決 | テックリード + アーキ |
+| DOC-DEC-003 | [03-p0-p1-detail/](03-p0-p1-detail/) | 11 P0 + 14 P1 細化決議（25 ファイル） | PO + 全意思決定者 |
+
+### 3.1 DOC-DEC-003 細化決議 索引 (25 ファイル)
+
+P0 細化決議 (per DOC-DEC-001 §14 連動):
+
+| P0 議題 | ファイル |
+|---|---|
+| UN-P0-01 人员 | [p0-01-人員.md](03-p0-p1-detail/p0-01-人员.md) |
+| UN-P0-02 組織 | [p0-02-組織.md](03-p0-p1-detail/p0-02-组织.md) |
+| UN-P0-03 FK | [p0-03-FK.md](03-p0-p1-detail/p0-03-FK.md) |
+| UN-P0-04 Manifest | [p0-04-Manifest.md](03-p0-p1-detail/p0-04-Manifest.md) |
+| UN-P0-05 audit partition | [p0-05-audit_partition.md](03-p0-p1-detail/p0-05-audit_partition.md) |
+| UN-P0-06 KMS | [p0-06-KMS.md](03-p0-p1-detail/p0-06-KMS.md) |
+| UN-P0-07 JWT | [p0-07-JWT.md](03-p0-p1-detail/p0-07-JWT.md) |
+| UN-P0-08 GDPR | [p0-08-GDPR.md](03-p0-p1-detail/p0-08-GDPR.md) |
+| UN-P0-09 log | [p0-09-log.md](03-p0-p1-detail/p0-09-log.md) |
+| UN-P0-10 Backup | [p0-10-Backup.md](03-p0-p1-detail/p0-10-Backup.md) |
+| UN-P0-11 ADR判定 | [p0-11-ADR判定.md](03-p0-p1-detail/p0-11-ADR判定.md) |
+
+P1 細化決議 (per `docs/architecture/07-qa-register.md` §5.2):
+
+| P1 議題 | ファイル |
+|---|---|
+| UN-P1-01 モジュール境界 | [p1-01-模块边界.md](03-p0-p1-detail/p1-01-模块边界.md) |
+| UN-P1-02 event_seq 性能 | [p1-02-event_seq性能.md](03-p0-p1-detail/p1-02-event_seq性能.md) |
+| UN-P1-03 NJSON サイズ | [p1-03-NJSON大小.md](03-p0-p1-detail/p1-03-NJSON大小.md) |
+| UN-P1-04 1000 ノード 30fps | [p1-04-1000节点30fps.md](03-p0-p1-detail/p1-04-1000节点30fps.md) |
+| UN-P1-05 100 ノードクラスタ | [p1-05-100节点集群.md](03-p0-p1-detail/p1-05-100节点集群.md) |
+| UN-P1-06 容量計画 | [p1-06-容量计划.md](03-p0-p1-detail/p1-06-容量计划.md) |
+| UN-P1-07 listener ack | [p1-07-listener_ack.md](03-p0-p1-detail/p1-07-listener_ack.md) |
+| UN-P1-08 SECURITY DEFINER | [p1-08-SECURITY_DEFINER.md](03-p0-p1-detail/p1-08-SECURITY_DEFINER.md) |
+| UN-P1-09 SharedArrayBuffer | [p1-09-SharedArrayBuffer.md](03-p0-p1-detail/p1-09-SharedArrayBuffer.md) |
+| UN-P1-10 WASM bundle | [p1-10-WASM大小.md](03-p0-p1-detail/p1-10-WASM大小.md) |
+| UN-P1-11 凍結基準 | [p1-11-冻结基准.md](03-p0-p1-detail/p1-11-冻结基准.md) |
+| UN-P1-12 DB マイグレーション | [p1-12-DB迁移.md](03-p0-p1-detail/p1-12-DB迁移.md) |
+| UN-P1-13 UX 検証 | [p1-13-UX验证.md](03-p0-p1-detail/p1-13-UX验证.md) |
+| UN-P1-14 浸透テスト | [p1-14-渗透测试.md](03-p0-p1-detail/p1-14-渗透测试.md) |
 
 ## 4. 推奨決定タイムライン
 
