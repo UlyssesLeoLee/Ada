@@ -196,7 +196,7 @@
 | **P0** | Application Metrics（[M-13 Gateway](../modules/M-13-api-gateway.md)） | エンドユーザー観測 |
 | **P1** | Logs（Loki、構造化） | 障害詳細 |
 | **P1** | Traces（[M-15 EventBus](../modules/M-15-central-event-bus.md) + Gateway） | 性能ボトルネック |
-| **P2** | Database Metrics（PostgreSQL 16） | 性能分析 |
+| **P2** | Database Metrics（PostgreSQL 18.6） | 性能分析 |
 | **P2** | Alert + SLO | 自動運用 |
 | **P3** | CRDT / Plugin 詳細観測 | 高度分析 |
 
