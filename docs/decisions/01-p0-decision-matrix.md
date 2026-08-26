@@ -570,7 +570,7 @@ $$;
 1. PMBOK Guide 第 7 版、Project Management Institute、2021 年
 2. GDPR (EU 2016/679)
 3. PIPL (中華人民共和国 2021)
-4. PostgreSQL 16 Documentation
+4. PostgreSQL 18.6 Documentation
 5. OAuth 2.0 / OpenID Connect 仕様
 6. JSON Schema Draft 2020-12
 7. Ada プロジェクトチーム「[DOC-ARCH-008 QA 登録簿](../architecture/07-qa-register.md)」、2026-08-19
