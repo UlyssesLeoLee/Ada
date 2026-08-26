@@ -70,3 +70,21 @@ push2.txt
 
 # Local backup of old worktree (non-git, no commit)
 /ada-changelog-bak/
+
+# 5 门复跑一時ログ
+check-old.txt
+check-old2.txt
+check-old3.txt
+test-old.txt
+test-old2.txt
+clippy-old.txt
+clippy-old2.txt
+clippy-old3.txt
+clippy-ws-old.txt
+clippy-ws-old3.txt
+clippy-ws-old4.txt
+fmt-old.txt
+fmt-old2.txt
+push-old.txt
+push-old2.txt
+push2-old.txt
