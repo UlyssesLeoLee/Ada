@@ -887,7 +887,7 @@ User PC
 | 后端 API | Actix-web (Rust) | Tokio + Tonic (gRPC), Axum |
 | 编排引擎 | Rust 自研状态机 | LangGraph (Python) 移植 |
 | 浏览器自动化 | Playwright Rust 绑定 | Puppeteer (Node.js) |
-| 数据库 | PostgreSQL 12+ | MySQL 8.0+, MariaDB |
+| 数据库 | PostgreSQL 18.6 | MySQL 8.0+, MariaDB |
 | 缓存 | Redis 6+ | Memcached, Apache Druid |
 | 对象存储 | AWS S3 / MinIO | Azure Blob, Google Cloud Storage |
 | 消息队列 | Tokio Channel / crossbeam | RabbitMQ, Apache Kafka |
