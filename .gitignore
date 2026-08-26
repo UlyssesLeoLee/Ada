@@ -54,3 +54,6 @@ npm-debug.log*
 /wasm/target/
 /wasm/Cargo.lock
 /pkg/
+
+# Git worktree (一時作業ディレクトリ)
+/.worktrees/
