@@ -194,7 +194,7 @@
 ### 7.2 制約
 
 1. **言語**：Rust 必須（[DOC-ARCH-007](../architecture/06-rust-tech-selection.md)）
-2. **DB**：PostgreSQL 16+（[DOC-MOD-010](../modules/M-10-tenant-middleware.md)）
+2. **DB**：PostgreSQL 18.6（[DOC-MOD-010](../modules/M-10-tenant-middleware.md)）
 3. **準拠規格**：IPA 共通フレーム2018 + 非機能要求グレード
 4. **デプロイ方式**：atomic 反映必須（[DOC-ARCH-004](../architecture/04-atomic-deployment.md)）
 5. **データ所在地**：3 リージョン選択可
