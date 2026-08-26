@@ -67,3 +67,6 @@ clippy-old*.txt
 fmt-old*.txt
 push*.txt
 push2.txt
+
+# Local backup of old worktree (non-git, no commit)
+/ada-changelog-bak/
