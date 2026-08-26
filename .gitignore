@@ -61,3 +61,7 @@ npm-debug.log*
 # Cargo test 出力ログ（一時検証、コミットしない）
 test-output*.txt
 test-output-*.txt
+clippy*.txt
+fmt*.txt
+clippy-old*.txt
+fmt-old*.txt

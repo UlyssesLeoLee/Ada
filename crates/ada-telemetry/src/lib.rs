@@ -36,8 +36,7 @@ mod tests {
     fn test_layer_is_known() {
         assert!(
             ["skeleton", "blood", "nerve", "muscle", "shared"].contains(&LAYER),
-            "Unknown layer: {}",
-            LAYER
+            "Unknown layer: {LAYER}",
         );
     }
 }
