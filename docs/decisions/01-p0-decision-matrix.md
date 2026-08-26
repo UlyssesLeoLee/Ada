@@ -5,14 +5,14 @@
 
 > **ドキュメントID**：DOC-DEC-001
 > **文書分類**：意思決定文書
-> **バージョン**：v1.0.0
+> **バージョン**：v1.1.0
 > **制定日**：2026-08-20
-> **最終更新日**：2026-08-20
+> **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：PO
 > **上位文書**：[`docs/decisions/README.md`](README.md)
-> **下位文書**：各決定後、関連モジュール文書 §X を更新
+> **下位文書**：[`03-p0-p1-detail/`](03-p0-p1-detail/)（DOC-DEC-003 細化決議 25 ファイル）、各決定後、関連モジュール文書 §X を更新
 > **関連文書**：[`docs/architecture/07-qa-register.md`](../architecture/07-qa-register.md)、[`docs/upstream/08-initial-risk-assessment.md`](../upstream/08-initial-risk-assessment.md)
 > **適用 IPA 標準**：
 > - IPA「共通フレーム2018 (SLCP-JCF2018)」
@@ -24,6 +24,7 @@
 | バージョン | 日付 | 変更内容 | 起草 | レビュー | 承認 |
 |---|---|---|---|---|---|
 | v1.0.0 | 2026-08-20 | 初版制定（11 P0 决策选项） | Ada プロジェクトチーム | TBD | PO |
+| v1.1.0 | 2026-08-27 | §14 P0 細化決議へのリンク追加（DOC-DEC-003 連動） | Mavis (per DEC-008) | ⏳ 待 Ulysses | ⏳ 待 Ulysses |
 
 ---
 
@@ -42,8 +43,9 @@
 11. UN-P0-10: Backup/Restore 戦略
 12. UN-P0-11: ADR レビュー会
 13. 决定完了チェックリスト
-14. 用語集
-15. 参考文献
+14. P0 細化決議へのリンク
+15. 用語集
+16. 参考文献
 
 ---
 
@@ -551,7 +553,27 @@ $$;
 
 ---
 
-## 14. 用語集
+## 14. P0 細化決議へのリンク
+
+各 P0 議題の背景・選択肢・評価・推奨案・RACI・期限を [`03-p0-p1-detail/`](03-p0-p1-detail/) で詳細展開している（DOC-DEC-003 細化決議群）。実装着手前に必ず参照。
+
+| P0 議題 | 細化決議ファイル | 主题 |
+|---|---|---|
+| UN-P0-01 | [p0-01-人員.md](03-p0-p1-detail/p0-01-人员.md) | Rust 16 crate 担当人員（段階採用 + AI 補助） |
+| UN-P0-02 | [p0-02-組織.md](03-p0-p1-detail/p0-02-组织.md) | 起草/レビュー/承認組織（最小 5 名） |
+| UN-P0-03 | [p0-03-FK.md](03-p0-p1-detail/p0-03-FK.md) | canvas 循環 FK（DEFERRABLE INITIALLY DEFERRED） |
+| UN-P0-04 | [p0-04-Manifest.md](03-p0-p1-detail/p0-04-Manifest.md) | Module Manifest JSON Schema (Draft 2020-12) |
+| UN-P0-05 | [p0-05-audit_partition.md](03-p0-p1-detail/p0-05-audit_partition.md) | audit_log 月次 RANGE パーティション |
+| UN-P0-06 | [p0-06-KMS.md](03-p0-p1-detail/p0-06-KMS.md) | KMS 選定 (AWS KMS + Vault OSS) |
+| UN-P0-07 | [p0-07-JWT.md](03-p0-p1-detail/p0-07-JWT.md) | JWT 鍵ローテーション (kid + JWKS) |
+| UN-P0-08 | [p0-08-GDPR.md](03-p0-p1-detail/p0-08-GDPR.md) | 忘れられる権利対応フロー (GDPR Art.17) |
+| UN-P0-09 | [p0-09-log.md](03-p0-p1-detail/p0-09-log.md) | ログ基盤選定 (Loki + Promtail) |
+| UN-P0-10 | [p0-10-Backup.md](03-p0-p1-detail/p0-10-Backup.md) | Backup/Restore 戦略 (4 段 + 週次リストア) |
+| UN-P0-11 | [p0-11-ADR判定.md](03-p0-p1-detail/p0-11-ADR判定.md) | ADR レビュー会 (週次アーキ会議) |
+
+---
+
+## 15. 用語集
 
 | 用語 | 説明 |
 |---|---|
