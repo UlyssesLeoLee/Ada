@@ -102,7 +102,7 @@ sli_latency_p99 =
 | **M-09 Exporter** | 出力 | 99.0% | 6 時間 43 分 | P2 |
 | **M-14 Module Registry** | メタ | 99.5% | 3 時間 21 分 | P1 |
 | **M-16 Cluster Coordinator** | 制御 | 99.95% | 20 分 10 秒 | P0 |
-| **PostgreSQL 16** | データ | 99.95% | 20 分 10 秒 | P0 |
+| **PostgreSQL 18.6** | データ | 99.95% | 20 分 10 秒 | P0 |
 | **Redis 7** | キャッシュ | 99.9% | 40 分 19 秒 | P1 |
 | **Grafana / Prometheus / Loki / Tempo** | 観測基盤 | 99.9% | 40 分 19 秒 | P0 |
 
