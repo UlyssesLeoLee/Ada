@@ -367,7 +367,7 @@
 | ID | 仮定 | 検証方法 |
 |---|---|---|
 | ASM-T01 | Rust 1.74 stable で全 crate ビルド可能 | CI 実行 |
-| ASM-T02 | PostgreSQL 15+ の RLS / `set_config` / advisory lock / `pg_notify` が安定動作 | DB 単体テスト |
+| ASM-T02 | PostgreSQL 18.6 の RLS / `set_config` / advisory lock / `pg_notify` が安定動作 | DB 単体テスト |
 | ASM-T03 | Tokio 1.40 の multi-thread runtime で 16 crate 並列実行可能 | 性能テスト |
 | ASM-T04 | Bevy WASM bundle が `wasm-opt -O3` 後 5MB gzipped 以下 | ビルド検証 |
 | ASM-T05 | yrs CRDT が 100 並列エディタで 100ms 以内収束 | 性能テスト |
