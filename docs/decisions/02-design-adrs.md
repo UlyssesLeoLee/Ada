@@ -529,7 +529,7 @@ async fn get_canvas(Path(id): Path<Uuid>) -> Json<Canvas> { ... }
 ## 18. 参考文献
 
 1. PMBOK Guide 第 7 版、Project Management Institute、2021 年
-2. PostgreSQL 16 Documentation
+2. PostgreSQL 18.6 Documentation
 3. wasmtime Documentation
 4. Yrs (Yjs for Rust) GitHub
 5. utoipa Documentation
