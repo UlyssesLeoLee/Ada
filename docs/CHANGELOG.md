@@ -5,9 +5,9 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.2.0
+> **バージョン**：v2.3.0
 > **制定日**：2026-08-19
-> **最終更新日**：2026-08-20
+> **最終更新日**：2026-08-26
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
@@ -39,6 +39,7 @@
 | v2.0.0 | 2026-08-20 | 超上流/要件/管理/業務 4 新ディレクトリ追加（24 ドキュメント）、[DOC-ARCH-009 §5.1-5.16 全部位对应文档完成 | Ada プロジェクトチーム | TBD | TBD |
 | v2.1.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、3 ファイル / 11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 |
 | v2.2.0 | 2026-08-20 | Observability Platform 設計（`docs/observability/`、14 ファイル / 210 KB / DOC-OBS-INDEX + 13 章 + 10 OBS-ADR + Phase 0-8 9 ヶ月導入計画）追加 | Ada プロジェクトチーム | TBD | TBD |
+| v2.3.0 | 2026-08-26 | v0.1.0 コードリリース + Rust 1.98.0 升版 + PostgreSQL 18.6 ドキュメント代換（13 ファイル横断、PR review 模式逐ファイル commit）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -699,6 +700,104 @@ docs/tests/
 1. [docs/decisions/01-p0-decision-matrix.md](decisions/01-p0-decision-matrix.md) を上から消化（11 件 × 30 分）
 2. 環境制約解消後 `cargo check --workspace && cargo test --workspace` 実行
 3. 両方完了で G4 通過 → 実装着手
+
+---
+
+## 2026-08-26 — v0.1.0 コードリリース（v2.3.0）
+
+**変更種別**：最初のコードベースリリース + ツールチェイン升版 + 横断ドキュメント代換
+
+**触发原因**：
+
+- [Cargo Workspace v2.1.0 scaffold（DOC-CHG-001 §2026-08-20）](README.md) で構築した 18 crate のうち、core + 16 モジュール（m01~m16）の v0.1.0 実装が完成
+- 累計 572 unit tests / 5-gate green（cargo check / test / clippy -D warnings / fmt / workspace clippy）
+- host toolchain が Rust 1.98.0（2026-08-18 stable）に升版済、workspace `rust-version` を 1.74 → 1.98.0 に统一
+- PostgreSQL 18.6（2026-08-26）にドキュメント上の参照を统一
+
+**変更内容**：
+
+### 1. コードベース v0.1.0 リリース（5 批 6 commit + 1 core、計 17 crate）
+
+| 批 | commit | モジュール | テスト | 5-gate |
+|---|---|---|---|---|
+| **B1 core** | 740772f | ada-core（実型層: AdaError / 5 ID / AdaLayer / `telemetry!`）| 23 | ✅ |
+| **B2** | 00c2791 | m13 API Gateway + m16 Cluster Coordinator | 44 | ✅ |
+| **B3** | 4f1aafe | m15 Central Event Bus + m11 RBAC/Collab | 72 | ✅ |
+| **B4** | 89791b6 | m10 Tenant Middleware + m14 Module Registry + m09 Exporter | 103 | ✅ |
+| **B5** | 42a82b1 | m01 Acquisition + m02 Normalizer + m03 DataFlow + m05 ControlFlow | 154 | ✅ |
+| **B6** | 8389d8d | m04 Orchestration + m06 Plugin SDK + m07 Debug + m08 Trigger + m12 Canvas | 176 | ✅ |
+
+**累計**：
+
+- 実装完了 crate：**17**（core + m01~m16）
+- scaffold 残：**1**（`crates/ada-telemetry/`、v0.2.0 範囲で実装）
+- 累计 unit tests：**23 + 44 + 72 + 103 + 154 + 176 = 572 tests**
+- 5-gate：**全 6 commit で green**
+- 最終コミット：main `ed00983`
+
+### 2. Rust toolchain 升版（per 523afda）
+
+- `Cargo.toml` workspace `rust-version`: `1.74` → `1.98.0`（2026-08-18 stable）
+- `rust-toolchain.toml` 注釈: `1.74+ / 1.95` → `1.98+ / 1.98.0`
+- host toolchain 確認: `rustc 1.98.0 (88d9e12ae 2026-08-18)`
+- B1〜B4 全 commit を 1.98 で 5-gate 再走 → 全 green
+- clippy 1.98 厳 lint 修正パターン: `uninlined_format_args` / `redundant_closure_for_method_calls` / `default_trait_access` / `unused_imports` / `let_underscore_must_use` / `derivable_impls` / `missing_docs_in_private_items`
+
+### 3. PostgreSQL 18.6 ドキュメント代換（13 ファイル、PR review 模式）
+
+**代換戦略**（ユーザー三選 1）：全歴史叙事保留 + 12→16 移行経路保留 + 逐ファイル commit（PR review 模式）
+
+**代換完了 13 コミット**（per `git log` 検証）：
+
+| commit | ファイル | 旧 → 新 |
+|---|---|---|
+| 34c9cd5 | `upstream/01-pj-charter.md` | PG 16+ → PG 18.6 |
+| 8316e5e | `upstream/06-to-be-business.md` | PG 16 → PG 18.6 |
+| 5670138 | `decisions/01-p0-decision-matrix.md` | PG 16 → PG 18.6 |
+| 545b065 | `decisions/02-design-adrs.md` | PG 16 → PG 18.6 |
+| 1fee9ff | `architecture/01-tech-stack.md`（2 箇所）| PG 12+ → PG 18.6 |
+| f491b08 | `architecture/07-qa-register.md` | PG 15+ → PG 18.6 |
+| f20dbe8 | `management/03-scope-statement.md` | PG 16+ → PG 18.6 |
+| 5daea3d | `legacy/basic-design.md` | PG 12+ → PG 18.6 |
+| f590406 | `observability/README.md` | PG 16 → PG 18.6 |
+| e0f1ea6 | `observability/01-current-state-analysis.md` | PG 16 → PG 18.6 |
+| acfe374 | `observability/08-slo-design.md` | PG 16 → PG 18.6 |
+| 27ced88 | `requirements/03-sr-system-requirements.md` | PG 16+ → PG 18.6 |
+| ed00983 | `templates/02-tests-execution.md` | PG 16.x → PG 18.6 |
+
+**保留 5 箇所**（歴史叙事 / 12→16 移行経路）：
+
+- `upstream/03/04/05` 3 ファイル
+- `requirements/07/10` 2 ファイル
+
+**コメント同期**：
+
+- `rust-toolchain.toml` 注釈も本节で 1.98 へ同期（commit b7e7087）
+
+### 4. ガバナンス整備
+
+- `.gitignore` に `.worktrees/` 追加（git worktree 一時ディレクトリを除外）
+- 既存 `wt-changelog-bump` worktree を `git worktree remove` + `branch -D` でクリーンアップ（stale 状態解消）
+
+**影響範囲**：
+
+- `crates/` 17 crate の v0.1.0 実装（~12K 行 Rust、572 unit tests）
+- `Cargo.toml` / `rust-toolchain.toml` 1 ファイル + 注釈 1 ファイル
+- `docs/` 13 ファイル横断（PG 18.6 代換）
+- `docs/CHANGELOG.md` 本書（v2.3.0）
+- `.gitignore` 1 ファイル
+
+**v2.3.0 達成**：
+
+- 初のコードベースリリース（v0.1.0）— 設計書から実装へ移行完了
+- ツールチェイン升版（Rust 1.98.0、PG 18.6）— host / workspace / 文档 の三層一致
+- ガバナンス整備（worktree cleanup、gitignore）— 次バッチ以降の作業衛生
+
+**保留 / 次フェーズ**：
+
+- `crates/ada-telemetry/` v0.2.0 実装（v0.1.0 範囲外）
+- フロントエンド Bevy 0.14 canvas 統合（m12 の WASM ビルド）
+- PR push（`git push`）— `github.com:443` RST 障壁のため deferred、ローカル 23 commits ahead of origin/main
 
 ---
 
