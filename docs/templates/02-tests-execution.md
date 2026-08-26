@@ -366,7 +366,7 @@ DOC-ID: DOC-TPL-TST-LOG-<YYYYMMDD>-09
 対象: 11 テーブル（[DOC-MOD-010 §4](../modules/M-10-tenant-middleware.md)）+ RLS + PL/pgSQL
 実施日: ____-__-__
 実施者: <QA + DBA>
-環境: PostgreSQL 16.x
+環境: PostgreSQL 18.6
 ```
 
 ### A.9.2 マイグレーション検証
