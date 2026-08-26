@@ -261,6 +261,37 @@ foreach ($kv in $envVars.GetEnumerator()) {
     Write-Host "  `$env:$($kv.Key) = `"$($kv.Value)`"" -ForegroundColor Gray
 }
 
+# ============= ステップ 13.5: DB マイグレーション (オプショナル) =============
+# db/ ディレクトリが存在し psql が利用可能なら、PL/pgSQL 存过の migrate + test を
+# 試行する。psql 不在 / DB 未起動 / 接続不可 はいずれも WARN で続行。
+$dbDir = Join-Path $WorkspaceRoot 'db'
+if (Test-Path $dbDir) {
+    Write-Step "Step 13.5/14: DB マイグレーション (オプショナル, db/ 検出)"
+    $dbPsql = Get-Command psql -ErrorAction SilentlyContinue
+    if (-not $dbPsql) {
+        Write-Warn "psql 未検出 - DB マイグレーションをスキップ"
+    } else {
+        $runTests = Join-Path $dbDir 'run-tests.sh'
+        if (Test-Path $runTests) {
+            Write-Host "  [..] bash db/run-tests.sh (DB=ada_dev 想定)"
+            try {
+                & bash $runTests 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-OK "DB マイグレーション + 単体テスト成功"
+                } else {
+                    Write-Warn "DB テスト失敗 (DB 未起動の可能性、スキップ)"
+                }
+            } catch {
+                Write-Warn "DB テスト実行エラー: $_"
+            }
+        } else {
+            Write-Warn "db/run-tests.sh 不在 - スキップ"
+        }
+    }
+} else {
+    Write-Warn "Step 13.5/14: db/ ディレクトリ不在 (本タスク範囲外、スキップ)"
+}
+
 # ============= ステップ 14: 完了 =============
 Write-Step "Step 14/14: セットアップ完了"
 Write-Host ""

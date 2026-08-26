@@ -1,5 +1,9 @@
 [workspace]
 resolver = "2"
+# 注: db/ ディレクトリ (PL/pgSQL 存过 + マイグレーション) は Cargo ビルド対象外。
+#     ランタイム/DB 層は独立した deployable であり、crates/* の Rust コードからは
+#     SQLx 経由 (sqlx::query / sqlx::query_as) で呼び出す。cargo check/build には
+#     含めない (sqlx::migrate!() マクロを使う場合のみ任意で comments 内参照可)。
 members = [
     "crates/ada-core",
     "crates/ada-telemetry",
