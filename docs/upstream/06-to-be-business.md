@@ -128,7 +128,7 @@
 | ISS-B-02 民主化 | ノーコードキャンバス | M-12 |
 | ISS-B-03 プラグイン | プラグイン SDK | M-06, M-14 |
 | ISS-B-04 自動復旧 | 自動リトライ + 通知 | M-04, M-15 |
-| ISS-S-01 PG EOL | PostgreSQL 16 刷新 | M-10 |
+| ISS-S-01 PG EOL | PostgreSQL 18.6 刷新 | M-10 |
 | ISS-S-02 マルチテナント | RLS + tenant_id | M-10 |
 | ISS-S-03 自動デプロイ | atomic swap | M-14 |
 | ISS-S-04 監視 | 100% 計装 + Prometheus | M-10, M-15 |
