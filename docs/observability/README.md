@@ -76,7 +76,7 @@
 
 | 項目 | 値 |
 |---|---|
-| 対象サービス | 18 Rust crate（scaffold 段階 v0.1.0）+ PostgreSQL 16 + Redis 7 + K3s |
+| 対象サービス | 18 Rust crate（scaffold 段階 v0.1.0）+ PostgreSQL 18.6 + Redis 7 + K3s |
 | 現状 observability 成熟度 | **L0（未着手）** |
 | 目標成熟度 | **L3（フル OpenTelemetry + 自動相関）** |
 | 実装方針 | **最小侵入**（既存コードに crate 追加のみ、書き換えなし） |
