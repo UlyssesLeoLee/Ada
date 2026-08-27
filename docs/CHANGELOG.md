@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.4.0
+> **バージョン**：v2.5.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
@@ -41,6 +41,7 @@
 | v2.2.0 | 2026-08-20 | Observability Platform 設計（`docs/observability/`、14 ファイル / 210 KB / DOC-OBS-INDEX + 13 章 + 10 OBS-ADR + Phase 0-8 9 ヶ月導入計画）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v2.3.0 | 2026-08-26 | v0.1.0 コードリリース + Rust 1.98.0 升版 + PostgreSQL 18.6 ドキュメント代換（13 ファイル横断、PR review 模式逐ファイル commit）| Mavis（per DEC-008）| TBD | TBD |
 | v2.4.0 | 2026-08-27 | v0.2.0 第1段: PL/pgSQL 6 存过（db/） + DOC-DEC-003 細化決議 25 ファイル + observability Phase 0-1 1-key-up stack（Prometheus/Loki/Grafana/Jaeger/OTel）| Mavis（per DEC-008）| TBD | TBD |
+| v2.5.0 | 2026-08-27 | v0.2.0 第2段: ada-telemetry v0.2.0 実装（OpenTelemetry SDK + OTLP + Prometheus） + m12 WASM compile + Bevy 0.14 integration（per D-02/D-04/D-05）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -943,6 +944,110 @@ docs/tests/
 - `ada-telemetry v0.2.0` 完全実装（WT-1 merge 后正式入 CHANGELOG v2.5.0）
 - m12 WASM 编译验证（worker merge 后）
 - 部署环境 PSQL 実机検証（host 工具链问题、user authorization 必要）
+
+---
+
+## 2026-08-27 — v0.2.0 第2段（v2.5.0）
+
+**変更種別**：ada-telemetry v0.2.0 実装 + m12 WASM + Bevy 0.14 集成
+
+**触发原因**：
+
+- v2.4.0 (5 worker 中 3 worker 完工) 之后，剩 2 worker（WT-1 ada-telemetry、WT-2 m12 WASM）需要 root 接手完成
+- WT-1 worker (bg_80f47927) failed 2 compile errors + 未 commit, root 接手修 2 error + clippy 1.98 严格 lint
+- WT-2 worker (bg_44baccb3) succeeded, 14 files / 1680 lines, 已 commit `222a699`
+
+**変更内容**：
+
+### 1. ada-telemetry v0.2.0 実装（per DOC-OBS-002 §2.1 / 03-metrics / 04-logging / 05-tracing）
+
+**new** (commit `ab5d4c9` / merge `69da556`, 10 files / 2833 insertions / 1881 行 Rust):
+
+- `crates/ada-telemetry/src/lib.rs`（380 行）— `TelemetryConfig` builder + `init()` + `TelemetryGuard` Drop semantics
+- `crates/ada-telemetry/src/config.rs`（465 行）— `TelemetryConfig` + `LogFormat` + `SampleRatio` + env-var 解析
+- `crates/ada-telemetry/src/error.rs`（121 行）— `TelemetryError` enum + `Result` type alias
+- `crates/ada-telemetry/src/logging.rs`（160 行）— `tracing_subscriber` fmt layer（JSON / Pretty）+ `Rfc3339Timestamp`
+- `crates/ada-telemetry/src/tracing.rs`（253 行）— OpenTelemetry SDK + OTLP gRPC exporter + `SdkTracerProviderGuard`
+- `crates/ada-telemetry/src/metrics.rs`（261 行）— Prometheus exporter + `canonical_name()` + `MetricsHandle`/`Guard`
+- `crates/ada-telemetry/src/testing.rs`（131 行）— `TestHandle` + `test_recorder()` + `metric_names()`（prometheus feature）
+- `crates/ada-telemetry/Cargo.toml`（86 行）— 5 features（default/otlp/prometheus/testing） + 7 optional deps
+- `crates/ada-telemetry/tests/integration.rs`（25 行）— stub 让 `[[test]]` 显式 target 存在
+
+**依赖选型**:
+- Always-on: `tracing` + `tracing-subscriber` (env-filter + json + fmt + registry) + `serde` + `parking_lot` + `time` + `thiserror`
+- `opentelemetry` 0.32 (always-on, 仅 facade) + `opentelemetry_sdk` 0.32 (otlp feature) + `opentelemetry-otlp` 0.32 (gRPC tonic)
+- `metrics` 0.24 + `metrics-exporter-prometheus` 0.18 (prometheus feature)
+- `[[test]]` 显式 block (B2 lesson: Cargo 1.85+ drops implicit `tests/*.rs` when `[lib]` has explicit `path = ...`)
+
+**Root hotfixes**（per 代签新规则 / 无证据叙事 = 禁止）:
+- `lib.rs install_with_otlp`: 重排 `with()` 链 — `otlp_layer` 在 `env_filter` 之后、`fmt_layer` 之前（satisfy `OpenTelemetryLayer<S: Subscriber + LookupSpan>` bound）
+- `config.rs`: `LogFormat` derive(Default) + `#[default] Json` variant
+- `config.rs`: `TelemetryConfig` doc `OTel` backticks + sample_ratio test 改 f64::EPSILON
+- `error.rs`: 删 `assert_eq!(ok.unwrap())` 改 `matches!`（avoid unnecessary_literal_unwrap）
+- `logging.rs`: `Rfc3339Timestamp` `#[derive(Debug)]`
+- `metrics.rs`: `install_recorder` no-prometheus 路径返 `(MetricsGuard, MetricsHandle)` 不包 `Result`
+- `tracing.rs`: 删 unused import `TracerProvider as _`（otlp_layer inline in lib.rs）
+- `testing.rs`: `use crate::*` 加 `#[cfg(feature = "prometheus")]` 限定
+- `tests/integration.rs`: stub 让 cargo test --workspace 找到显式 [[test]] target
+
+**検証**:
+- 5 门 cargo check/test/clippy -D warnings/fmt/workspace clippy 全 GREEN
+- cargo test --workspace: 632 passed（從 589 +43 telemetry unit + integration）
+
+### 2. m12 WASM compile + Bevy 0.14 集成（per D-02/D-04/D-05）
+
+**new** (commit `222a699` / merge `1557e05`, 14 files / 1680 insertions / Cargo.lock conflict resolution):
+
+- `crates/ada-m12-canvas-editor/Cargo.toml` — 5 features (`default`/`wasm`/`bevy`/`full`/`wasm-test`)、7 optional deps、`crate-type = ["cdylib", "rlib"]`、target-specific tokio (wasm/native 分流)
+- `crates/ada-m12-canvas-editor/build.rs` — wasm32 target hint
+- `crates/ada-m12-canvas-editor/src/lib.rs` — feature-gated module + re-export `wasm_bindings::*` / `bevy_integration::*`
+- `crates/ada-m12-canvas-editor/src/canvas.rs` — `inner` + `Inner` 字段改 `pub(crate)` (供 `wasm.rs` bulk snapshot/restore)
+- `crates/ada-m12-canvas-editor/src/wasm.rs`（256 行）— `WasmCanvas` + `CanvasSnapshot`（wasm-bindgen 绑定）
+- `crates/ada-m12-canvas-editor/src/bevy_plugin.rs`（155 行）— `CanvasPlugin` + `CanvasResource` + 2 个 `Component`
+- `crates/ada-m12-canvas-editor/src/bevy_bridge.rs`（197 行）— `sync_canvas_system` (Canvas → ECS push)
+- `crates/ada-m12-canvas-editor/README.md` — features 表 + WASM 构建指引
+- `crates/ada-m12-canvas-editor/wasm/README.md` — 工具链前置 + build/test/JS 接入示例
+- `crates/ada-m12-canvas-editor/wasm/build.sh` — 一键 wasm-pack build + size-check
+- `crates/ada-m12-canvas-editor/wasm/test.sh` — 一键 wasm-pack test (chrome/firefox/safari/node)
+- `crates/ada-m12-canvas-editor/wasm/size-check.sh` — D-05 raw 8 MB / gzip 3 MB ceiling 校验
+- `crates/ada-m12-canvas-editor/wasm/package.json.tmpl` — 前端 bundle 的 package.json 模板
+
+**WASM build 検証**:
+- `wasm-pack build --target web --release --features wasm`: ✅ **0.143 MiB raw / 0.065 MiB gzip**（D-05 8 MB / 3 MB ceiling 远未触）
+- `wasm-pack test --node --features wasm-test`: ✅ 4 wasm-bindgen tests passed
+- `cargo test -p ada-m12-canvas-editor --features bevy`: ✅ 32 unit + 4 integration（含 5 new bevy sync tests）
+
+**D-04 Bevy 0.14 検証**:
+- 集成测试用 `bevy_ecs` + `bevy_app` 子集
+- `CanvasPlugin` 注册 `CanvasResource` resource + `sync_canvas_system` 每帧同步 ECS entity ↔ canvas node
+- 单向 Canvas → ECS push（ECS → Canvas 反向 留给上层 bevy_egui 事件，per M-12 §3.6）
+
+**Cargo.lock conflict 解決**:
+- WT-1 + WT-2 都改了 Cargo.lock（不同 crate 不同 deps）
+- `git checkout --theirs Cargo.lock` + `cargo check --workspace` 重生成 → 0 conflict
+- 5 门 cargo 验证后 commit
+
+**影響範囲**:
+
+- `crates/ada-telemetry/` 9 files（1881 行、OpenTelemetry + OTLP + Prometheus 完整实装）
+- `crates/ada-m12-canvas-editor/` 8 files（1680 行、WASM + Bevy 0.14 集成）
+- `Cargo.lock` 重生成（合并 telemetry + m12 新 deps）
+- `docs/CHANGELOG.md` 本書（v2.5.0）
+
+**v2.5.0 達成**:
+
+- v0.2.0 release 后的**第2段実装**（telemetry + canvas WASM/Bevy）
+- 5 worker 全部完成（3 worker self-succeeded + 2 worker root-takeover 修 2 error / Cargo.lock conflict）
+- 5 门 cargo 维持（632 tests passed，WT-1 +43 telemetry + 0 m12 baseline）
+- 27 commits ahead of v2.3.0 / 4 commits ahead of v2.4.0
+
+**保留 / 次フェーズ**:
+
+- m12 sync_canvas_system O(N) per-frame 暴力 diff → R-tree 增量优化（per M-12 §3.5，bevy 集成后续 PR）
+- 浏览器端 headless Chrome wasm-pack test 跑通（CI 验证，host 无 Chrome）
+- bevy_egui 集成（ECS → Canvas 反向 + 拖拽，per M-12 §3.6）
+- `wasm-opt` (binaryen) air-gapped CI 环境用 `wasm-pack build --no-opt`
+- CHANGELOG v2.6.0 留给 v0.3.0 阶段（m12 bevy_egui 集成 + observability Phase 2 + db CI）
 
 ---
 
