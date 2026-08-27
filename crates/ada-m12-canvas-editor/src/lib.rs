@@ -64,6 +64,15 @@ mod node;
 mod bevy_bridge;
 #[cfg(feature = "bevy")]
 mod bevy_plugin;
+/// M-12 v0.6.0 CRDT (Yrs) sync. Only compiled with
+/// `--features crdt` so the default 5-gate CI path doesn't
+/// pull yrs into the dep graph. See `src/crdt.rs` for the
+/// sync protocol. Made `pub mod` (not just `pub use`) so
+/// cross-crate integration tests (e.g. `m13/tests/crdt_smoke.rs`)
+/// can address the types as
+/// `ada_m12_canvas_editor::crdt::merge_crdt_update`.
+#[cfg(feature = "crdt")]
+pub mod crdt;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
 /// M-12 v0.5.0 server-side reconciliation. Only compiled with
@@ -73,7 +82,13 @@ mod egui_integration;
 /// cross-crate integration tests (e.g. `m13/tests/reconcile_smoke.rs`)
 /// can address the types as
 /// `ada_m12_canvas_editor::server_recon::reconcile_canvas_state`.
-#[cfg(feature = "server")]
+///
+/// In v0.6.0, the `server` feature is aliased / re-routed to
+/// `legacy-lww` — see the `[features]` table — and the new
+/// `crdt` feature (Yrs-backed, default off) provides the
+/// forward path. Both can be enabled simultaneously during the
+/// transition window for cross-validation.
+#[cfg(any(feature = "server", feature = "legacy-lww"))]
 pub mod server_recon;
 #[cfg(feature = "wasm")]
 mod wasm;
@@ -118,13 +133,29 @@ pub use egui_integration::{
 };
 
 /// M-12 v0.5.0 server-side reconciliation public surface.
-/// Only compiled with `--features server`.
+/// Only compiled with `--features server` (or its v0.6.0 alias
+/// `legacy-lww`).
 ///
 /// 包含:
 /// - [`reconcile_canvas_state`] — 3-way merge (LWW, server wins)
 /// - [`ReconcileResult`] — 合并结果 (merged canvas + win lists)
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "legacy-lww"))]
 pub use server_recon::{reconcile_canvas_state, ReconcileResult};
+
+/// M-12 v0.6.0 CRDT (Yrs) sync public surface. Only compiled
+/// with `--features crdt`.
+///
+/// 包含:
+/// - [`merge_crdt_update`] — apply remote update, return diff
+/// - [`encode_state_as_update`] — full state snapshot
+/// - [`reconcile_with_crdt`] — end-to-end reconcile (server
+///   canvas + client update → merged state + new version)
+/// - [`CrdtReconcileResult`] — 合并结果 (merged_state bytes +
+///   new_version)
+#[cfg(feature = "crdt")]
+pub use crdt::{
+    encode_state_as_update, merge_crdt_update, reconcile_with_crdt, CrdtReconcileResult,
+};
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace
 /// version per D-09).

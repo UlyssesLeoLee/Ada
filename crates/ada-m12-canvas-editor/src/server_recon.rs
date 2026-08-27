@@ -46,7 +46,7 @@
 //!
 //! All branches are `match` / `if let`; the function is total.
 
-#![cfg(feature = "server")]
+#![cfg(any(feature = "server", feature = "legacy-lww"))]
 
 use std::collections::{HashMap, HashSet};
 

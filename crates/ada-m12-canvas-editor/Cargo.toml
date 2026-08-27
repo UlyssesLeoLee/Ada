@@ -36,6 +36,18 @@ crate-type = ["cdylib", "rlib"]
 name = "integration"
 path = "tests/integration.rs"
 
+# B2 lesson (repeated for `crdt_sync`): explicit `[[test]]`
+# block so `cargo test --workspace` actually runs the
+# integration test under `tests/crdt_sync.rs` (Cargo 1.85+
+# silently drops tests/* when `[lib]` also has an explicit
+# `path = ...`). The test itself is feature-gated (only
+# meaningful with `--features crdt`); see the `#[cfg]`
+# at the top of `tests/crdt_sync.rs`.
+[[test]]
+name = "crdt_sync"
+path = "tests/crdt_sync.rs"
+required-features = ["crdt"]
+
 [dependencies]
 ada-core = { path = "../ada-core" }
 # `tokio` baseline 是 wasm-friendly 子集(`macros,sync,time`)—
@@ -51,6 +63,16 @@ serde_json = "1"
 thiserror = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Yrs (Yjs Rust port, MIT) — M-12 v0.6.0 CRDT sync backend.
+# Pinned to 0.18 (latest stable at the time of v0.6.0; the cached
+# registry only has 0.18.8, so no `*` wildcard is used). The
+# default feature set pulls in fastrand/js + serde/derive + thiserror
+# — none of those break the WASM build because yrs itself does not
+# pull wasm-bindgen. WASM-specific bindings (if any future release
+# ships them) would arrive via a dedicated feature flag we add
+# then. See `crates/ada-m12-canvas-editor/CRDT.md` for the
+# integration design.
+yrs = "0.18"
 # WASM 下 `uuid` 需要 explicit randomness source;通过 feature
 # gate 拉入 `uuid/js`(用 crypto.getRandomValues),native build
 # 不受影响。
@@ -156,6 +178,18 @@ wasm-test = ["wasm", "dep:wasm-bindgen-test"]
 # and the integration tests under `tests/integration.rs` (which
 # use `#[cfg(feature = "server")]`).
 server = []
+# v0.6.0 CRDT (Yrs) sync. Pulls in `yrs` (already declared in
+# [dependencies] above — this flag only gates the `pub mod
+# crdt` block and the `tests/crdt_sync.rs` integration test).
+# Default off: 5-gate CI default build does not exercise CRDT.
+crdt = []
+# v0.6.0 rename of the v0.5.0 `server` feature. `server` is kept
+# as a stable alias for cross-crate compat (m13 etc.); new
+# crates should depend on `legacy-lww` for clarity that this
+# path is on the deprecation roadmap (replaced by `crdt`).
+# `server` and `legacy-lww` are functionally equivalent in
+# v0.6.0; both enable the same `pub mod server_recon` block.
+legacy-lww = []
 
 [lints]
 workspace = true
