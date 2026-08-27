@@ -1,0 +1,54 @@
+# SLO-REM-FAST-BURN-6h
+# Auto-remediation SLO-004 (webhook success rate, 99.5%)
+# 6h short window × 30h long window, AND condition.
+# Burn Rate 6x → 28-day budget consumed in ~5 days.
+#
+# Source of truth: docs/observability/15-error-budget-policy.md §3.2
+# Related SLO: docs/observability/08-slo-design.md §11.2 (SLO-004)
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-remediation-fast-burn-6h
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/component: slo-alerts
+    app.kubernetes.io/part-of: ada-observability
+    slo: slo-004-remediation-webhook
+spec:
+  groups:
+    - name: slo.remediation.availability.fastBurn.6h
+      interval: 1m
+      rules:
+        - alert: SLO_Remediation_Availability_FastBurn_6h
+          expr: |
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[6h]))
+              /
+              sum(rate(ada_remediation_actions_total[6h]))
+            ) > (6 * 0.005)
+            and
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[30h]))
+              /
+              sum(rate(ada_remediation_actions_total[30h]))
+            ) > (6 * 0.005)
+          for: 5m
+          labels:
+            severity: sev2
+            slo: slo-004-remediation-webhook
+            team: sre
+            service: ada-remediation
+            burn_rate: "6x"
+            window: "6h/30h"
+          annotations:
+            summary: "Auto-remediation SLO-004 中速消費 (6h 窓で 6x Burn)"
+            description: |
+              Auto-remediation webhook success rate has been burning the
+              28-day error budget at 6x for at least 5 minutes. If
+              sustained, the budget will be exhausted in ~5 days.
+              Target: 99.5% (SLO-004).
+            runbook_url: https://wiki/runbooks/slo-rem-fast-burn-6h
+            error_budget_policy: docs/observability/15-error-budget-policy.md
+            slo_source: docs/observability/08-slo-design.md
+            action: "PagerDuty 即時通知 / SRE Lead が 30 分以内に [15-error-budget-policy.md §4.1] 対応"

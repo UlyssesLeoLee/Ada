@@ -22,7 +22,9 @@ use ada_remediation::http::{
     router, AlertmanagerAlert, AlertmanagerPayload, AppState, WebhookResponse,
 };
 use ada_remediation::MemoryStore;
-use ada_remediation::{load_runbooks_from_dir, AlertEvent, RemediationAction, RemediationEngine};
+use ada_remediation::{
+    load_runbooks_from_dir, AlertEvent, ExecutorMode, RemediationAction, RemediationEngine,
+};
 use axum::body::Body;
 use axum::http::Request;
 use std::sync::Arc;
@@ -156,6 +158,7 @@ fn sample_action() -> RemediationAction {
         trigger: Trigger::Exact("DiskSpaceFillingFast".into()),
         severities: vec![],
         steps: vec![ActionStep::NotifySlack {
+            executor: ExecutorMode::DryRun,
             channel: "#ada-ops".into(),
             message: "disk low".into(),
         }],
@@ -164,12 +167,19 @@ fn sample_action() -> RemediationAction {
     }
 }
 
+/// Shared secret used by every E2E webhook call.
+const E2E_WEBHOOK_SECRET: &str = "E2E_SECRET";
+
 fn app_with_state() -> (axum::Router, Arc<RemediationEngine>, MemoryStore) {
     let engine = Arc::new(RemediationEngine::with_runbooks(vec![sample_action()]));
     let store = MemoryStore::new();
     let state = AppState {
         engine: engine.clone(),
         store: store.clone(),
+        // E2E tests use the same shared-secret
+        // scheme as production. Each test sends
+        // `x-webhook-token: E2E_SECRET` to authenticate.
+        auth: ada_remediation::auth::AuthState::enabled(E2E_WEBHOOK_SECRET),
     };
     (router(state), engine, store)
 }
@@ -200,6 +210,7 @@ async fn webhook_executes_and_records_history() {
                 .method("POST")
                 .uri("/webhook/alertmanager")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(disk_alert_webhook_body()))
                 .unwrap(),
         )
@@ -226,6 +237,7 @@ async fn second_webhook_is_skipped_by_cooldown() {
                 .method("POST")
                 .uri("/webhook/alertmanager")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(disk_alert_webhook_body()))
                 .unwrap(),
         )
@@ -241,6 +253,7 @@ async fn second_webhook_is_skipped_by_cooldown() {
                 .method("POST")
                 .uri("/webhook/alertmanager")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(disk_alert_webhook_body()))
                 .unwrap(),
         )
@@ -268,6 +281,7 @@ async fn manual_trigger_with_force_bypasses_cooldown() {
                 .method("POST")
                 .uri("/webhook/alertmanager")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(disk_alert_webhook_body()))
                 .unwrap(),
         )
@@ -282,6 +296,7 @@ async fn manual_trigger_with_force_bypasses_cooldown() {
                 .method("POST")
                 .uri("/remediation/trigger")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(
                     serde_json::to_vec(&serde_json::json!({
                         "alert_name": "DiskSpaceFillingFast",
@@ -314,6 +329,7 @@ async fn cooldowns_endpoint_reflects_live_state() {
                 .method("POST")
                 .uri("/webhook/alertmanager")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(disk_alert_webhook_body()))
                 .unwrap(),
         )

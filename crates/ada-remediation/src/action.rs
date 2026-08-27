@@ -15,6 +15,13 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// Re-exported for downstream `serde` convenience: see
+/// [`crate::executor::ExecutorMode`]. The two definitions are
+/// identical; this re-export keeps `action.rs` callers from
+/// having to import the executor module just to construct a
+/// step.
+pub use crate::executor::ExecutorMode;
+
 /// One declarative remediation action, loaded from a runbook
 /// JSON file (see `config/remediation/*.json`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -107,6 +114,10 @@ pub enum ActionStep {
     /// server side. The executor is pluggable: the default
     /// `DryRunHttp` records the intent and returns success.
     HttpCall {
+        /// v0.7.0: per-step executor override. Defaults to
+        /// `DryRun` so v0.6.0 runbook JSON files still parse.
+        #[serde(default = "default_executor_mode")]
+        executor: ExecutorMode,
         url: String,
         method: HttpMethod,
         #[serde(default)]
@@ -120,6 +131,8 @@ pub enum ActionStep {
     /// responsible for resolving the connection pool and
     /// calling `SELECT fn_name(args...)`.
     PgFunction {
+        #[serde(default = "default_executor_mode")]
+        executor: ExecutorMode,
         name: String,
         #[serde(default)]
         args: Vec<String>,
@@ -128,11 +141,18 @@ pub enum ActionStep {
     /// (no URL is stored in runbook files; the channel name is
     /// mapped to a webhook URL at executor time so secrets
     /// stay in env vars per `docs/observability/09-security-design.md`).
-    NotifySlack { channel: String, message: String },
+    NotifySlack {
+        #[serde(default = "default_executor_mode")]
+        executor: ExecutorMode,
+        channel: String,
+        message: String,
+    },
     /// Page an operator. Severity is `high` (page on-call) or
     /// `low` (open a ticket). `runbook_url` is shown in the
     /// pager payload so the responder can read the procedure.
     PageOperator {
+        #[serde(default = "default_executor_mode")]
+        executor: ExecutorMode,
         severity: PageSeverity,
         runbook_url: String,
     },
@@ -173,6 +193,11 @@ pub enum PageSeverity {
 
 const fn default_step_timeout_secs() -> u64 {
     30
+}
+
+#[allow(dead_code)]
+const fn default_executor_mode() -> ExecutorMode {
+    ExecutorMode::DryRun
 }
 
 /// Result of executing a remediation action. Per-step results

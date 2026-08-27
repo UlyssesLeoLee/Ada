@@ -15,6 +15,7 @@
 
 use crate::action::ActionOutcome;
 use crate::alert::{AlertEvent, AlertStatus};
+use crate::auth::{AuthError, AuthState, HEADER_NAME};
 use crate::engine::RemediationEngine;
 use crate::error::RemediationError;
 use crate::history::{HistoryQuery, MemoryStore};
@@ -31,6 +32,11 @@ use std::sync::Arc;
 pub struct AppState {
     pub engine: Arc<RemediationEngine>,
     pub store: MemoryStore,
+    /// Webhook + manual-trigger shared-secret auth. The
+    /// v0.6.0 handlers accepted every request; v0.7.0
+    /// requires a matching `X-Webhook-Token` header on
+    /// every state-changing endpoint.
+    pub auth: AuthState,
 }
 
 /// Build the axum `Router`. The caller is responsible for
@@ -38,6 +44,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(handle_metrics))
         .route("/webhook/alertmanager", post(handle_alertmanager_webhook))
         .route("/remediation/history", get(handle_history))
         .route("/remediation/cooldowns", get(handle_cooldowns))
@@ -47,6 +54,33 @@ pub fn router(state: AppState) -> Router {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+// ----------------------------------------------------------------------
+// Prometheus exposition
+// ----------------------------------------------------------------------
+
+/// Render the current Prometheus snapshot. Mirrors the
+/// `/metrics` endpoint convention from `ada-telemetry`:
+/// plain text, no auth (relies on k8s `NetworkPolicy` to
+/// keep the path private to the cluster's Prometheus
+/// scraper).
+async fn handle_metrics(
+    State(state): State<AppState>,
+) -> ([(axum::http::HeaderName, &'static str); 1], String) {
+    // Update the cooldown gauge from the live in-memory
+    // store before rendering. Cheap: O(active count).
+    crate::metrics::set_cooldown_gauge(f64::from(
+        u32::try_from(state.store.active_cooldowns().len()).unwrap_or(u32::MAX),
+    ));
+    let body = crate::metrics::render();
+    (
+        [(
+            axum::http::HeaderName::from_static("content-type"),
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
 }
 
 // ----------------------------------------------------------------------
@@ -131,8 +165,18 @@ pub struct WebhookResponse {
 
 async fn handle_alertmanager_webhook(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<AlertmanagerPayload>,
 ) -> Result<Json<WebhookResponse>, HttpError> {
+    // Webhook auth. `check_token` returns
+    //   Ok(())                     - header matched
+    //   Err(AuthError::Disabled)   - no env var, fail-closed 503
+    //   Err(AuthError::MissingToken)  - 401
+    //   Err(AuthError::InvalidToken)  - 403
+    let provided = headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
+    if let Err(e) = state.auth.check_token(provided) {
+        return Err(map_auth_error(&e));
+    }
     let received = payload.alerts.len();
     let mut outcomes = Vec::new();
     let mut matched = 0;
@@ -255,8 +299,22 @@ pub struct ManualTriggerResponse {
 
 async fn handle_manual_trigger(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<ManualTriggerRequest>,
 ) -> Result<Json<ManualTriggerResponse>, HttpError> {
+    // Manual-trigger auth. Same scheme as the
+    // Alertmanager webhook — see
+    // [`crate::auth`] for the credential model and
+    // [`map_auth_error`] for the HTTP status mapping.
+    // The trigger endpoint can run runbooks with
+    // `force=true` to bypass cooldowns, so it is
+    // explicitly gated even though the
+    // `Alertmanager` webhook is the primary attack
+    // surface.
+    let provided = headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
+    if let Err(e) = state.auth.check_token(provided) {
+        return Err(map_auth_error(&e));
+    }
     let mut event = AlertEvent::builder(req.alert_name.clone())
         .with_status(AlertStatus::Firing)
         .build();
@@ -319,12 +377,36 @@ impl IntoResponse for HttpError {
     }
 }
 
+/// Map an [`AuthError`] to the appropriate HTTP status
+/// for the response body. Production wiring is
+/// fail-closed: a missing `REMEDIATION_WEBHOOK_SECRET`
+/// at startup yields 503 for every webhook request
+/// until the operator sets the var and restarts. This
+/// is the safe default — better to refuse traffic
+/// than to silently accept it.
+fn map_auth_error(e: &AuthError) -> HttpError {
+    match e {
+        AuthError::Disabled => HttpError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "webhook auth is disabled (REMEDIATION_WEBHOOK_SECRET unset)".into(),
+        ),
+        AuthError::MissingToken => HttpError(
+            StatusCode::UNAUTHORIZED,
+            "missing X-Webhook-Token header".into(),
+        ),
+        AuthError::InvalidToken => {
+            HttpError(StatusCode::FORBIDDEN, "invalid X-Webhook-Token".into())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::action::{ActionStep, RemediationAction, Trigger};
     use axum::body::Body;
     use axum::http::{Request, StatusCode as AxStatus};
+    use std::collections::BTreeMap;
     use std::time::Duration;
     use tower::ServiceExt;
 
@@ -335,6 +417,7 @@ mod tests {
             trigger: Trigger::Exact("DiskSpaceFillingFast".into()),
             severities: vec![],
             steps: vec![ActionStep::NotifySlack {
+                executor: crate::executor::ExecutorMode::DryRun,
                 channel: "#ada-ops".into(),
                 message: "disk low".into(),
             }],
@@ -343,10 +426,28 @@ mod tests {
         }
     }
 
+    /// Default app for tests that do not exercise
+    /// auth. Auth is disabled, which means the
+    /// webhook / trigger handlers return 503. Tests
+    /// that need auth wire up [`authed_app`].
     fn app() -> Router {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
+            auth: crate::auth::AuthState::disabled(),
+        };
+        router(state)
+    }
+
+    /// App with webhook auth enabled. The shared
+    /// secret is `TEST_SECRET`. Tests that exercise
+    /// the webhook / trigger paths send the matching
+    /// `X-Webhook-Token: TEST_SECRET` header.
+    fn authed_app() -> Router {
+        let state = AppState {
+            engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
+            store: MemoryStore::new(),
+            auth: crate::auth::AuthState::enabled("TEST_SECRET"),
         };
         router(state)
     }
@@ -367,12 +468,13 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_dispatches_matching_action() {
-        let r = app()
+        let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
                     .body(Body::from(
                         serde_json::to_vec(&AlertmanagerPayload {
                             version: Some("4".into()),
@@ -403,12 +505,13 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_with_unknown_alert_is_noop() {
-        let r = app()
+        let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
                     .body(Body::from(
                         serde_json::to_vec(&AlertmanagerPayload {
                             version: Some("4".into()),
@@ -442,6 +545,7 @@ mod tests {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
+            auth: crate::auth::AuthState::enabled("TEST_SECRET"),
         };
         let app = router(state);
         let r = app
@@ -451,6 +555,7 @@ mod tests {
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
                     .body(Body::from(
                         serde_json::to_vec(&AlertmanagerPayload {
                             version: Some("4".into()),
@@ -486,5 +591,192 @@ mod tests {
         let arr = v["history"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["action_id"], "disk-space-low");
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_serves_prometheus_text() {
+        // Install the recorder so `/metrics` returns real
+        // Prometheus text instead of the empty string.
+        let _ = crate::metrics::install();
+        let state = AppState {
+            engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
+            store: MemoryStore::new(),
+            auth: crate::auth::AuthState::disabled(),
+        };
+        let r = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::OK);
+        // Content-Type is the Prometheus text exposition
+        // format. `render()` may still be empty if no
+        // metric has been recorded yet, but the body must
+        // be ASCII text either way.
+        let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
+        let body = std::str::from_utf8(&body_bytes).expect("prometheus text is utf-8");
+        if !body.is_empty() {
+            // Every non-comment line must be a
+            // `name{labels} value` triple. Skip blank
+            // lines (Prometheus text ends with a trailing
+            // newline).
+            for line in body.lines() {
+                if line.starts_with('#') || line.trim().is_empty() {
+                    continue;
+                }
+                assert!(
+                    line.split_whitespace().count() >= 2,
+                    "malformed prometheus line: {line:?}"
+                );
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Webhook shared-secret auth (v0.7.0 hardening)
+    // ----------------------------------------------------------------------
+
+    /// The unit-level "valid token" path is already
+    /// covered by [`crate::auth::tests::valid_token_returns_ok`].
+    /// The end-to-end HTTP test below exercises the
+    /// header -> handler -> engine path.
+    #[tokio::test]
+    async fn webhook_accepts_valid_token() {
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
+                    .body(Body::from(
+                        serde_json::to_vec(&AlertmanagerPayload {
+                            version: Some("4".into()),
+                            status: Some("firing".into()),
+                            alerts: vec![],
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::OK);
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_missing_token() {
+        // Auth is enabled but the request omits the
+        // header. Expect 401 Unauthorized.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&AlertmanagerPayload {
+                            version: Some("4".into()),
+                            status: Some("firing".into()),
+                            alerts: vec![],
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_invalid_token() {
+        // Auth is enabled and the header is present but
+        // wrong. Expect 403 Forbidden.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-token", "WRONG-SECRET")
+                    .body(Body::from(
+                        serde_json::to_vec(&AlertmanagerPayload {
+                            version: Some("4".into()),
+                            status: Some("firing".into()),
+                            alerts: vec![],
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::FORBIDDEN);
+    }
+
+    // ----------------------------------------------------------------------
+    // Manual-trigger auth (v0.7.0 hardening, task 5)
+    // ----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn manual_trigger_requires_token() {
+        // Auth is enabled but the request omits the
+        // header. Expect 401 Unauthorized.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/remediation/trigger")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ManualTriggerRequest {
+                            alert_name: "DiskSpaceFillingFast".into(),
+                            labels: BTreeMap::new(),
+                            severity: Some("P2".into()),
+                            force: false,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn manual_trigger_accepts_valid_token() {
+        // Auth is enabled and the header is present
+        // and matches. Expect 200 OK.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/remediation/trigger")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
+                    .body(Body::from(
+                        serde_json::to_vec(&ManualTriggerRequest {
+                            alert_name: "DiskSpaceFillingFast".into(),
+                            labels: std::collections::BTreeMap::new(),
+                            severity: Some("P2".into()),
+                            force: true,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::OK);
+        let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
+        let resp: ManualTriggerResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(resp.matched, vec!["disk-space-low".to_string()]);
+        assert_eq!(resp.executed, 1);
     }
 }

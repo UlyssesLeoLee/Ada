@@ -1,0 +1,59 @@
+# SLO-REM-SLOW-BURN-72h
+# Auto-remediation SLO-004 (webhook success rate, 99.5%)
+# 72h short window × 360h (15d) long window, AND condition.
+# Burn Rate 1x → 28-day budget consumed in exactly 28 days.
+# This is the "baseline over-consumption" alert: it
+# fires if the SLO is being consumed at the
+# sustainable rate for too long, meaning historical
+# behavior is unsustainable.
+#
+# Source of truth: docs/observability/15-error-budget-policy.md §3.4
+# Related SLO: docs/observability/08-slo-design.md §11.2 (SLO-004)
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-remediation-slow-burn-72h
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/component: slo-alerts
+    app.kubernetes.io/part-of: ada-observability
+    slo: slo-004-remediation-webhook
+spec:
+  groups:
+    - name: slo.remediation.availability.slowBurn.72h
+      interval: 15m
+      rules:
+        - alert: SLO_Remediation_Availability_SlowBurn_72h
+          expr: |
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[72h]))
+              /
+              sum(rate(ada_remediation_actions_total[72h]))
+            ) > (1 * 0.005)
+            and
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[360h]))
+              /
+              sum(rate(ada_remediation_actions_total[360h]))
+            ) > (1 * 0.005)
+          for: 1h
+          labels:
+            severity: sev4
+            slo: slo-004-remediation-webhook
+            team: sre
+            service: ada-remediation
+            burn_rate: "1x"
+            window: "72h/360h"
+          annotations:
+            summary: "Auto-remediation SLO-004 ベースライン超過 (72h 窓で 1x Burn)"
+            description: |
+              Auto-remediation webhook success rate has been sustaining
+              1x burn for at least 1 hour over 72h short / 360h long
+              windows. Historical consumption is at the SLO's natural
+              rate; the SLO target itself may be infeasible. This
+              is the SRE review alert, not a paging alert.
+            runbook_url: https://wiki/runbooks/slo-rem-slow-burn-72h
+            error_budget_policy: docs/observability/15-error-budget-policy.md
+            slo_source: docs/observability/08-slo-design.md
+            action: "Slack #ada-sre-reports に投稿のみ / 翌営業日 SRE 週次レビューで SLO 妥当性再評価"

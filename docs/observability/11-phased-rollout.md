@@ -15,6 +15,7 @@
 |---|---|---|
 | v1.0.0 | 2026-08-20 | 初版（Phase 0-8、9 ヶ月計画） |
 | v1.1.0 | 2026-08-27 | Phase 8 Auto-remediation (v0.6.0 実装完了). §10 完了基準を "v0.6.0 実装完了" に更新、関連ドキュメント (14-auto-remediation.md) へのリンク追加。 |
+| v1.2.0 | 2026-08-27 | Phase 8.5 SRE ハードニング (v0.7.0 実装完了) を §11 として追加。Real executor / Prometheus exporter / hot-reload / shared-secret auth / SLO 7.5 の 5 atomic commits を完了基準に明記。関連ドキュメント (15-error-budget-policy.md) へのリンク追加。 |
 
 ---
 
@@ -30,10 +31,11 @@
 8. Phase 6: Alert
 9. Phase 7: SLO
 10. Phase 8: 自動化運用
-11. フェーズ移行判定（GATE）
-12. ロールバック計画
-13. 用語集
-14. 参考文献
+11. Phase 8.5: SRE ハードニング (v0.7.0)
+12. フェーズ移行判定（GATE）
+13. ロールバック計画
+14. 用語集
+15. 参考文献
 
 ---
 
@@ -425,7 +427,62 @@ curl -s 'http://loki.observability/loki/api/v1/query?query=sum(rate(tempo_spans_
 
 > 既知の制約 (v0.6.0 リリース時点): `HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` ステップは **dry-run パス**で動作。実 executor は v0.6.x で本実装に置換。`docs/observability/14-auto-remediation.md` §9 参照。
 
-## 11. フェーズ移行判定（GATE）
+## 11. Phase 8.5: SRE ハードニング (v0.7.0 実装完了)
+
+### 11.1 目標
+
+**Phase 8 で実装した Auto-remediation engine を、本番投入に耐える品質まで引き上げる**。v0.6.0 で残した 5 つの **known gap** ([14-auto-remediation.md §9](14-auto-remediation.md)) を解消する:
+
+1. `HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` が **dry-run のみ** → Real executor
+2. **Prometheus exporter なし** → `/metrics` エンドポイント + SLO Burn Rate
+3. **hot-reload なし** (runbook 更新にプロセス再起動が必要) → watcher
+4. **webhook 認証なし** → shared-secret + constant_time_eq
+5. **SLO が M-13 Gateway 用のみ** → Auto-remediation 専用の SLO 7.5
+
+### 11.2 作業 (5 atomic commits)
+
+| コミット | タスク | 成果物 | 状態 |
+|---|---|---|---|
+| **commit-1** | Prometheus exporter + `/metrics` | `crates/ada-remediation/src/metrics.rs` (350 行) + `GET /metrics` ルート | ✅ 完了 |
+| **commit-2** | hot-reload watcher | `src/watcher.rs` (~410 行、5s polling + 500ms debounce) + `Engine::reload_runbooks()` | ✅ 完了 (polling fallback; `notify` crate は offline cache 不可) |
+| **commit-3** | webhook shared-secret auth | `src/auth.rs` (~225 行、constant_time_eq) + `cargo: constant_time_eq 0.4` | ✅ 完了 (HMAC-SHA256 は v0.7.1 で `hmac` / `sha2` crate 取得後) |
+| **commit-4** | manual trigger auth | `http.rs` 拡張 (commit-3 と同じ secret 共有) | ✅ 完了 |
+| **commit-5** | SLO Phase 7.5 + Error Budget | `08-slo-design.md §11` + `15-error-budget-policy.md` (新) + `config/alertmanager/*.yaml` 4 ファイル | ✅ 完了 |
+
+> **commit-1 と同等だが先行**: v0.7.0 開始時に前任 worker が `31213a7` で **Real executor** (`StepExecutor` trait + Real/DryRun dispatch + LoggingClient) を commit 済み。v0.7.0 の 6 atomic commit (commit-1~5 + ドキュメント) はこの 1 commit を引き継ぐ。
+
+### 11.3 完了基準 (G8.5 ゲート)
+
+- [x] **Real executor** (`StepExecutor` trait + `RealExecutor` + `LoggingClient`) — `crates/ada-remediation/src/executor.rs`
+- [x] **Prometheus exporter** — `metrics.rs` + `GET /metrics` で `ada_remediation_actions_total` / `ada_remediation_action_duration_seconds` / `ada_remediation_engine_state_transitions_total` / `ada_remediation_cooldown_active` の 4 メトリクス公開
+- [x] **hot-reload watcher** — 5s polling + 500ms debounce + 3 unit test (file_addition / file_modification / debounce)
+- [x] **shared-secret auth** — `X-Webhook-Token` header + `constant_time_eq` 比較、起動時 `REMEDIATION_WEBHOOK_SECRET` env var 読み込み、missing で fail-closed 503
+- [x] **SLO 7.5** — SLI-005~008 / SLO-004~006、4 window multi-burn-rate (FAST 1h/6h + SLOW 24h/72h) + PrometheusRule 4 yaml
+- [x] **5-gate baseline** 通過 (check / test / clippy / fmt / clippy-workspace)
+- [x] **テスト数** — 50 unit (metrics+watcher+auth) + 8 E2E + 1 doc = 59 → v0.7.0 完了時点で 64+8+1=73 (+14 vs v0.6.0)
+- [ ] k8s deployment manifest — **v0.7.1** (parent brief で簡略化、本 commit では省略)
+
+### 11.4 既知の制約 (v0.7.0 リリース時点)
+
+| # | 内容 | 計画 |
+|---|---|---|
+| C-001 | `RealExecutor` の `NetworkClient` は `LoggingClient` (in-memory 記録) のみ。`reqwest` ベースの本実装は v0.7.1 (`reqwest` crate が offline cache で取得可能になり次第) | v0.7.1 |
+| C-002 | `notify` crate (FS event watcher) 不可。`polling` 5s + debounce で代用、最大 5 秒の staleness あり | v0.7.1 |
+| C-003 | Webhook 認証は shared-secret のみ。HMAC-SHA256 + per-request nonce は v0.7.1 (`hmac` / `sha2` crate 取得後) | v0.7.1 |
+| C-004 | `k8s deployment manifest` (Helm chart 同期 / NetworkPolicy) は本 commit では未実装 | v0.7.1 |
+| C-005 | `reqwest` / `sqlx` / `prometheus` 直接依存は offline cache 制約で不可。`metrics-exporter-prometheus` 0.18 経由で同等機能を実現 | 制約継続 |
+
+> 制約の詳細は [14-auto-remediation.md §12 既知の制約 (v0.7.0 リリース時点)](14-auto-remediation.md) を参照。
+
+### 11.5 関連ドキュメント
+
+- [`14-auto-remediation.md`](14-auto-remediation.md) — v0.7.0 ハードニングの実装詳細 (real executor / metrics / hot-reload / auth)
+- [`08-slo-design.md §11`](08-slo-design.md) — Auto-remediation 専用 SLO 7.5
+- [`15-error-budget-policy.md`](15-error-budget-policy.md) — Error Budget 行動契約 (本 Phase 8.5 で新規作成)
+
+---
+
+## 12. フェーズ移行判定（GATE）
 
 各フェーズ移行時に以下を判定：
 
@@ -442,7 +499,7 @@ curl -s 'http://loki.observability/loki/api/v1/query?query=sum(rate(tempo_spans_
 - 該当 Phase の改善 → 再判定
 - 2 回連続 NG → Phase 計画自体を見直し
 
-## 12. ロールバック計画
+## 13. ロールバック計画
 
 各 Phase で問題発生時のロールバック：
 
@@ -456,10 +513,11 @@ curl -s 'http://loki.observability/loki/api/v1/query?query=sum(rate(tempo_spans_
 | **P6** | Alert rule 無効化、AlertManager 再起動 |
 | **P7** | SLO Alert ルール無効化 |
 | **P8** | Auto-remediation CronJob 停止 |
+| **P8.5** | `REMEDIATION_WEBHOOK_SECRET` を unset にして再起動 → fail-closed 503 で全 webhook 拒否。`engine.reload_runbooks()` を呼ばずに watcher task を kill すれば hot-reload 停止。 |
 
 ロールバック時間目標：**RTO 15 分**（業務影響なし）
 
-## 13. 用語集
+## 14. 用語集
 
 | 用語 | 説明 |
 |---|---|
@@ -473,8 +531,10 @@ curl -s 'http://loki.observability/loki/api/v1/query?query=sum(rate(tempo_spans_
 | **RTO** | Recovery Time Objective |
 | **Sampling** | トレース採取率調整 |
 | **Burn Rate** | Error Budget 消費速度 |
+| **Hardening** | 本番投入前の信頼性強化（Phase 8.5 で実施） |
+| **Fail-Closed** | 認証/外部依存が失敗したときに拒否する設計（Auto-remediation のデフォルト） |
 
-## 14. 参考文献
+## 15. 参考文献
 
 1. Google SRE Book - Implementing SLOs  
    <https://sre.google/workbook/implementing-slos/>

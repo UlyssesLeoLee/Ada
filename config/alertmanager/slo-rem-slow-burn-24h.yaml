@@ -1,0 +1,54 @@
+# SLO-REM-SLOW-BURN-24h
+# Auto-remediation SLO-004 (webhook success rate, 99.5%)
+# 24h short window × 120h long window, AND condition.
+# Burn Rate 3x → 28-day budget consumed in ~10 days.
+#
+# Source of truth: docs/observability/15-error-budget-policy.md §3.3
+# Related SLO: docs/observability/08-slo-design.md §11.2 (SLO-004)
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-remediation-slow-burn-24h
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/component: slo-alerts
+    app.kubernetes.io/part-of: ada-observability
+    slo: slo-004-remediation-webhook
+spec:
+  groups:
+    - name: slo.remediation.availability.slowBurn.24h
+      interval: 5m
+      rules:
+        - alert: SLO_Remediation_Availability_SlowBurn_24h
+          expr: |
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[24h]))
+              /
+              sum(rate(ada_remediation_actions_total[24h]))
+            ) > (3 * 0.005)
+            and
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[120h]))
+              /
+              sum(rate(ada_remediation_actions_total[120h]))
+            ) > (3 * 0.005)
+          for: 30m
+          labels:
+            severity: sev3
+            slo: slo-004-remediation-webhook
+            team: sre
+            service: ada-remediation
+            burn_rate: "3x"
+            window: "24h/120h"
+          annotations:
+            summary: "Auto-remediation SLO-004 緩速消費 (24h 窓で 3x Burn)"
+            description: |
+              Auto-remediation webhook success rate has been burning the
+              28-day error budget at 3x for at least 30 minutes. If
+              sustained, the budget will be exhausted in ~10 days.
+              Target: 99.5% (SLO-004).
+            runbook_url: https://wiki/runbooks/slo-rem-slow-burn-24h
+            error_budget_policy: docs/observability/15-error-budget-policy.md
+            slo_source: docs/observability/08-slo-design.md
+            action: "Slack #ada-ops 通知 / 当日 SRE デイリー Sync で議題化 / [15-error-budget-policy.md §4.2] 24 時間以内対応"

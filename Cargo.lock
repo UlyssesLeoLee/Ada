@@ -350,8 +350,14 @@ name = "ada-remediation"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
+ "base64 0.22.1",
+ "blake3",
  "chrono",
+ "constant_time_eq",
+ "metrics",
+ "metrics-exporter-prometheus",
  "parking_lot",
  "serde",
  "serde_json",

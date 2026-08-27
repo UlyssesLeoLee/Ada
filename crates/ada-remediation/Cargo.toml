@@ -44,10 +44,36 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Async-friendly shared state
 parking_lot = "0.12"
 
+# v0.7.0 hardening: metrics facade + Prometheus text-format renderer.
+# Same versions as ada-telemetry (see `ada-telemetry/Cargo.toml`
+# `prometheus` feature). Default-features = false so we do not
+# pull in the optional HTTP listener (we render Prometheus text
+# from inside the axum `/metrics` route instead).
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
+
+# v0.7.0 hardening: keyed-hash MAC for webhook HMAC auth. v0.7.0
+# uses blake3 keyed-hash (the `hmac`/`sha2`/`subtle` crates are
+# not in the offline `Cargo.lock`; v0.7.1 swaps to HMAC-SHA256 +
+# constant-time compare once those crates are vendored).
+base64 = "0.22"
+blake3 = "1.8"
+
+# v0.7.0 hardening: constant-time compare for the
+# shared-secret webhook token. Reused as a transitive
+# dep of `blake3`, so this line does not pull any new
+# crate into the offline cache.
+constant_time_eq = "0.4"
+
+# v0.7.0 hardening: object-safe async trait for `StepExecutor`.
+# `dyn StepExecutor` is held by the engine, so the impl needs
+# `#[async_trait]` (native RPITIT is not object-safe).
+async-trait = "0.1"
+
 [dev-dependencies]
 # In-memory store for the E2E test does not need sqlx; we exercise
 # the full engine through public APIs.
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
 
