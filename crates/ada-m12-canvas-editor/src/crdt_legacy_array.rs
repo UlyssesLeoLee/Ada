@@ -27,12 +27,10 @@
 
 #![cfg(feature = "legacy-array")]
 
+use yrs::types::Value;
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{
-    Any, Array, ArrayRef, Doc, Map, MapPrelim, MapRef, ReadTxn, StateVector, Transact,
-};
-use yrs::types::Value;
+use yrs::{Any, Array, ArrayRef, Doc, Map, MapPrelim, MapRef, ReadTxn, StateVector, Transact};
 
 use crate::canvas::{Canvas, Edge};
 use crate::error::CanvasError;

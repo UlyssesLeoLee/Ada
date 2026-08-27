@@ -104,10 +104,10 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use yrs::types::Value;
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Any, Doc, Map, MapPrelim, MapRef, ReadTxn, StateVector, Transact};
-use yrs::types::Value;
 
 use crate::canvas::{Canvas, Edge};
 use crate::error::CanvasError;
@@ -510,11 +510,7 @@ pub fn remove_element(doc: &Doc, id: NodeId) -> Result<bool, CanvasError> {
 /// # Errors
 ///
 /// Returns [`CanvasError::BackendError`] on yrs failure.
-pub fn update_element(
-    doc: &Doc,
-    id: NodeId,
-    update: ElementUpdate,
-) -> Result<bool, CanvasError> {
+pub fn update_element(doc: &Doc, id: NodeId, update: ElementUpdate) -> Result<bool, CanvasError> {
     if update.is_empty() {
         // Still check existence so the caller gets a
         // useful bool.
@@ -845,8 +841,7 @@ fn port_key(element_id: NodeId, port_id: uuid::Uuid) -> String {
 
 fn read_element_snapshot(map: &MapRef, txn: &impl ReadTxn) -> ElementSnapshot {
     let id_str = string_field(map, txn, F_ID).unwrap_or_default();
-    let id = uuid::Uuid::parse_str(&id_str)
-        .map_or_else(|_| uuid::Uuid::nil(), uuid::Uuid::from);
+    let id = uuid::Uuid::parse_str(&id_str).map_or_else(|_| uuid::Uuid::nil(), uuid::Uuid::from);
     let kind = string_field(map, txn, F_KIND).map_or(NodeKind::Block, |s| kind_parse(&s));
     let x = int_field(map, txn, F_X).unwrap_or(0);
     let y = int_field(map, txn, F_Y).unwrap_or(0);
@@ -885,7 +880,13 @@ fn read_ports_for_element(txn: &impl ReadTxn, element_id: NodeId) -> Vec<PortSna
         let label = string_field(&pm, txn, F_PORT_LABEL).unwrap_or_default();
         let x = int_field(&pm, txn, F_PORT_X).unwrap_or(0);
         let y = int_field(&pm, txn, F_PORT_Y).unwrap_or(0);
-        out.push(PortSnapshot { id: port_id, kind, label, x, y });
+        out.push(PortSnapshot {
+            id: port_id,
+            kind,
+            label,
+            x,
+            y,
+        });
     }
     out
 }
@@ -1013,11 +1014,7 @@ pub fn doc_from_canvas(canvas: &Canvas) -> Doc {
 /// element exists, `false` if the element id was not found.
 /// If a port with the same `${element_id}::${port_id}` key
 /// already exists, this updates its fields in place (idempotent).
-pub fn add_port(
-    doc: &Doc,
-    element_id: NodeId,
-    port: PortSnapshot,
-) -> Result<bool, CanvasError> {
+pub fn add_port(doc: &Doc, element_id: NodeId, port: PortSnapshot) -> Result<bool, CanvasError> {
     // 1. Make sure the element exists. (A no-op update of
     //    a missing element is still a no-op, so we return
     //    `false` here to let the caller distinguish.)
@@ -1161,6 +1158,7 @@ mod tests {
 
         let doc_a = server_doc(&Canvas::new("c")); // empty
         let doc_b = server_doc(&Canvas::new("c")); // empty
+
         // Seed both with the same shared element.
         for doc in [&doc_a, &doc_b] {
             insert_element(doc, &shared_node).expect("seed");
@@ -1186,8 +1184,14 @@ mod tests {
             txn.apply_update(u);
         }
         // Both replicas should report the element as absent.
-        assert!(get_element(&doc_a, NodeId(shared_id)).is_none(), "a: should be absent");
-        assert!(get_element(&doc_b, NodeId(shared_id)).is_none(), "b: should be absent");
+        assert!(
+            get_element(&doc_a, NodeId(shared_id)).is_none(),
+            "a: should be absent"
+        );
+        assert!(
+            get_element(&doc_b, NodeId(shared_id)).is_none(),
+            "b: should be absent"
+        );
     }
 
     /// v0.7.0 fix: two replicas insert the *same* element id
@@ -1243,8 +1247,18 @@ mod tests {
             insert_element(doc, &node).expect("seed");
         }
         // a moves to (100, 100), b moves to (200, 200).
-        update_element(&doc_a, NodeId(shared_id), ElementUpdate::new().position(Position::new(100, 100))).expect("a update");
-        update_element(&doc_b, NodeId(shared_id), ElementUpdate::new().position(Position::new(200, 200))).expect("b update");
+        update_element(
+            &doc_a,
+            NodeId(shared_id),
+            ElementUpdate::new().position(Position::new(100, 100)),
+        )
+        .expect("a update");
+        update_element(
+            &doc_b,
+            NodeId(shared_id),
+            ElementUpdate::new().position(Position::new(200, 200)),
+        )
+        .expect("b update");
         // Cross-sync.
         let upd_a = encode_state_as_update(&doc_a);
         let upd_b = encode_state_as_update(&doc_b);
@@ -1260,7 +1274,10 @@ mod tests {
         let snap_a = get_element(&doc_a, NodeId(shared_id)).expect("a present");
         let snap_b = get_element(&doc_b, NodeId(shared_id)).expect("b present");
         // Converge: same position on both sides.
-        assert_eq!(snap_a.position, snap_b.position, "positions should converge");
+        assert_eq!(
+            snap_a.position, snap_b.position,
+            "positions should converge"
+        );
     }
 
     /// v0.7.0: concurrent updates to *different* fields of
@@ -1311,8 +1328,18 @@ mod tests {
         // Both sides now have the element under the same
         // inner YMap reference. Concurrent updates to
         // different fields:
-        update_element(&doc_a, NodeId(shared_id), ElementUpdate::new().position(Position::new(50, 60))).expect("a update");
-        update_element(&doc_b, NodeId(shared_id), ElementUpdate::new().label("from-b")).expect("b update");
+        update_element(
+            &doc_a,
+            NodeId(shared_id),
+            ElementUpdate::new().position(Position::new(50, 60)),
+        )
+        .expect("a update");
+        update_element(
+            &doc_b,
+            NodeId(shared_id),
+            ElementUpdate::new().label("from-b"),
+        )
+        .expect("b update");
         // Cross-sync.
         let upd_a = encode_state_as_update(&doc_a);
         let upd_b = encode_state_as_update(&doc_b);
@@ -1423,8 +1450,15 @@ mod tests {
         let names_a: Vec<&str> = snap_a.ports.iter().map(|p| p.label.as_str()).collect();
         let names_b: Vec<&str> = snap_b.ports.iter().map(|p| p.label.as_str()).collect();
         assert!(names_a.contains(&"out-a"), "a should have out-a");
-        assert!(names_a.contains(&"out-b"), "a should have out-b (merged from b)");
-        assert_eq!(names_a.len(), names_b.len(), "a and b should agree on port count");
+        assert!(
+            names_a.contains(&"out-b"),
+            "a should have out-b (merged from b)"
+        );
+        assert_eq!(
+            names_a.len(),
+            names_b.len(),
+            "a and b should agree on port count"
+        );
     }
 
     /// v0.7.0: two replicas remove the *same* port id
@@ -1668,8 +1702,14 @@ mod tests {
         // Different client ids must produce different
         // state-vector bytes (the header encodes the
         // client id in a varint).
-        assert_ne!(sv_a, sv_b, "different client ids must produce different state vectors");
-        assert_ne!(snap_a, snap_b, "different client ids must produce different update bytes");
+        assert_ne!(
+            sv_a, sv_b,
+            "different client ids must produce different state vectors"
+        );
+        assert_ne!(
+            snap_a, snap_b,
+            "different client ids must produce different update bytes"
+        );
         // And the state vector should not be empty (it has
         // at least the one client entry from the insert).
         assert!(!sv_a.is_empty());

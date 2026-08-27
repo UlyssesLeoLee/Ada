@@ -19,11 +19,11 @@ use ada_m12_canvas_editor::{
     encode_state_as_update, insert_element, iter_elements, merge_crdt_update, reconcile_with_crdt,
     Canvas, CanvasNode, ClientId, NodeKind, Position,
 };
+use yrs::types::Value;
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{Doc, ReadTxn, Transact};
-use yrs::types::Value;
 use yrs::Map;
+use yrs::{Doc, ReadTxn, Transact};
 
 /// Encode a doc's state vector for use as a `remote_state` arg
 /// in `merge_crdt_update`. Re-exposed here (not from the lib)

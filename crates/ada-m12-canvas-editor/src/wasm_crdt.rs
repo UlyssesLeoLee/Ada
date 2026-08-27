@@ -155,9 +155,7 @@ impl WasmCrdtDoc {
     #[wasm_bindgen(js_name = getElements)]
     pub fn get_elements(&self) -> Result<JsValue, JsError> {
         let arr: Vec<serde_json::Value> = crdt::iter_elements(&self.doc)
-            .map(|(_uuid, snap)| {
-                serde_json::to_value(&snap).unwrap_or(serde_json::Value::Null)
-            })
+            .map(|(_uuid, snap)| serde_json::to_value(&snap).unwrap_or(serde_json::Value::Null))
             .collect();
         serde_wasm_bindgen::to_value(&arr).map_err(|e| JsError::new(&e.to_string()))
     }
@@ -207,8 +205,7 @@ impl WasmCrdtDoc {
         }
         let p: Pos = serde_wasm_bindgen::from_value(json.clone())
             .map_err(|e| JsError::new(&e.to_string()))?;
-        let upd = crdt::ElementUpdate::new()
-            .position(crate::node::Position::new(p.x, p.y));
+        let upd = crdt::ElementUpdate::new().position(crate::node::Position::new(p.x, p.y));
         crdt::update_element(&self.doc, crate::node::NodeId(p.id), upd)
             .map_err(|e| JsError::new(&e.to_string()))
     }
@@ -217,8 +214,8 @@ impl WasmCrdtDoc {
     /// element existed. Mirrors `crdt::remove_element`.
     #[wasm_bindgen(js_name = removeElement)]
     pub fn remove_element(&mut self, id: &str) -> Result<bool, JsError> {
-        let uuid = uuid::Uuid::parse_str(id)
-            .map_err(|e| JsError::new(&format!("invalid uuid: {e}")))?;
+        let uuid =
+            uuid::Uuid::parse_str(id).map_err(|e| JsError::new(&format!("invalid uuid: {e}")))?;
         crdt::remove_element(&self.doc, crate::node::NodeId(uuid))
             .map_err(|e| JsError::new(&e.to_string()))
     }
