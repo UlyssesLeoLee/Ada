@@ -1,0 +1,44 @@
+# ALT-203 / CPUHigh — P3 (per 07-alert-policy.md §4.3).
+#
+# Fires when a host's CPU has been above 80% for 30 minutes.
+# P3 → email_digest receiver (per alertmanager.yml §route
+# §3). This is the "capacity-planning heads-up" alert: not an
+# incident, but a signal that the next deploy should bump
+# the pod's resources or scale out the deployment.
+#
+# Threshold rationale: 80% sustained is the boundary at
+# which 07-alert-policy.md §4.3 row ALT-203 starts paging
+# the on-call rotation. The 30-minute `for` matches the
+# design doc exactly; shorter windows (5m, 10m) cause too
+# many false positives during legitimate CPU spikes (e.g.
+# batch ETL windows).
+#
+# Phase 6 (this file): also feeds the SLO dashboard's
+# capacity-planning panel; the burn-rate column picks the
+# same time series for 7-day CPU pressure.
+
+groups:
+  - name: scaling_alert
+    interval: 30s
+    rules:
+      - alert: CPUHigh
+        expr: |
+          (
+            1
+            -
+            avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+          ) > 0.80
+        for: 30m
+        labels:
+          severity: P3
+          phase: "6"
+        annotations:
+          summary: "CPU > 80% on {{ $labels.instance }} for 30m"
+          description: |
+            CPU on instance {{ $labels.instance }} has been
+            above 80% for 30 minutes (current value:
+            {{ $value | humanizePercentage }}). Consider
+            raising requests/limits or scaling out the
+            deployment consuming this host.
+          runbook: "https://wiki.example/runbooks/cpu-high"
+          dashboard: "http://localhost:3000/d/app-overview"

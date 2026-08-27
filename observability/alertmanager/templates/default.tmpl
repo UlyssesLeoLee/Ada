@@ -1,0 +1,30 @@
+{{/*
+  default.tmpl — Catch-all template for receivers that don't
+  pick a more specific layout (e.g. the `webhook_default`
+  fallback). Keeping the named definition `default` lets
+  the webhook receiver reference it without forcing every
+  receiver to inline its own template.
+*/}}
+
+{{ define "default.text" }}
+[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}
+Severity: {{ .CommonLabels.severity }}
+Service:  {{ .CommonLabels.service }}
+
+{{ range .Alerts }}{{ .Annotations.summary }}
+{{ .Annotations.description }}
+{{ end }}
+{{ end }}
+
+{{ define "default.html" }}
+<!doctype html>
+<html><body>
+<h3>[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}</h3>
+<p>Severity: {{ .CommonLabels.severity }}<br>Service: {{ .CommonLabels.service }}</p>
+<ul>
+{{ range .Alerts }}
+  <li><b>{{ .Annotations.summary }}</b><br>{{ .Annotations.description }}</li>
+{{ end }}
+</ul>
+</body></html>
+{{ end }}

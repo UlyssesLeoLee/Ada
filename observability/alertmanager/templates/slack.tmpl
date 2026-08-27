@@ -1,0 +1,52 @@
+{{/*
+  slack.tmpl — Slack message templates.
+  Loaded by alertmanager via the `templates:` block in
+  alertmanager.yml. Defines named templates that the
+  `slack_configs` blocks reference.
+
+  Style guide:
+    - Plain text fallback is a single message; Alertmanager
+      builds the blocks from .Alerts.
+    - For richer formatting, downstream `slack_configs` can
+      override `text` directly in the YAML — these templates
+      are the *default* that the YAML calls when no override
+      is supplied.
+*/}}
+
+{{ define "slack.default.text" }}
+[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+Severity: {{ .CommonLabels.severity }}
+Service:  {{ .CommonLabels.service }}
+Cluster:  {{ .CommonLabels.cluster }}
+
+{{ range .Alerts }}
+• {{ .Annotations.summary }}
+  {{ .Annotations.description }}
+{{ end }}
+{{ end }}
+
+{{ define "slack.p1.text" }}
+:red_circle: *P1 — {{ .Status | toUpper }}* — {{ .CommonLabels.alertname }}
+> *Service:* {{ .CommonLabels.service }}
+> *Cluster:* {{ .CommonLabels.cluster }}
+> *Runbook:* {{ .CommonAnnotations.runbook }}
+
+{{ range .Alerts }}{{ .Annotations.description }}
+{{ end }}
+{{ end }}
+
+{{ define "slack.p2.text" }}
+:warning: *P2 — {{ .Status | toUpper }}* — {{ .CommonLabels.alertname }}
+*Service:* {{ .CommonLabels.service }}
+
+{{ range .Alerts }}{{ .Annotations.description }}
+{{ end }}
+{{ end }}
+
+{{ define "slack.p3.text" }}
+:information_source: *P3 — {{ .Status | toUpper }}* — {{ .CommonLabels.alertname }}
+*Service:* {{ .CommonLabels.service }}
+
+{{ range .Alerts }}{{ .Annotations.description }}
+{{ end }}
+{{ end }}

@@ -76,3 +76,19 @@ datasources:
       sslmode: disable
       postgresVersion: 1806
       timescaledb: false
+
+  # --------------------------------------------------------------------
+  # Alertmanager (Phase 6). Exposes the Alertmanager REST
+  # API to Grafana so dashboards can list firing alerts
+  # and silences. UID `alertmanager` is referenced from
+  # any alert-list panels added in Phase 6+ dashboards.
+  # --------------------------------------------------------------------
+  - name: Alertmanager
+    type: alertmanager
+    uid: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: true
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false

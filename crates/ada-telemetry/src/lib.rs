@@ -97,9 +97,6 @@ pub const LAYER: &str = "shared";
 /// ```no_run
 /// use ada_telemetry::{TelemetryConfig, init};
 ///
-/// ```no_run
-/// use ada_telemetry::{TelemetryConfig, init};
-///
 /// let cfg = TelemetryConfig::new("my-service");
 /// let _guard = init(cfg).expect("telemetry init");
 /// tracing::info!("ready");

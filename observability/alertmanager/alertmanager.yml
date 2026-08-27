@@ -1,0 +1,224 @@
+# Alertmanager configuration — Ada observability Phase 6.
+#
+# Three-level severity scheme per task assignment (P1 / P2 / P3).
+# Mapping from the four-level design in 07-alert-policy.md
+# (sev1 / sev2 / sev3 / sev4):
+#
+#   Phase 6 (this file)   Design doc 07
+#   ──────────────────    ──────────────
+#   P1                    sev1
+#   P2                    sev2
+#   P3                    sev3 + sev4  (digest / next-business-day)
+#
+# Receivers in this file are placeholders. Real integration
+# (PagerDuty routing key, Slack webhook URL, SMTP password)
+# is supplied at runtime through env vars per
+# observability/.env.example. The `PLACEHOLDER` strings below
+# are deliberately non-secret so the file can be committed
+# without exposing real credentials — see
+# docs/observability/09-security-design.md §4 for the secret
+# handling policy.
+#
+# Source of truth: docs/observability/07-alert-policy.md,
+# docs/observability/11-phased-rollout.md §8 (Phase 6),
+# docs/observability/10-deployment-design.md §4.6 (Helm
+# AlertManager values).
+
+global:
+  resolve_timeout: 5m
+  # SMTP / API URLs are environment-overridable so the same
+  # config file works in dev (no real integration) and prod
+  # (real keys injected via .env / Kubernetes Secret).
+  smtp_smarthost: '${SMTP_SMARTHOST}'
+  smtp_from: '${SMTP_FROM:-alerts@ada.local}'
+  smtp_require_tls: '${SMTP_REQUIRE_TLS:-true}'
+  smtp_auth_username: '${SMTP_AUTH_USERNAME:-}'
+  smtp_auth_password: '${SMTP_AUTH_PASSWORD:-}'
+
+# Templates are loaded from the templates/ directory (mounted
+# into the container at /etc/alertmanager/templates/).
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# ----------------------------------------------------------------------
+# Route tree.
+#
+# Order of evaluation: Alertmanager walks the routes array
+# top-to-bottom and dispatches to the first match. `continue:
+# true` lets a single alert hit multiple receivers (P1 still
+# pages the on-call *and* posts to the awareness channel, per
+# 07-alert-policy.md §5).
+#
+# Five routes in this tree:
+#   1. P1 (sev1)        → pagerduty_critical  (10s, 1h repeat)
+#   2. P2 (sev2)        → slack_warnings      (30s, 4h repeat)
+#   3. P3 (sev3+sev4)   → email_digest        (5m,  24h repeat)
+#   4. cluster-wide     → slack_cluster       (only alertname
+#                                               matches Cluster*)
+#   5. default fallback → webhook_default
+# ----------------------------------------------------------------------
+route:
+  receiver: webhook_default
+  group_by:
+    - alertname
+    - service
+    - severity
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # ---- 1. P1 — page on-call within 5 minutes ----
+    - matchers:
+        - severity = "P1"
+      receiver: pagerduty_critical
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      continue: true
+
+    # ---- 2. P2 — slack #incident within 30 minutes ----
+    - matchers:
+        - severity = "P2"
+      receiver: slack_warnings
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      continue: true
+
+    # ---- 3. P3 — daily email digest ----
+    - matchers:
+        - severity = "P3"
+      receiver: email_digest
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 24h
+
+    # ---- 4. Cluster-wide events go to a separate channel ----
+    - matchers:
+        - alertname =~ "Cluster.*"
+      receiver: slack_cluster
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+
+# ----------------------------------------------------------------------
+# Inhibit rules.
+#
+# Modeled on 07-alert-policy.md §7.1. When a "source" alert is
+# firing, matching "target" alerts are silently suppressed so
+# operators don't get paged for every downstream symptom of a
+# single root cause.
+# ----------------------------------------------------------------------
+inhibit_rules:
+  # ServiceDown (P1) → silence the same service's P2/P3 noise
+  - source_matchers:
+      - alertname = "ServiceDown"
+    target_matchers:
+      - severity =~ "P2|P3"
+    equal:
+      - service
+
+  # ClusterDegraded → silence per-Pod noise
+  - source_matchers:
+      - alertname = "ClusterDegraded"
+    target_matchers:
+      - alertname =~ "Pod.*"
+    equal:
+      - service
+
+  # DatabaseDown (P1) → silence DB.* sub-alerts
+  - source_matchers:
+      - alertname = "DatabaseDown"
+    target_matchers:
+      - alertname =~ "Database.*|DB.*"
+    equal:
+      - service
+
+  # PlannedMaintenance → silence every other alert on the cluster
+  - source_matchers:
+      - alertname = "PlannedMaintenance"
+    target_matchers:
+      - severity =~ "P1|P2|P3"
+    equal:
+      - service
+
+# ----------------------------------------------------------------------
+# Receivers.
+#
+# Every receiver has a single integration point. Adding
+# multiple integrations to one receiver is supported (e.g. a
+# PagerDuty config + a Slack config on the same receiver name),
+# but the current tree keeps them 1:1 for traceability.
+# ----------------------------------------------------------------------
+receivers:
+  # ----- default fallback (webhook placeholder) -----
+  - name: webhook_default
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+        max_alerts: 0  # 0 == unlimited
+        title: '{{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          [{{ .Status }}] {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+  # ----- P1 → PagerDuty critical -----
+  - name: pagerduty_critical
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+        send_resolved: true
+        severity: critical
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          severity: '{{ .CommonLabels.severity }}'
+          cluster: '{{ .CommonLabels.cluster }}'
+          phase: '{{ .CommonLabels.phase }}'
+        links:
+          - href: '{{ .CommonAnnotations.dashboard }}'
+            text: 'Grafana dashboard'
+          - href: '{{ .CommonAnnotations.runbook }}'
+            text: 'Runbook'
+
+  # ----- P2 → Slack #ada-warnings -----
+  - name: slack_warnings
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_WARNINGS}'
+        channel: '#ada-warnings'
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+        text: |-
+          *Severity:* {{ .CommonLabels.severity }}
+          *Service:* {{ .CommonLabels.service }}
+          {{ range .Alerts }}{{ .Annotations.description }}
+          {{ end }}
+
+  # ----- P3 → email digest -----
+  - name: email_digest
+    email_configs:
+      - to: '${ALERT_DIGEST_TO:-oncall@ada.local}'
+        send_resolved: true
+        headers:
+          Subject: '[Ada Observability] {{ .GroupLabels.alertname }} ({{ .Status }})'
+        html: '{{ template "email.digest.html" . }}'
+        text: '{{ template "email.digest.text" . }}'
+
+  # ----- cluster-wide → Slack #ada-cluster -----
+  - name: slack_cluster
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_CLUSTER}'
+        channel: '#ada-cluster'
+        send_resolved: true
+        title: '[CLUSTER] {{ .GroupLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}{{ .Annotations.description }}
+          {{ end }}
+
+# ----------------------------------------------------------------------
+# Silences are stored at runtime in the Alertmanager data
+# directory (see docker-compose volume `alertmanager-data`).
+# Operators add silences through the Alertmanager UI at
+# http://localhost:9093 — no file-level config required.
+# ----------------------------------------------------------------------
