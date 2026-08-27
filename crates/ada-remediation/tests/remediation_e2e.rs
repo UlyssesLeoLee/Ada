@@ -296,6 +296,7 @@ async fn manual_trigger_with_force_bypasses_cooldown() {
                 .method("POST")
                 .uri("/remediation/trigger")
                 .header("content-type", "application/json")
+                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
                 .body(Body::from(
                     serde_json::to_vec(&serde_json::json!({
                         "alert_name": "DiskSpaceFillingFast",

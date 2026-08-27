@@ -297,11 +297,24 @@ pub struct ManualTriggerResponse {
 
 async fn handle_manual_trigger(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<ManualTriggerRequest>,
 ) -> Result<Json<ManualTriggerResponse>, HttpError> {
-    // Manual-trigger auth is added in v0.7.0 task 5
-    // (commit-4). For task 3 (commit-3) only the
-    // Alertmanager webhook is gated.
+    // Manual-trigger auth. Same scheme as the
+    // Alertmanager webhook — see
+    // [`crate::auth`] for the credential model and
+    // [`map_auth_error`] for the HTTP status mapping.
+    // The trigger endpoint can run runbooks with
+    // `force=true` to bypass cooldowns, so it is
+    // explicitly gated even though the
+    // `Alertmanager` webhook is the primary attack
+    // surface.
+    let provided = headers
+        .get(HEADER_NAME)
+        .and_then(|v| v.to_str().ok());
+    if let Err(e) = state.auth.check_token(provided) {
+        return Err(map_auth_error(e));
+    }
     let mut event = AlertEvent::builder(req.alert_name.clone())
         .with_status(AlertStatus::Firing)
         .build();
@@ -704,5 +717,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), AxStatus::FORBIDDEN);
+    }
+
+    // ----------------------------------------------------------------------
+    // Manual-trigger auth (v0.7.0 hardening, task 5)
+    // ----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn manual_trigger_requires_token() {
+        // Auth is enabled but the request omits the
+        // header. Expect 401 Unauthorized.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/remediation/trigger")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ManualTriggerRequest {
+                            alert_name: "DiskSpaceFillingFast".into(),
+                            labels: Default::default(),
+                            severity: Some("P2".into()),
+                            force: false,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn manual_trigger_accepts_valid_token() {
+        // Auth is enabled and the header is present
+        // and matches. Expect 200 OK.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/remediation/trigger")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
+                    .body(Body::from(
+                        serde_json::to_vec(&ManualTriggerRequest {
+                            alert_name: "DiskSpaceFillingFast".into(),
+                            labels: Default::default(),
+                            severity: Some("P2".into()),
+                            force: true,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::OK);
+        let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
+        let resp: ManualTriggerResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(resp.matched, vec!["disk-space-low".to_string()]);
+        assert_eq!(resp.executed, 1);
     }
 }
