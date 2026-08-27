@@ -14,6 +14,7 @@
 | バージョン | 日付 | 変更内容 |
 |---|---|---|
 | v1.0.0 | 2026-08-20 | 初版（Phase 0-8、9 ヶ月計画） |
+| v1.1.0 | 2026-08-27 | Phase 8 Auto-remediation (v0.6.0 実装完了). §10 完了基準を "v0.6.0 実装完了" に更新、関連ドキュメント (14-auto-remediation.md) へのリンク追加。 |
 
 ---
 
@@ -389,25 +390,40 @@ curl -s 'http://loki.observability/loki/api/v1/query?query=sum(rate(tempo_spans_
 
 **運用自動化 + Auto-remediation**。手動運用を極小化。
 
+> **v0.6.0 実装完了 (2026-08-27)** — Phase 8 の **Auto-remediation
+> 部分** (Runbook 自動化 + セルフ healing) は v0.6.0 で実装完了。
+> 詳細は [`14-auto-remediation.md`](14-auto-remediation.md) 参照。
+> ChatOps / 容量予測 / DR 訓練 は v0.6.x follow-up。
+
 ### 10.2 作業
 
-| タスク | 担当 | 期間 | 成果物 |
-|---|---|---|---|
-| ChatOps 統合 | SRE | 1 週 | Slack からクエリ / 対応 |
-| Auto-scaling チューニング | SRE | 1 週 | HPA 設定最適化 |
-| Runbook 自動化 | SRE | 2 週 | 5 シナリオ自動対応 |
-| Auto-remediation | SRE | 2 週 | セルフ healing |
-| 定期レポート自動配信 | SRE | 1 週 | 日次 / 週次 / 月次 |
-| 容量予測 | SRE + Data | 2 週 | ML ベース予測 |
-| コスト最適化 | SRE | 1 週 | 未使用 exporter 削減等 |
-| 訓練（DR 訓練） | SRE + 全員 | 1 週 | 四半期訓練実施 |
+| タスク | 担当 | 期間 | 成果物 | 状態 |
+|---|---|---|---|---|
+| ChatOps 統合 | SRE | 1 週 | Slack からクエリ / 対応 | v0.6.x |
+| Auto-scaling チューニング | SRE | 1 週 | HPA 設定最適化 | v0.6.x |
+| **Runbook 自動化** | SRE | 2 週 | 5 シナリオ自動対応 | **v0.6.0 完了** (`config/remediation/*.json`) |
+| **Auto-remediation engine** | SRE | 2 週 | セルフ healing | **v0.6.0 完了** (`crates/ada-remediation/`) |
+| **永続履歴 + cooldown** | SRE | (随伴) | `remediation_history` + `remediation_cooldowns` | **v0.6.0 完了** (`V003__phase8_remediation.sql`) |
+| **Grafana dashboard 80-01** | SRE | (随伴) | auto-remediation overview | **v0.6.0 完了** (`phase8-remediation-overview.json`) |
+| 定期レポート自動配信 | SRE | 1 週 | 日次 / 週次 / 月次 | v0.6.x |
+| 容量予測 | SRE + Data | 2 週 | ML ベース予測 | v0.6.x |
+| コスト最適化 | SRE | 1 週 | 未使用 exporter 削減等 | v0.6.x |
+| 訓練（DR 訓練） | SRE + 全員 | 1 週 | 四半期訓練実施 | v0.6.x |
 
-### 10.3 完了基準（G8 ゲート）
+### 10.3 完了基準（G8 ゲート — v0.6.0 時点）
 
-- [x] アラート対応の 70% が自動化
-- [x] 手動運用タスク < 5 / 日
-- [x] 容量予測モデル稼働
-- [x] DR 訓練完了
+- [x] **Auto-remediation engine** (`crates/ada-remediation/`) — Idle / Evaluating / Executing / Cooldown / Failed / Retrying 状態機械 + 6 種類 step (RunCommand / HttpCall / PgFunction / NotifySlack / PageOperator / Sequence) + axum HTTP サーバ (`/webhook/alertmanager` / `/remediation/history` / `/remediation/cooldowns` / `/remediation/trigger` / `/health`)
+- [x] **5 デフォルト runbook** (`config/remediation/*.json`) — DiskSpaceFillingFast / ServiceDown / DBConnectionPoolExhausted / SLIBurnRateFast / SLIBurnRateSlow を cover
+- [x] **永続 cooldown テーブル** + 2 PL/pgSQL 関数 (`remediation_record_execution`, `remediation_check_cooldown`)
+- [x] **Grafana dashboard 80-01** — 24h count / success rate / top 5 alerts / active cooldowns
+- [x] **5-gate baseline** 通過 (check / test / clippy / fmt / clippy-workspace)
+- [x] **E2E integration test** (8 ケース in `tests/remediation_e2e.rs`)
+- [ ] アラート対応の 70% が自動化 — **v0.6.x** (残り alert の runbook 化)
+- [ ] ChatOps 統合 — **v0.6.x**
+- [ ] 容量予測モデル — **v0.6.x**
+- [ ] DR 訓練 — **v0.6.x**
+
+> 既知の制約 (v0.6.0 リリース時点): `HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` ステップは **dry-run パス**で動作。実 executor は v0.6.x で本実装に置換。`docs/observability/14-auto-remediation.md` §9 参照。
 
 ## 11. フェーズ移行判定（GATE）
 

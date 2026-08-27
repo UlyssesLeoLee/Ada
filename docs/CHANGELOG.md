@@ -45,7 +45,7 @@
 | v2.6.0 | 2026-08-27 | v0.3.0: m12 bevy_egui 集成（双向 ECS↔Canvas + 拖拽 + 属性面板） + observability Phase 6（Alertmanager + MinIO Long-term storage）| Mavis（per DEC-008）| TBD | TBD |
 | v2.7.0 | 2026-08-27 | v0.4.0: observability Phase 4（Distributed Trace: Tempo + W3C + tail sampling） + Phase 7（SLO/SLI framework: 4 SLI + 3 SLO + 4 Burn Rate alert + 3 dashboard）| Mavis（per DEC-008）| TBD | TBD |
 | v2.8.0 | 2026-08-27 | v0.5.0: observability Phase 5 Dashboard 全面化（10 dashboards total）+ m12 server-side reconciliation（M-12 §3.6 客户端乐观更新+服务端校正）| Mavis（per DEC-008）| TBD | TBD |
-| v2.9.0 | 2026-08-27 | v0.6.0 第1段: m12 canvas editor 从 LWW 迁到 Yrs CRDT（同步 API: merge_crdt_update / encode_state_as_update / reconcile_with_crdt；LWW 保留为 `legacy-lww` feature）；observability Auto-remediation 留下段 | Mavis（per DEC-008）| TBD | TBD |
+| v2.9.0 | 2026-08-27 | v0.6.0: observability Phase 8 Auto-remediation（`crates/ada-remediation` + 5 default runbooks + V003 PL/pgSQL `remediation_history`/`remediation_cooldowns` + Grafana dashboard 80-01 + `docs/observability/14-auto-remediation.md`）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1461,75 +1461,126 @@ docs/tests/
 - SLO Phase 7.5 (更多 service 覆盖 / 跨 region / Error Budget policy 文档)
 - CHANGELOG v2.9.0 留给 v0.6.0 阶段
 
----
+## 2026-08-27 — v0.6.0 (v2.9.0)
 
-## 2026-08-27 — v0.6.0 第1段（v2.9.0）
+**変更種別**:m12 canvas editor 升级 CRDT (Yrs) + observability Phase 8 Auto-remediation
 
-**変更種別**：m12 canvas editor 从 LWW 迁到 Yrs CRDT
+**触发原因**:
 
-**触发原因**：
-
-- v0.5.0 release（per v2.8.0）后, 进入 v0.6.0 阶段（per docs/observability/11-phased-rollout.md §10）
+- v0.5.0 release (per v2.8.0) 完成后, 进入 v0.6.0 阶段
 - 范围由用户 2026-08-27 选定: CRDT (m12) + Auto-remediation (observability)
-- 本段仅含 m12 CRDT, Auto-remediation 留 v2.9.x 后续段
-- 1 worker (wt-m12-crdt) 单线推进, 3 原子 commit
+- 2 worker + 2 worktree 并行 (User 偏好子代理快速完成)
+- 这次 2 worker **都实际写了代码** + commit 完成, 5 门 root 跑 + 修 clippy
 
-**主要変更**：
+**主要変更**:
 
-- m12 引入 `yrs 0.18` (Yjs Rust port, MIT, offline 0.18.8 cached) — `crates/ada-m12-canvas-editor/Cargo.toml`
-- 新模块 `crates/ada-m12-canvas-editor/src/crdt.rs`（YDoc canvas types + sync API, gated by `--features crdt`）:
+### 1. m12 CRDT (Yrs) — v0.6.0 第1段 (per D-01 / 02-design-adrs.md)
+
+**new** (commit `c6d19cf`..`564bb01`, 5 atomic commits on `wt-m12-crdt`):
+
+- `crates/ada-m12-canvas-editor/Cargo.toml` — 加 `yrs 0.18` (offline cache 0.18.8) + `crdt` feature (默认 off) + `legacy-lww` feature (alias `server`, 保留 v0.5.0 LWW 行为) + 第 2 个 [[test]] 入口给 `crdt_sync`
+- `crates/ada-m12-canvas-editor/src/crdt.rs` (新, 817 lines) — YDoc canvas types + sync API
   - YDoc root layout: `meta` (YMap name/version) + `elements` (YArray of YMap) + `edges` (YArray of YMap)
-  - 每个 element = YMap (id/kind/x/y/label/ports/alive) — 字段级 LWW 让并发 move / edit 不同字段不丢
+  - 每个 element = YMap {id, kind, x, y, label, ports, alive} — 字段级 LWW 让并发 move / edit 不同字段不丢
   - `merge_crdt_update(doc, remote_state, update_bytes) -> Vec<u8>` — apply remote + return diff
   - `encode_state_as_update(doc) -> Vec<u8>` — full state snapshot
-  - `reconcile_with_crdt(server, client_update, client_version) -> CrdtReconcileResult` — end-to-end reconcile, server Canvas + client CRDT 互操作
+  - `reconcile_with_crdt(server, client_update, client_version) -> CrdtReconcileResult` — end-to-end reconcile, server Canvas (v0.5.0 数据) + client CRDT update 互操作
   - `CrdtReconcileResult { merged_state: Vec<u8>, new_version: u64 }` — serde-derived
-- LWW fallback: 新增 `legacy-lww` feature (alias `server`, 默认 off), 保留 v0.5.0 行为可切换
-- 8 lib unit tests (同步 roundtrip / 并发 insert/move/delete / 3-client 多 client / 1k elements 性能烟雾 / reconcile / malformed bytes 拒绝)
-- 1 integration test `crates/ada-m12-canvas-editor/tests/crdt_sync.rs` (3 客户端 star-shaped merge + server Canvas ↔ client CRDT 互操作)
+  - 8 lib unit tests (同步 roundtrip / 并发 insert/move/delete / 3-client 多 client / 1k elements 性能烟雾 / reconcile / malformed bytes 拒绝)
+- `crates/ada-m12-canvas-editor/src/lib.rs` — `pub mod crdt` + `pub use crdt::*` (under `crdt` feature)
+- `crates/ada-m12-canvas-editor/src/canvas.rs` / `server_recon.rs` — `from_parts` + LWW path 走 `legacy-lww` feature (v0.5.0 行为可切换)
+- `crates/ada-m12-canvas-editor/tests/crdt_sync.rs` (新, 153 lines) — 2 integration tests (3-client star-shaped merge + server Canvas ↔ client CRDT 互操作)
 - 文档:
-  - `crates/ada-m12-canvas-editor/CRDT.md` (新文件, Yrs 集成说明 / API / 迁移路径 / fallback 开关)
-  - `docs/modules/M-12-canvas-editor-frontend.md` §3.6 从 "server reconciliation" 改写为 "CRDT sync", 引用新 API
+  - `crates/ada-m12-canvas-editor/CRDT.md` (新, 194 lines): Yrs 集成说明 / API 表 / 迁移路径 / fallback 开关 / 已知限制 7 条 / 测试矩阵
+  - `docs/modules/M-12-canvas-editor-frontend.md` §3.6 从 "server reconciliation" 改写为 "CRDT sync" (3.6.1 子段), §5 用語集加 CRDT / Yrs / LWW (legacy) 三项
 
-**v0.5.0 → v0.6.0 迁移路径**（写在 CRDT.md）：
+**clippy hotfix** (commit `564bb01`):
+- `crdt.rs`: cast_possible_truncation on `f64 as i32` 加 explicit cast
+- `crdt.rs`: unused imports (Transact, WriteTxn) drop
+- `lib.rs`: cargo fmt 重排 mod 顺序 (按 cfg 排序, 不是 bug)
 
+**v0.5.0 → v0.6.0 迁移路径** (写在 CRDT.md §3):
 - v0.5.0 client (走 `server` feature) 与 v0.6.0 server (走 `crdt` feature) 兼容, m13 endpoint 透传 yrs update bytes
-- v0.6.0 完成后 (v0.7.0) 计划把 `server` 改默认 off + 把 server-recon 完整 deprecate
-- 元素去重 / port YArray 等限制走 v0.7.0
+- v0.6.0 → v0.7.0 计划: `server` 改默认 off + server-recon 完整 deprecate
+- 元素去重 / port YArray / edge dedup 等限制走 v0.7.0
 
-**5 门结果**（root 接手跑, 留 known gap 段）:
+### 2. observability Phase 8 Auto-remediation (per 11-phased-rollout.md §10)
 
-- check: PASS (release: 0.18.8 cached)
-- test: PASS (lib 27 + crdt unit 8 + integration 4 + crdt_sync 2 = 41 tests)
-- clippy: PASS (`-D warnings`)
+**new** (commit `8e4fc58`..`dec3941`, 8 atomic commits on `wt-obs-autoremediation`):
+
+- `crates/ada-remediation/` (新 crate, 9 src files + 1 test + Cargo.toml + README)
+  - `src/alert.rs` (171 lines) — `AlertEvent` + builder + template engine (handlebars-like)
+  - `src/action.rs` (383 lines) — `RemediationAction` + `ActionStep` enum (6 variants: RunCommand / HttpCall / PgFunction / NotifySlack / PageOperator / Wait) + hand-rolled glob matcher
+  - `src/state.rs` (90 lines) — `EngineState` (Idle / Evaluating / Executing / Cooldown / Failed / Retrying) + transition guard
+  - `src/config.rs` (122 lines) — `RunbookFile` + `load_runbooks_from_dir`
+  - `src/history.rs` (230 lines) — `MemoryStore` (in-memory cooldowns + history, pluggable trait for PG backing)
+  - `src/engine.rs` (368 lines) — `RemediationEngine` evaluate / execute + dry-run path
+  - `src/http.rs` (490 lines) — axum 0.7 router (5 endpoints: /webhook/alertmanager, /remediation/history, /remediation/cooldowns, /remediation/trigger, /healthz)
+  - `src/error.rs` (29 lines) — `RemediationError` (thiserror)
+  - 32 lib unit tests + 8 E2E tests + 1 doctest = 41 tests, 全 GREEN
+- `db/migrations/V003__phase8_remediation.sql` (新, 220 lines) — 2 tables (`remediation_history` / `remediation_cooldowns`) + 2 functions (`remediation_record_execution` / `remediation_check_cooldown`)
+  - 注: task spec 写 V006, 但本仓现存 V001 + V002, V003 是下一合法 slot
+- `db/tests/V003__phase8_remediation_test.sql` (新, 287 lines) — 7 SAVEPOINT test cases
+- `config/remediation/{disk-space-low,service-down,db-connection-pool-exhausted,slo-budget-burn-rate-fast,slo-budget-burn-rate-slow}.json` (5 new, 127 lines total) — 5 默认 runbook
+  - 注: task spec 写 YAML, 实现用 JSON (offline build 缺 `serde_yaml`)
+- `config/remediation/README.md` (新, 58 lines) — 字段说明 + 模板
+- `observability/grafana/dashboards/phase8-remediation-overview.json` (新, 259 lines) — Grafana dashboard 80-01 (24h count by action / success rate / top 5 alerts / cooldowns)
+- `docs/observability/14-auto-remediation.md` (新, 349 lines, DOC-OBS-014) — 设计 doc
+  - 注: task spec 写 12, 但 `12-code-impact.md` 已存在, 跳到 14
+- `docs/observability/11-phased-rollout.md` §10 — 目标/作业/完了基準/保留次フェーズ 更新 + 改訂履歴加 v0.6.0 行
+
+**5 门结果** (root 接手跑):
+
+- check: PASS (1m 10s, 全 workspace 17 crates + ada-remediation)
+- test: PASS (696 tests across 58 binaries; m12 default 655 + 10 new crdt/legacy-lww 路径 = 665; workspace 含 ada-remediation 41 = 696)
+- clippy: PASS (`-D warnings` + pedantic)
 - fmt: PASS
 - workspace clippy: PASS
 
-**Commit 列表**（wt-m12-crdt 分支）:
+**Commit 列表**:
 
-- c6d19cf feat(m12): add yrs 0.18 dep (CRDT sync backend for v0.6.0)
-- 5587f7a feat(m12): v0.6.0 CRDT (Yrs) sync — YDoc canvas types + sync API
-- 92277db test(m12): CRDT integration test (3-client star-shaped merge + reconcile)
-- 后续 commit: CRDT.md + M-12 §3.6 + CHANGELOG（本段）
+- m12 CRDT (`wt-m12-crdt`): c6d19cf, 5587f7a, 92277db, 9bae8b5, 564bb01 (5 commits)
+- observability Phase 8 (`wt-obs-autoremediation`): 8e4fc58, cce088f, 22b37e7, 51de190, 93dab83, 1da9e38, 0aeb3ce, dec3941 (8 commits)
+- root merge commits: 2 (`wt-m12-crdt` → main, `wt-obs-autoremediation` → main)
+- total ahead of c848d06: 13 commits + 2 merges = 15
 
-**保留 / 次フェーズ**：
+**v2.9.0 達成**:
 
-- observability Phase 8 Auto-remediation (v2.9.x 后续段)
-- m12 v0.6.0 收尾: 把 Yrs wasm-bindgen 绑定也加 `--features wasm-crdt` 测浏览器内行为
-- m12 v0.7.0: 元素去重 (YMap keyed by uuid) + port YArray + `server` 改默认 off
-- m12 bevy_egui browser E2E (Chrome headless CI)
+- v0.6.0 release 入口: m12 CRDT (Yrs) + observability Phase 8 Auto-remediation (per user 2026-08-27 选定)
+- 2 worker 实际都写了代码 + commit (前 4 worker 都 fail, root 接手; v0.5.0 这次 root 跑 5 门 + clippy hotfix; **v0.6.0 这次双 worker 全部完成到 5 门 GREEN**, 是 v0.2.0 以来第一次)
+- 5 门 cargo 维持 (696 tests passed)
+- 5 worker + 2 worktree 模式继续成功
+
+**保留 / 次フェーズ**:
+
+- m12 v0.7.0: YMap keyed by uuid 解决 YArray concurrent delete 不 collapse; port YArray; edge dedup; yrs-wasm binding
+- observability Phase 8.x: reqwest/sqlx real executor (替代 dry-run); Prometheus exporter; hot-reload via `notify` crate; webhook HMAC auth; manual trigger HMAC
+- observability Phase 5.5 Dashboard 深化 (网络层更细, business events funnel 完整化)
+- m12 bevy_egui browser E2E (Chrome headless CI, 集成 GitHub Actions)
+- m12 server feature 全面化 (默认 on, 移除 #[cfg])
 - Long-term storage 跨 region 复制
 - Distributed Trace DB Span 注入 (m03 + m10 + m13)
-- SLO Phase 7.5
-- CHANGELOG v2.9.x 留给 v0.6.0 后续段
+- SLO Phase 7.5 (更多 service 覆盖 / 跨 region / Error Budget policy 文档)
 
 **已知缺口** (per DTL-036 v1.4 hotfix 教训, 显式列出):
 
-- yrs 0.18 的 `wasm` feature 不存在 (Cargo.toml 仅 `weak`); 当前未做 browser-in-wasm CRDT 跑测, 留 v0.7.0 评估 `yrs-wasm` binding
-- Yjs YArray 的双向并发 delete 同位置不 collapse (Yjs 已知行为, v0.6.0 接受; v0.7.0 改 YMap keyed by uuid 解决)
-- v0.6.0 集成测试不在浏览器内跑 (需要 wasm-pack + Chrome headless, 见 m12 v0.3.0 留下的 issue)
+- yrs 0.18 不带 `wasm` feature (Cargo.toml 仅 `weak`); browser-in-wasm CRDT 跑测未做, 留 v0.7.0 评估 `yrs-wasm` binding
+- Yjs YArray 双向并发 delete 同位置不 collapse (Yjs 已知行为, v0.6.0 接受; v0.7.0 改 YMap keyed by uuid 解决)
+- v0.6.0 集成测试不在浏览器内跑 (需要 wasm-pack + Chrome headless, m12 v0.3.0 留下的 issue)
 - `read_canvas_from_doc` helper 是 `pub(crate)`, 未 pub-export 给 m13 cross-crate user; m13 smoke 留 v0.6.1
 - `Cargo.lock` 内 yrs = 0.18.8 来自 offline cache (D:/Ada 无网); 升级需手动 `cargo update -p yrs`, 留 v0.7.0
+- ports 字段是 JSON 字符串 (非嵌套 YArray); 字段级 CRDT 不覆盖 ports 子结构, v0.7.0 升 YArray
+- edge dedup 不做 (YArray 无 dedup); v0.7.0 用 YMap keyed by `${from}->${to}`
+- `reconcile_with_crdt` 不显式 client_id 协商 (假设 yrs 内部 rand); v0.7.0 评估
+- observability V003 vs V006 命名差异 (task spec V006, 实现 V003 — 本仓只有 V001+V002, V003 是下一 slot, 已在 migration 头 + 14-auto-remediation.md §9.6 显式标注)
+- observability 设计 doc 编号 14 vs 12 (task spec 12, `12-code-impact.md` 已存在, 跳到 14)
+- `HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` 4 种 step 在 v0.6.0 release 只走 dry-run 路径 (offline build 限制 reqwest / sqlx 不在 Cargo.lock); `RunCommand` 真实执行; 已在 14-auto-remediation.md §1.2 / §9.1 / 11-phased-rollout.md §10 全部声明
+- observability Prometheus exporter 未实现; Grafana dashboard 80-01 直接 query PG (remediation_history + remediation_cooldowns) 回避此缺口; PromQL-based dashboard 跟随 v0.6.x exporter 添加
+- observability hot-reload 未实现 (config/remediation/*.json 修改需重启); v0.6.x 引入 `notify` crate watcher
+- observability webhook / manual trigger 无 auth; 信赖 k8s NetworkPolicy / Service mesh + Grafana 侧 proxy auth; HMAC 留 v0.6.x
+- observability 实盘 alertmanager webhook 集成未做 (本 task scope 内只到 in-process HTTP server + Alertmanager v4 payload 解析 + 32 unit + 8 E2E test); production wiring (binding 0.0.0.0:9100 / k8s deployment manifest / HMAC secret env 注入) 留 v0.6.x follow-up
+- observability PL/pgSQL V003 测试无法本地执行 (需要 psql + PostgreSQL 18.6 server); 走 CI
+- observability config JSON vs YAML (task spec YAML, 实现 JSON, offline 缺 serde_yaml); JSON 是 YAML 1.2 严格子集, 已显式标注
 
 ---
 

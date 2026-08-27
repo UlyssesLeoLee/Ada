@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "_comment": "Phase 8 / 12-auto-remediation.md §5.2. P1 only — ServiceDown on a production service means user impact. Auto-remediation tries the in-cluster restart first (the pg function `remediation_restart_service` is a future v0.6.x addition — for now the step is a dry-run), then pages the on-call with the runbook URL.",
+  "actions": [
+    {
+      "id": "service-down-restart-and-page",
+      "name": "Service {{ $labels.service }} down — restart and page",
+      "trigger": "ServiceDown",
+      "severities": ["P1"],
+      "steps": [
+        {
+          "kind": "pg_function",
+          "name": "remediation_restart_service",
+          "args": ["{{ $labels.service }}", "{{ $labels.instance }}"]
+        },
+        {
+          "kind": "page_operator",
+          "severity": "high",
+          "runbook_url": "https://runbooks.ada.local/service-down"
+        }
+      ],
+      "cooldown": 600,
+      "max_retries": 2
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+[package]
+name = "ada-remediation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Auto-remediation runbook engine for observability Phase 8. Maps Alertmanager alerts to declarative remediation actions with cooldown + retry semantics. Sources of truth: docs/observability/11-phased-rollout.md §10 and docs/observability/12-auto-remediation.md."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_remediation"
+path = "src/lib.rs"
+
+# B2 lesson (mirrored from ada-telemetry): explicit [[test]] so
+# cargo test --workspace picks up tests/integration.rs even though
+# the [lib] block pins src/lib.rs.
+[[test]]
+name = "remediation_e2e"
+path = "tests/remediation_e2e.rs"
+
+[dependencies]
+# Always-on: core types + serialization for runbook configs and history
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+
+# HTTP server: axum 0.7 (same version as used by ada-telemetry trace
+# HTTP endpoint and ada-m13-api-gateway; we keep the dep graph homogeneous).
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process"] }
+
+# Time / id
+chrono = { version = "0.4", features = ["serde", "clock"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Async-friendly shared state
+parking_lot = "0.12"
+
+[dev-dependencies]
+# In-memory store for the E2E test does not need sqlx; we exercise
+# the full engine through public APIs.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+
+[lints]
+workspace = true

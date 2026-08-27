@@ -1,0 +1,259 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Phase 8 Auto-remediation overview. The on-call landing page after a successful Alertmanager firing: see what auto-remediation has done in the last 24h, what is currently in cooldown, and which alerts are triggering the most. Source tables: `remediation_history` + `remediation_cooldowns` in PostgreSQL (per `db/migrations/V003__phase8_remediation.sql`). For the live cooldown list, the dashboard reads `GET /remediation/cooldowns` from the in-process axum server (provisioned in `observability/grafana/provisioning/datasources/datasources.yml`); the JSON datasource plugin is required for that panel.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "phase8-remediation",
+  "title": "Auto-remediation Overview (80-01)",
+  "tags": ["ada", "phase-8", "remediation", "auto-remediation"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "pg",
+        "type": "datasource",
+        "query": "postgres",
+        "current": {"selected": false, "text": "PostgreSQL", "value": "PostgreSQL"},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "24h remediation executions (total)",
+      "description": "Count of every `remediation_history` row written in the last 24h. Includes both succeeded and failed attempts. The retry_count column is summed separately; this panel is the total *attempts*.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT count(*)::int AS total FROM remediation_history WHERE executed_at > now() - interval '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 50},
+              {"color": "red", "value": 200}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "24h success rate",
+      "description": "Fraction of remediation_history rows in the last 24h whose `outcome='succeeded'`. A value below 80% means auto-remediation is firing but not landing — most likely a wrong runbook, a permission issue, or an upstream problem the runbook cannot fix.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT (count(*) FILTER (WHERE outcome='succeeded'))::float / greatest(count(*), 1) AS success_rate, count(*)::int AS total FROM remediation_history WHERE executed_at > now() - interval '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.5},
+              {"color": "green", "value": 0.8}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active cooldowns",
+      "description": "Number of rows in `remediation_cooldowns` whose `expires_at > now()`. These are actions the engine will NOT re-execute until the cooldown window elapses. If this number is large and growing, see panel 6 for the longest-running ones.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT count(*)::int AS active FROM remediation_cooldowns WHERE expires_at > now()",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 5},
+              {"color": "red", "value": 20}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Distinct actions triggered (24h)",
+      "description": "Count of distinct `action_id` values seen in the last 24h. A jump in this number means a new runbook is firing — confirm it is intentional.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT count(DISTINCT action_id)::int AS distinct_actions FROM remediation_history WHERE executed_at > now() - interval '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 10}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "24h remediation count by action (timeline)",
+      "description": "Time-bucketed count of remediation_history rows, broken out by `action_id`. Stack mode (`stack` option) makes it easy to see both which actions are firing and the absolute volume. A flat-line is healthy; spikes correlate with incident clusters.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 6},
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(executed_at, '15m'), action_id AS metric, count(*)::int AS value FROM remediation_history WHERE $__timeFilter(executed_at) GROUP BY 1, 2 ORDER BY 1",
+          "refId": "A",
+          "alias": "$action_id"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 50, "stacking": {"mode": "normal"}}
+        }
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right"}
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Top 5 triggered alerts (24h)",
+      "description": "The 5 most-fired alert_name values in the last 24h, with their success / failure split. This is the 'what is hurting us right now' panel — actionable: each row is a candidate for a new or improved runbook.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 6},
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT alert_name, count(*)::int AS total, count(*) FILTER (WHERE outcome='succeeded')::int AS succeeded, count(*) FILTER (WHERE outcome='failed')::int AS failed FROM remediation_history WHERE executed_at > now() - interval '24 hours' GROUP BY alert_name ORDER BY total DESC LIMIT 5",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "total", "desc": true}]
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Active cooldowns (live)",
+      "description": "Read from the in-process axum server's `GET /remediation/cooldowns` endpoint. Requires the Grafana JSON / Infinity datasource plugin. Shows action_id + expires_at (UTC). Expired rows are filtered out by the engine.",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "infinity"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 15},
+      "targets": [
+        {
+          "format": "table",
+          "url": "http://localhost:9100/remediation/cooldowns",
+          "jsonPath": "$.cooldowns[*]",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "expires_at", "desc": false}]
+      }
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Recent failure log (24h)",
+      "description": "Most recent 50 rows where `outcome='failed'`. The `error_msg` column contains the engine's step-0 failure description (e.g. `step 0: command not found`). Filter by `action_id` or `alert_name` to narrow.",
+      "datasource": {"type": "postgres", "uid": "${pg}"},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 23},
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT executed_at, action_id, alert_name, retry_count, error_msg FROM remediation_history WHERE outcome='failed' AND executed_at > now() - interval '24 hours' ORDER BY executed_at DESC LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false
+      }
+    }
+  ]
+}
