@@ -51,6 +51,16 @@ serde_json = "1"
 thiserror = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Yrs (Yjs Rust port, MIT) — M-12 v0.6.0 CRDT sync backend.
+# Pinned to 0.18 (latest stable at the time of v0.6.0; the cached
+# registry only has 0.18.8, so no `*` wildcard is used). The
+# default feature set pulls in fastrand/js + serde/derive + thiserror
+# — none of those break the WASM build because yrs itself does not
+# pull wasm-bindgen. WASM-specific bindings (if any future release
+# ships them) would arrive via a dedicated feature flag we add
+# then. See `crates/ada-m12-canvas-editor/CRDT.md` for the
+# integration design.
+yrs = "0.18"
 # WASM 下 `uuid` 需要 explicit randomness source;通过 feature
 # gate 拉入 `uuid/js`(用 crypto.getRandomValues),native build
 # 不受影响。
