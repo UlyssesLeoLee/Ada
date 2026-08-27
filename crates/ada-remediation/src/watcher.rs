@@ -99,7 +99,12 @@ impl std::fmt::Debug for Watcher {
             .field("interval", &self.interval)
             .field(
                 "mtime_count",
-                &self.mtimes.as_ref().map(|m| m.len()).unwrap_or(0),
+                &self
+                    .mtimes
+                    .as_ref()
+                    .map_or(0, |mtimes: &HashMap<PathBuf, Option<SystemTime>>| {
+                        mtimes.len()
+                    }),
             )
             .field(
                 "last_emit_age_ms",
@@ -157,10 +162,10 @@ impl Watcher {
         // for the initial load so the engine has
         // runbooks before the first webhook.
         ticker.tick().await;
-        scan_once(&dir, &engine, &tx, &mut mtimes, &mut last_emit).await;
+        scan_once(&dir, &engine, &tx, &mut mtimes, &mut last_emit);
         loop {
             ticker.tick().await;
-            scan_once(&dir, &engine, &tx, &mut mtimes, &mut last_emit).await;
+            scan_once(&dir, &engine, &tx, &mut mtimes, &mut last_emit);
         }
     }
 }
@@ -168,7 +173,7 @@ impl Watcher {
 /// One pass over the runbook directory. Computes the
 /// union of mtimes in `mtimes` and the live mtimes; if
 /// anything changed, reload + emit (subject to debounce).
-async fn scan_once(
+fn scan_once(
     dir: &Path,
     engine: &Arc<RemediationEngine>,
     tx: &mpsc::UnboundedSender<WatcherEvent>,
@@ -199,10 +204,7 @@ async fn scan_once(
         live.insert(path, mtime);
     }
     let is_initial = mtimes.is_none();
-    let unchanged = mtimes
-        .as_ref()
-        .map(|prev| prev == &live)
-        .unwrap_or(false);
+    let unchanged = mtimes.as_ref().is_some_and(|prev| prev == &live);
     if !is_initial && unchanged {
         // Nothing changed since last scan. Skip the
         // reload + emit. (The first scan is exempt: we
@@ -228,10 +230,7 @@ async fn scan_once(
         // here, the first real `Reloaded` (typically
         // one tick later) would fall inside the
         // debounce window and be silently dropped.
-    } else if last_emit
-        .map(|t| t.elapsed() >= DEBOUNCE)
-        .unwrap_or(true)
-    {
+    } else if last_emit.is_none_or(|t| t.elapsed() >= DEBOUNCE) {
         let _ = tx.send(WatcherEvent::Reloaded(actions));
         *last_emit = Some(Instant::now());
     }
@@ -282,8 +281,7 @@ mod tests {
     async fn file_addition_triggers_reload() {
         let dir = tempdir().unwrap();
         let engine = Arc::new(RemediationEngine::new());
-        let (watcher, mut rx) =
-            Watcher::new(dir.path().to_path_buf(), engine.clone());
+        let (watcher, mut rx) = Watcher::new(dir.path().to_path_buf(), engine.clone());
         let watcher = watcher.with_interval(Duration::from_millis(100));
         let handle = tokio::spawn(watcher.run());
 
@@ -322,8 +320,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = write_runbook(dir.path(), "alpha.json", "alpha");
         let engine = Arc::new(RemediationEngine::new());
-        let (watcher, mut rx) =
-            Watcher::new(dir.path().to_path_buf(), engine.clone());
+        let (watcher, mut rx) = Watcher::new(dir.path().to_path_buf(), engine.clone());
         let watcher = watcher.with_interval(Duration::from_millis(100));
         let handle = tokio::spawn(watcher.run());
 
@@ -348,10 +345,7 @@ mod tests {
         // 1.75+; we use it to push the mtime clearly
         // into the future so a paused-time test still
         // sees a delta.
-        let f = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_modified(std::time::SystemTime::now() + Duration::from_secs(60))
             .unwrap();
         drop(f);
@@ -370,7 +364,10 @@ mod tests {
                 break;
             }
         }
-        assert!(got_reload, "did not receive Reloaded event after modification");
+        assert!(
+            got_reload,
+            "did not receive Reloaded event after modification"
+        );
         handle.abort();
     }
 
@@ -378,8 +375,7 @@ mod tests {
     async fn debounce_collapses_five_changes_to_one_reload() {
         let dir = tempdir().unwrap();
         let engine = Arc::new(RemediationEngine::new());
-        let (watcher, mut rx) =
-            Watcher::new(dir.path().to_path_buf(), engine.clone());
+        let (watcher, mut rx) = Watcher::new(dir.path().to_path_buf(), engine.clone());
         let watcher = watcher.with_interval(Duration::from_millis(50));
         let handle = tokio::spawn(watcher.run());
 
@@ -417,9 +413,7 @@ mod tests {
         // already committed, so subsequent scans see
         // no delta and emit nothing).
         let mut reloads = 0;
-        while let Ok(Some(ev)) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
-        {
+        while let Ok(Some(ev)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
             if matches!(ev, WatcherEvent::Reloaded(_)) {
                 reloads += 1;
             }

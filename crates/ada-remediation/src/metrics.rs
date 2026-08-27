@@ -89,7 +89,7 @@ static METRICS: OnceLock<MetricsState> = OnceLock::new();
 ///
 /// 1. **No recorder yet, this call wins** — `Ok(&state)`.
 /// 2. **We already installed it earlier** — `Ok(&state)`
-///    (OnceLock fast path).
+///    (`OnceLock` fast path).
 /// 3. **The `metrics` crate's process-global recorder was
 ///    already set by a different caller** (typical in
 ///    `cargo test` where several tests run concurrently
@@ -135,10 +135,7 @@ pub fn install() -> std::result::Result<&'static MetricsState, MetricsError> {
 /// empty string if `install` has not been called yet.
 #[must_use]
 pub fn render() -> String {
-    METRICS
-        .get()
-        .map(|s| s.handle.render())
-        .unwrap_or_default()
+    METRICS.get().map(|s| s.handle.render()).unwrap_or_default()
 }
 
 /// `true` iff [`install`] has been called in this process.
@@ -213,10 +210,10 @@ mod tests {
         // test ran first), `render` will return non-empty
         // — that path is also fine to assert.
         let s = render();
-        if !is_installed() {
-            assert_eq!(s, "");
-        } else {
+        if is_installed() {
             assert!(s.contains("ada_remediation"));
+        } else {
+            assert_eq!(s, "");
         }
     }
 
@@ -301,8 +298,7 @@ mod tests {
         if is_installed() {
             let snapshot = render();
             assert!(
-                snapshot.contains("ada_remediation_actions_total")
-                    || snapshot.is_empty(),
+                snapshot.contains("ada_remediation_actions_total") || snapshot.is_empty(),
                 "snapshot should mention actions_total or be empty: {snapshot}"
             );
         }
@@ -319,8 +315,7 @@ mod tests {
         if is_installed() {
             let snapshot = render();
             assert!(
-                snapshot.contains("ada_remediation_actions_total")
-                    || snapshot.is_empty(),
+                snapshot.contains("ada_remediation_actions_total") || snapshot.is_empty(),
                 "snapshot should mention actions_total or be empty: {snapshot}"
             );
         }
@@ -334,8 +329,7 @@ mod tests {
         if is_installed() {
             let snapshot = render();
             assert!(
-                snapshot.contains("ada_remediation_action_duration_seconds")
-                    || snapshot.is_empty()
+                snapshot.contains("ada_remediation_action_duration_seconds") || snapshot.is_empty()
             );
         }
     }
@@ -358,13 +352,12 @@ mod tests {
     fn cooldown_gauge_records_active_count() {
         let store = MemoryStore::new();
         // No actions recorded -> 0 active cooldowns.
-        set_cooldown_gauge(store.active_cooldowns().len() as f64);
+        set_cooldown_gauge(f64::from(
+            u32::try_from(store.active_cooldowns().len()).unwrap_or(u32::MAX),
+        ));
         if is_installed() {
             let snapshot = render();
-            assert!(
-                snapshot.contains("ada_remediation_cooldown_active")
-                    || snapshot.is_empty()
-            );
+            assert!(snapshot.contains("ada_remediation_cooldown_active") || snapshot.is_empty());
         }
     }
 

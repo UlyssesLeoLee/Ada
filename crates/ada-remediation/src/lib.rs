@@ -94,8 +94,8 @@ pub use config::{load_runbooks_from_dir, RunbookFile};
 pub use engine::RemediationEngine;
 pub use error::{RemediationError, Result};
 pub use executor::{
-    DryRunExecutor, ExecutionContext, LoggingClient, NetworkClient, RealExecutor,
-    RecordedRequest, StepExecutionResult, StepExecutor,
+    DryRunExecutor, ExecutionContext, LoggingClient, NetworkClient, RealExecutor, RecordedRequest,
+    StepExecutionResult, StepExecutor,
 };
 pub use history::{HistoryQuery, HistoryRecord, MemoryStore};
 pub use state::EngineState;

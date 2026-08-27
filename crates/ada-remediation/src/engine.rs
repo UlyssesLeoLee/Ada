@@ -243,14 +243,9 @@ impl RemediationEngine {
             }
             ActionStep::Sequence { steps } => {
                 for (i, sub) in steps.iter().enumerate() {
-                    let (ok, sub_msg, _dur) =
-                        Box::pin(self.run_step(i, sub, ctx)).await;
+                    let (ok, sub_msg, _dur) = Box::pin(self.run_step(i, sub, ctx)).await;
                     if !ok {
-                        return (
-                            false,
-                            format!("sequence sub-step {i} failed: {sub_msg}"),
-                            0,
-                        );
+                        return (false, format!("sequence sub-step {i} failed: {sub_msg}"), 0);
                     }
                 }
                 (true, "sequence ok".to_string(), 0)

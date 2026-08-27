@@ -62,13 +62,17 @@ async fn health() -> &'static str {
 
 /// Render the current Prometheus snapshot. Mirrors the
 /// `/metrics` endpoint convention from `ada-telemetry`:
-/// plain text, no auth (relies on k8s NetworkPolicy to
+/// plain text, no auth (relies on k8s `NetworkPolicy` to
 /// keep the path private to the cluster's Prometheus
 /// scraper).
-async fn handle_metrics(State(state): State<AppState>) -> ([(axum::http::HeaderName, &'static str); 1], String) {
+async fn handle_metrics(
+    State(state): State<AppState>,
+) -> ([(axum::http::HeaderName, &'static str); 1], String) {
     // Update the cooldown gauge from the live in-memory
     // store before rendering. Cheap: O(active count).
-    crate::metrics::set_cooldown_gauge(state.store.active_cooldowns().len() as f64);
+    crate::metrics::set_cooldown_gauge(f64::from(
+        u32::try_from(state.store.active_cooldowns().len()).unwrap_or(u32::MAX),
+    ));
     let body = crate::metrics::render();
     (
         [(
@@ -169,11 +173,9 @@ async fn handle_alertmanager_webhook(
     //   Err(AuthError::Disabled)   - no env var, fail-closed 503
     //   Err(AuthError::MissingToken)  - 401
     //   Err(AuthError::InvalidToken)  - 403
-    let provided = headers
-        .get(HEADER_NAME)
-        .and_then(|v| v.to_str().ok());
+    let provided = headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
     if let Err(e) = state.auth.check_token(provided) {
-        return Err(map_auth_error(e));
+        return Err(map_auth_error(&e));
     }
     let received = payload.alerts.len();
     let mut outcomes = Vec::new();
@@ -309,11 +311,9 @@ async fn handle_manual_trigger(
     // explicitly gated even though the
     // `Alertmanager` webhook is the primary attack
     // surface.
-    let provided = headers
-        .get(HEADER_NAME)
-        .and_then(|v| v.to_str().ok());
+    let provided = headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
     if let Err(e) = state.auth.check_token(provided) {
-        return Err(map_auth_error(e));
+        return Err(map_auth_error(&e));
     }
     let mut event = AlertEvent::builder(req.alert_name.clone())
         .with_status(AlertStatus::Firing)
@@ -384,7 +384,7 @@ impl IntoResponse for HttpError {
 /// until the operator sets the var and restarts. This
 /// is the safe default — better to refuse traffic
 /// than to silently accept it.
-fn map_auth_error(e: AuthError) -> HttpError {
+fn map_auth_error(e: &AuthError) -> HttpError {
     match e {
         AuthError::Disabled => HttpError(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -394,10 +394,9 @@ fn map_auth_error(e: AuthError) -> HttpError {
             StatusCode::UNAUTHORIZED,
             "missing X-Webhook-Token header".into(),
         ),
-        AuthError::InvalidToken => HttpError(
-            StatusCode::FORBIDDEN,
-            "invalid X-Webhook-Token".into(),
-        ),
+        AuthError::InvalidToken => {
+            HttpError(StatusCode::FORBIDDEN, "invalid X-Webhook-Token".into())
+        }
     }
 }
 
@@ -407,6 +406,7 @@ mod tests {
     use crate::action::{ActionStep, RemediationAction, Trigger};
     use axum::body::Body;
     use axum::http::{Request, StatusCode as AxStatus};
+    use std::collections::BTreeMap;
     use std::time::Duration;
     use tower::ServiceExt;
 
@@ -736,7 +736,7 @@ mod tests {
                     .body(Body::from(
                         serde_json::to_vec(&ManualTriggerRequest {
                             alert_name: "DiskSpaceFillingFast".into(),
-                            labels: Default::default(),
+                            labels: BTreeMap::new(),
                             severity: Some("P2".into()),
                             force: false,
                         })
@@ -763,7 +763,7 @@ mod tests {
                     .body(Body::from(
                         serde_json::to_vec(&ManualTriggerRequest {
                             alert_name: "DiskSpaceFillingFast".into(),
-                            labels: Default::default(),
+                            labels: std::collections::BTreeMap::new(),
                             severity: Some("P2".into()),
                             force: true,
                         })

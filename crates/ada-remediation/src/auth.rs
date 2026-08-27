@@ -76,6 +76,7 @@ pub const HEADER_NAME: &str = "x-webhook-token";
 pub const ENV_VAR: &str = "REMEDIATION_WEBHOOK_SECRET";
 
 /// Errors that [`AuthState::check_token`] can return.
+#[allow(clippy::too_many_lines)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum AuthError {
     /// Auth is disabled because [`ENV_VAR`] was unset
@@ -162,14 +163,14 @@ impl AuthState {
     ///
     /// In tests we use [`Self::disabled`] directly.
     pub fn require_enabled(&self) {
-        if self.secret.is_none() {
-            panic!(
-                "webhook auth is disabled ({}=missing); \
-                 refusing to start without a configured secret \
-                 — see docs/observability/14-auto-remediation.md §auth",
-                ENV_VAR
-            );
+        if self.secret.is_some() {
+            return;
         }
+        panic!(
+            "webhook auth is disabled ({ENV_VAR}=missing); \
+             refusing to start without a configured secret \
+             — see docs/observability/14-auto-remediation.md §auth"
+        );
     }
 
     /// Compare `header_value` against the configured
@@ -189,7 +190,7 @@ impl AuthState {
         // safe (it returns false), but rejecting
         // mismatched lengths early keeps the call
         // obvious and the log line clean.
-        if provided.as_bytes().len() != secret.len() {
+        if provided.len() != secret.len() {
             return Err(AuthError::InvalidToken);
         }
         if constant_time_eq(provided.as_bytes(), secret) {
@@ -247,13 +248,19 @@ mod tests {
     fn require_enabled_panics_when_disabled() {
         let auth = AuthState::disabled();
         let result = std::panic::catch_unwind(|| auth.require_enabled());
-        assert!(result.is_err(), "require_enabled should panic when disabled");
+        assert!(
+            result.is_err(),
+            "require_enabled should panic when disabled"
+        );
     }
 
     #[test]
     fn require_enabled_silent_when_enabled() {
         let auth = AuthState::enabled("any-secret");
         let result = std::panic::catch_unwind(|| auth.require_enabled());
-        assert!(result.is_ok(), "require_enabled should not panic when enabled");
+        assert!(
+            result.is_ok(),
+            "require_enabled should not panic when enabled"
+        );
     }
 }

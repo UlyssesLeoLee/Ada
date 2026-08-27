@@ -32,7 +32,7 @@
 //! `docs/observability/14-auto-remediation.md` §11 known
 //! gaps).
 //!
-//! ## RunCommand semantics
+//! ## `RunCommand` semantics
 //!
 //! `RunCommand` is intentionally **not** routed through
 //! `execute_step`. It is the one step that always runs in
@@ -50,22 +50,17 @@ use tracing::warn;
 /// Per-step execution mode. Selected via the `executor` field
 /// on the four "outside world" step variants. `RunCommand`
 /// and `Sequence` ignore this enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutorMode {
     /// Log the intent, return success. No side effects.
+    #[default]
     DryRun,
     /// Hand the step to the configured `RealExecutor` (which
     /// may be a `LoggingClient` in tests, or a real
     /// `ReqwestClient` / `tokio-postgres` client in
     /// production).
     Real,
-}
-
-impl Default for ExecutorMode {
-    fn default() -> Self {
-        Self::DryRun
-    }
 }
 
 /// Context passed to `StepExecutor::execute`. Carries the
@@ -242,10 +237,7 @@ impl StepExecutor for DryRunExecutor {
                 runbook_url,
                 ..
             } => {
-                format!(
-                    "dry-run page operator severity={:?} runbook={runbook_url}",
-                    severity
-                )
+                format!("dry-run page operator severity={severity:?} runbook={runbook_url}")
             }
             ActionStep::Sequence { steps } => {
                 format!("dry-run sequence ({} sub-steps)", steps.len())
@@ -302,6 +294,7 @@ impl RealExecutor {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 #[async_trait::async_trait]
 impl StepExecutor for RealExecutor {
     async fn execute(
@@ -351,11 +344,7 @@ impl StepExecutor for RealExecutor {
                     started.elapsed(),
                 )
             }
-            ActionStep::PgFunction {
-                name,
-                args,
-                ..
-            } => {
+            ActionStep::PgFunction { name, args, .. } => {
                 // v0.7.0: PG calls route through the same
                 // HTTP path against the in-cluster
                 // `remediation_execute_function` shim
@@ -372,22 +361,18 @@ impl StepExecutor for RealExecutor {
                             .collect(),
                     ),
                 );
-                let body_str = serde_json::to_string(&body_map).map_err(|e| {
-                    RemediationError::StepFailed {
+                let body_str =
+                    serde_json::to_string(&body_map).map_err(|e| RemediationError::StepFailed {
                         index: 0,
                         message: format!("serialise pg body: {e}"),
-                    }
-                })?;
+                    })?;
                 let outcome = self
                     .network
                     .call(
                         "POST",
                         "pg://remediation_execute_function",
                         &[
-                            (
-                                "Content-Type".to_string(),
-                                "application/json".to_string(),
-                            ),
+                            ("Content-Type".to_string(), "application/json".to_string()),
                             (
                                 "X-Remediation-Trace-Id".to_string(),
                                 format!("{}::{}", ctx.action_id, ctx.alert_name),
@@ -402,9 +387,7 @@ impl StepExecutor for RealExecutor {
                 )
             }
             ActionStep::NotifySlack {
-                channel,
-                message,
-                ..
+                channel, message, ..
             } => {
                 // Slack incoming-webhook. Resolved from env at
                 // call time so the URL never lives in the
@@ -432,10 +415,7 @@ impl StepExecutor for RealExecutor {
                         .call(
                             "POST",
                             &webhook_url,
-                            &[(
-                                "Content-Type".to_string(),
-                                "application/json".to_string(),
-                            )],
+                            &[("Content-Type".to_string(), "application/json".to_string())],
                             Some(&body_str),
                         )
                         .await?;
@@ -487,10 +467,7 @@ impl StepExecutor for RealExecutor {
                     .call(
                         "POST",
                         "https://events.pagerduty.com/v2/enqueue",
-                        &[(
-                            "Content-Type".to_string(),
-                            "application/json".to_string(),
-                        )],
+                        &[("Content-Type".to_string(), "application/json".to_string())],
                         Some(&body_str),
                     )
                     .await?;
@@ -515,7 +492,7 @@ const fn severity_label(severity: PageSeverity) -> &'static str {
 }
 
 #[allow(dead_code)]
-fn _http_method_label(m: HttpMethod) -> &'static str {
+fn http_method_label(m: HttpMethod) -> &'static str {
     m.as_str()
 }
 
@@ -634,7 +611,10 @@ mod tests {
         // one PagerDuty v2 enqueue. The assertion below
         // checks either path.
         if !lc.recorded().is_empty() {
-            assert_eq!(lc.recorded()[0].url, "https://events.pagerduty.com/v2/enqueue");
+            assert_eq!(
+                lc.recorded()[0].url,
+                "https://events.pagerduty.com/v2/enqueue"
+            );
         }
     }
 
@@ -697,7 +677,7 @@ mod tests {
     #[test]
     fn http_method_label_does_not_panic() {
         // Compile-time check that the helper is wired.
-        assert_eq!(_http_method_label(HttpMethod::Post), "POST");
+        assert_eq!(http_method_label(HttpMethod::Post), "POST");
     }
 
     #[allow(dead_code)]
