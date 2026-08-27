@@ -142,19 +142,38 @@ pub use egui_integration::{
 #[cfg(any(feature = "server", feature = "legacy-lww"))]
 pub use server_recon::{reconcile_canvas_state, ReconcileResult};
 
-/// M-12 v0.6.0 CRDT (Yrs) sync public surface. Only compiled
+/// M-12 v0.7.0 CRDT (Yrs) sync public surface. Only compiled
 /// with `--features crdt`.
 ///
-/// 包含:
+/// 包含 (v0.7.0 schema — YMap keyed by uuid):
 /// - [`merge_crdt_update`] — apply remote update, return diff
 /// - [`encode_state_as_update`] — full state snapshot
 /// - [`reconcile_with_crdt`] — end-to-end reconcile (server
-///   canvas + client update → merged state + new version)
+///   canvas + client update + client_id → merged state + new
+///   version)
 /// - [`CrdtReconcileResult`] — 合并结果 (merged_state bytes +
 ///   new_version)
+/// - [`ClientId`] — v0.7.0 stable client identifier
+///   (uuid + label) for explicit client_id negotiation
+/// - [`insert_element`] / [`remove_element`] / [`update_element`]
+///   / [`get_element`] / [`iter_elements`] — element-level
+///   ergonomics
+/// - [`add_port`] / [`remove_port`] — port-level ergonomics
+///   (v0.7.0 lifts ports to a proper nested YArray)
+/// - [`insert_edge`] / [`remove_edge`] / [`update_edge`] /
+///   [`get_edge`] / [`iter_edge_keys`] — edge-level ergonomics
+///   (v0.7.0 keys edges by `${from}::${to}` for natural dedup)
+/// - [`read_canvas_from_doc`] / [`doc_from_canvas`] — read a
+///   YDoc back into a `Canvas` (or build a YDoc from one);
+///   pub in v0.7.0 for m13 cross-crate consumers
+/// - [`ElementSnapshot`] / [`ElementUpdate`] / [`PortSnapshot`]
+///   / [`EdgeSnapshot`] — value types for the above APIs
 #[cfg(feature = "crdt")]
 pub use crdt::{
-    encode_state_as_update, merge_crdt_update, reconcile_with_crdt, CrdtReconcileResult,
+    add_port, doc_from_canvas, encode_state_as_update, get_edge, get_element, insert_edge,
+    insert_element, iter_edge_keys, iter_elements, merge_crdt_update, read_canvas_from_doc,
+    reconcile_with_crdt, remove_edge, remove_element, remove_port, update_edge, update_element,
+    ClientId, CrdtReconcileResult, EdgeSnapshot, ElementSnapshot, ElementUpdate, PortSnapshot,
 };
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace

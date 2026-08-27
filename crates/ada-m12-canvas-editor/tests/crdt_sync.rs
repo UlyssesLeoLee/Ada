@@ -1,4 +1,4 @@
-//! Integration tests for the M-12 v0.6.0 CRDT (Yrs) sync path.
+//! Integration tests for the M-12 v0.7.0 CRDT (Yrs) sync path.
 //!
 //! Cross-crate smoke test: 3 concurrent clients edit a shared
 //! canvas independently, then sync via `merge_crdt_update` /
@@ -16,27 +16,14 @@
 #![cfg(feature = "crdt")]
 
 use ada_m12_canvas_editor::{
-    encode_state_as_update, merge_crdt_update, reconcile_with_crdt, Canvas, CanvasNode, NodeKind,
-    Position,
+    encode_state_as_update, insert_element, iter_elements, merge_crdt_update, reconcile_with_crdt,
+    Canvas, CanvasNode, ClientId, NodeKind, Position,
 };
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{Any, Array, ArrayRef, Doc, Map, MapPrelim, MapRef};
-use yrs::{ReadTxn, Transact};
-
-/// Push a node into a `YDoc` at the elements array, returning the
-/// doc's state vector. Convenience helper for the cross-client
-/// sync tests below.
-fn push_node(doc: &Doc, els: &ArrayRef, id: &str, label: &str) {
-    let mut txn = doc.transact_mut();
-    let m: MapRef = els.push_back(&mut txn, MapPrelim::<Any>::new());
-    m.insert(&mut txn, "id", id);
-    m.insert(&mut txn, "kind", "block");
-    m.insert(&mut txn, "x", 0i64);
-    m.insert(&mut txn, "y", 0i64);
-    m.insert(&mut txn, "label", label);
-    m.insert(&mut txn, "alive", true);
-}
+use yrs::{Doc, ReadTxn, Transact};
+use yrs::types::Value;
+use yrs::Map;
 
 /// Encode a doc's state vector for use as a `remote_state` arg
 /// in `merge_crdt_update`. Re-exposed here (not from the lib)
@@ -47,38 +34,42 @@ fn state_vector_bytes(doc: &Doc) -> Vec<u8> {
     txn.state_vector().encode_v1()
 }
 
+/// v0.7.0: 3 concurrent clients insert elements (different
+/// uuids per client) and then sync. After sync, all 3 docs
+/// should expose the same 9 elements. Uses the v0.7.0
+/// YMap-keyed-by-uuid schema (`insert_element` /
+/// `iter_elements`).
 #[test]
 fn three_clients_converge_to_same_state() {
     // 1. Build 3 YDocs (one per "client"). Each starts with
-    //    a shared root.
+    //    the v0.7.0 root layout (elements YMap, etc.).
     let docs: Vec<Doc> = (0..3).map(|_| Doc::new()).collect();
-    let els: Vec<ArrayRef> = docs
-        .iter()
-        .map(|d| d.get_or_insert_array("elements"))
-        .collect();
 
-    // 2. Each client makes independent edits: c0 adds 3 nodes,
-    //    c1 adds 2 nodes, c2 adds 4 nodes — disjoint ids so
-    //    there is no in-YArray "duplicate element" ambiguity.
-    for (i, (doc, el)) in docs.iter().zip(els.iter()).enumerate() {
+    // 2. Each client makes independent inserts: c0 adds 3,
+    //    c1 adds 2, c2 adds 4 — disjoint uuids so there is
+    //    no in-YMap "same-key conflict" (each insert
+    //    creates a unique key).
+    for (i, doc) in docs.iter().enumerate() {
         let n = match i {
             0 => 3,
             1 => 2,
             _ => 4,
         };
         for j in 0..n {
-            push_node(
-                doc,
-                el,
-                &format!("c{i}-n{j}"),
+            let mut node = CanvasNode::new(
+                NodeKind::Block,
+                Position::new(0, 0),
                 &format!("client-{i}-node-{j}"),
             );
+            node.id = ada_m12_canvas_editor::NodeId(uuid::Uuid::new_v4());
+            insert_element(doc, &node).expect("insert");
         }
     }
 
-    // 3. Star-shaped sync: clients 1 and 2 push to 0; then 0
-    //    pushes back to 1 and 2. Two rounds is sufficient to
-    //    show convergence for 3 peers (later: formal gossip).
+    // 3. Star-shaped sync: clients 1 and 2 push to 0; then
+    //    0 pushes back to 1 and 2. Two rounds is sufficient
+    //    to show convergence for 3 peers (later: formal
+    //    gossip).
     for src in 1..docs.len() {
         let update = encode_state_as_update(&docs[src]);
         let sv = state_vector_bytes(&docs[0]);
@@ -100,54 +91,68 @@ fn three_clients_converge_to_same_state() {
         }
     }
 
-    // 4. Verify all 3 docs see the same total element count:
-    //    3 + 2 + 4 = 9 elements.
+    // 4. Verify all 3 docs see the same total element
+    //    count: 3 + 2 + 4 = 9 elements.
     for (i, doc) in docs.iter().enumerate() {
-        let len = {
-            let txn = doc.transact();
-            txn.get_array("elements").expect("elements").len(&txn)
-        };
-        assert_eq!(len, 9, "client {i} should see 9 elements after merge");
+        let count = iter_elements(doc).count();
+        assert_eq!(count, 9, "client {i} should see 9 elements after merge");
     }
 }
 
+/// v0.7.0: server has 1 element (in v0.5.0 `Canvas` shape),
+/// client has 1 element (in v0.7.0 YDoc shape). After
+/// `reconcile_with_crdt` with a fresh `ClientId`, the
+/// merged state encodes both elements under the v0.7.0
+/// YMap-keyed-by-uuid schema.
 #[test]
 fn reconcile_with_server_canvas_preserves_client_additions() {
     // Server-side state: 1 block node.
     let server = Canvas::new("doc-1");
-    let server_node = CanvasNode::new(NodeKind::Block, Position::new(0, 0), "server-block");
+    let mut server_node = CanvasNode::new(NodeKind::Block, Position::new(0, 0), "server-block");
+    server_node.id = ada_m12_canvas_editor::NodeId(uuid::Uuid::new_v4());
     server.add_node(server_node);
 
     // Client-side: a fresh YDoc with one client-only element
     // (different node id from the server's).
     let client_doc = Doc::new();
-    let client_els = client_doc.get_or_insert_array("elements");
-    push_node(
-        &client_doc,
-        &client_els,
-        "99999999-9999-9999-9999-999999999999",
-        "client-block",
-    );
+    let mut client_node = CanvasNode::new(NodeKind::Block, Position::new(0, 0), "client-block");
+    client_node.id = ada_m12_canvas_editor::NodeId(uuid::Uuid::new_v4());
+    insert_element(&client_doc, &client_node).expect("insert client");
     let client_update = encode_state_as_update(&client_doc);
 
-    // Run the reconcile.
-    let result = reconcile_with_crdt(&server, &client_update, 1).expect("reconcile");
+    // Run the reconcile with a fresh server-side ClientId.
+    let server_client_id = ClientId::new("server-1");
+    let result =
+        reconcile_with_crdt(&server, &client_update, 1, &server_client_id).expect("reconcile");
     assert_eq!(result.new_version, 2);
 
-    // Decode the merged state on a fresh doc and verify the
-    // union of server + client elements.
+    // Decode the merged state on a fresh doc and verify
+    // the union of server + client elements.
     let merged_doc = Doc::new();
     {
         let mut txn = merged_doc.transact_mut();
         let update = yrs::Update::decode_v1(&result.merged_state).expect("decode merged");
         txn.apply_update(update);
     }
-    let len = {
+    let count = {
         let txn = merged_doc.transact();
-        txn.get_array("elements").expect("elements").len(&txn)
+        let elements = txn.get_map("elements").expect("elements");
+        let mut live = 0usize;
+        for (_k, v) in elements.iter(&txn) {
+            if let Value::YMap(m) = v {
+                let alive = m
+                    .get(&txn, "alive")
+                    .map(|x| matches!(x, Value::Any(yrs::any::Any::Bool(true))))
+                    .unwrap_or(true);
+                if alive {
+                    live += 1;
+                }
+            }
+        }
+        live
     };
     assert_eq!(
-        len, 2,
-        "merged state should have 2 elements (1 server + 1 client)"
+        count, 2,
+        "merged state should have 2 live elements (1 server + 1 client)"
     );
 }
