@@ -73,6 +73,11 @@ mod bevy_plugin;
 /// `ada_m12_canvas_editor::crdt::merge_crdt_update`.
 #[cfg(feature = "crdt")]
 pub mod crdt;
+/// M-12 v0.6.0 YArray-of-YMap CRDT legacy schema. Preserved
+/// behind `--features legacy-array` (default off) for one
+/// release as a rollback path. v0.8.0 will remove this.
+#[cfg(feature = "legacy-array")]
+pub mod crdt_legacy_array;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
 /// M-12 v0.5.0 server-side reconciliation. Only compiled with

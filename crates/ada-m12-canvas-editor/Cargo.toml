@@ -190,6 +190,12 @@ crdt = []
 # `server` and `legacy-lww` are functionally equivalent in
 # v0.6.0; both enable the same `pub mod server_recon` block.
 legacy-lww = []
+# v0.7.0: keep the v0.6.0 YArray-of-YMap schema available
+# behind a feature flag for one release as a rollback path.
+# v0.8.0 will remove this flag. New code should use the
+# v0.7.0 YMap-keyed-by-uuid schema in `crdt.rs` (the default
+# `crdt` feature flag).
+legacy-array = ["crdt"]
 
 [lints]
 workspace = true
