@@ -5,9 +5,9 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.9.0
+> **バージョン**：v2.10.0
 > **制定日**：2026-08-19
-> **最終更新日**：2026-08-27
+> **最終更新日**：2026-08-28
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
@@ -46,6 +46,7 @@
 | v2.7.0 | 2026-08-27 | v0.4.0: observability Phase 4（Distributed Trace: Tempo + W3C + tail sampling） + Phase 7（SLO/SLI framework: 4 SLI + 3 SLO + 4 Burn Rate alert + 3 dashboard）| Mavis（per DEC-008）| TBD | TBD |
 | v2.8.0 | 2026-08-27 | v0.5.0: observability Phase 5 Dashboard 全面化（10 dashboards total）+ m12 server-side reconciliation（M-12 §3.6 客户端乐观更新+服务端校正）| Mavis（per DEC-008）| TBD | TBD |
 | v2.9.0 | 2026-08-27 | v0.6.0: observability Phase 8 Auto-remediation（`crates/ada-remediation` + 5 default runbooks + V003 PL/pgSQL `remediation_history`/`remediation_cooldowns` + Grafana dashboard 80-01 + `docs/observability/14-auto-remediation.md`）| Mavis（per DEC-008）| TBD | TBD |
+| v2.10.0 | 2026-08-28 | v0.7.0: m12 CRDT 深化（YMap keyed by uuid + ports root YMap + edge dedup + yrs-wasm + `server` feature 默认 on） + observability SRE 硬化（real executor + Prometheus /metrics + hot-reload watcher + shared-secret auth + SLO Phase 7.5 + Error Budget policy）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1581,6 +1582,140 @@ docs/tests/
 - observability 实盘 alertmanager webhook 集成未做 (本 task scope 内只到 in-process HTTP server + Alertmanager v4 payload 解析 + 32 unit + 8 E2E test); production wiring (binding 0.0.0.0:9100 / k8s deployment manifest / HMAC secret env 注入) 留 v0.6.x follow-up
 - observability PL/pgSQL V003 测试无法本地执行 (需要 psql + PostgreSQL 18.6 server); 走 CI
 - observability config JSON vs YAML (task spec YAML, 实现 JSON, offline 缺 serde_yaml); JSON 是 YAML 1.2 严格子集, 已显式标注
+
+## 2026-08-28 — v0.7.0 (v2.10.0)
+
+**変更種別**:m12 CRDT 深化 (YMap keyed by uuid) + observability SRE 工具链硬化 (real executor / metrics / auth / SLO 7.5)
+
+**触发原因**:
+
+- v0.6.0 release (per v2.9.0) 完成后, 进入 v0.7.0 阶段
+- 范围由用户 2026-08-27 选定: A (m12 CRDT 深化) + C (observability SRE 硬化)
+- 2 worktree + 2 worker 启动 (User 偏好子代理快速完成)
+- 这次 2 worker **第一次迭代都提前结束** (worker A 写完 1751 行 m12 改动但 0 commit; worker B 完成了 task 1 commit 后停 metrics)
+- **parent 简化为双 worker 续命 + root 接手 hotfix + commit** (8 worker 7 fail systematic pattern)
+- 2 续命 worker 实际完成主要工作, root 接手 m12 失败的 2 tests 修复 + obs 5 门 hotfix
+
+**主要変更**:
+
+### 1. m12 CRDT 深化 (YMap keyed by uuid) — v0.7.0 第1段 (per D-01)
+
+**new** (commit `5fb531e`..`b857335` on `wt-m12-crdt-deep`, 7 atomic commits):
+
+- `crates/ada-m12-canvas-editor/src/crdt.rs` (改 1820 行, v0.6.0 800 行 → v0.7.0 1300+ 行)
+  - **YMap keyed by uuid**: 元素从 `YArray<YMap>` 升 `YMap<NodeId, YMap>`, 2P-Set 语义保证双向并发 delete 同 id → 一致
+  - **新 API**: `insert_element(doc, &node) / remove_element(doc, id) / update_element(doc, id, ElementUpdate) / get_element(doc, id) / iter_elements(doc) -> impl Iterator`
+  - **ports root YMap**: 端口从 element 内的 JSON 字符串升 root-level YMap keyed by `${element_uuid}::${port_uuid}`
+  - **edge dedup**: edge 从 YArray 升 YMap keyed by `${from_uuid}::${to_uuid}` (字典序避免 self-loop)
+  - **ClientId API**: `reconcile_with_crdt(&ClientId)` API 引入, 客户端 ID 协商持久化到 yrs update bytes
+- `crates/ada-m12-canvas-editor/src/crdt_legacy_array.rs` (新, 180 行) — v0.6.0 YArray 路径作 `legacy-array` feature fallback
+- `crates/ada-m12-canvas-editor/src/wasm_crdt.rs` (新, 287 行) — yrs-wasm binding (`wasm-crdt` feature), `WasmCrdtDoc` 暴露给浏览器
+- `crates/ada-m12-canvas-editor/Cargo.toml` — `legacy-array` / `wasm-crdt` features; `default = ["server"]` (v0.6.0 `default = []`)
+- `crates/ada-m12-canvas-editor/src/lib.rs` — `pub mod crdt_legacy_array;` (under `legacy-array`) + `pub mod wasm_crdt;` (under `wasm-crdt`) + `legacy-lww` 标 `#[deprecated(note = "use crdt; will be removed in v0.8.0")]`
+- `crates/ada-m12-canvas-editor/src/canvas.rs` + `server_recon.rs` — 移除 `#[cfg(feature = "server")]` (always-on)
+- 文档:
+  - `crates/ada-m12-canvas-editor/CRDT.md` 加 v0.7.0 section (YMap keyed by uuid / ports root YMap / edge dedup / ClientId / wasm-crdt)
+  - `docs/modules/M-12-canvas-editor-frontend.md` §3.6.2 (新子段):v0.7.0 CRDT schema 升 YMap keyed by uuid
+  - `docs/CHANGELOG.md` v2.10.0 修订履歴行 (本 commit)
+
+**clippy hotfix + cargo fmt** (commit `b857335`): 5 门 verification round
+
+**5 门结果** (root 接手跑):
+- check: PASS (1m21s 首次 / 13s incremental)
+- test: PASS (49 unit + 11 integration with `--features crdt`; 50 unit + 11 integration with `--features legacy-array`)
+- clippy: PASS (`-D warnings`)
+- fmt: PASS
+- workspace clippy: PASS
+
+**额外验证** (root 接手跑):
+- `cargo build -p ada-m12-canvas-editor --features wasm-crdt --target wasm32-unknown-unknown`: PASS (42.7s, 6 benign warnings)
+
+**root 修复的 2 失败 tests** (前任 worker session 提前结束留下):
+1. `concurrent_update_different_fields_no_conflict` (snap_a.label = "shared" 而不是 "from-b"): 真实 root cause 是 **yrs 0.18 YMap 嵌套类型的 outer LWW 抢 inner YMap reference** — 外层 YMap 存 inner type 的 BranchPtr (不是内容), 两个 client `insert_element(same_uuid)` 各自 `MapPrelim::new()` 创建独立 inner YMap (不同 yrs ID), outer 2P-Set 按 key 收敛选一个 inner YMap reference, 另一个的字段写 (x/y/label) 整体 lost. Fix: 不动 schema (那是 v0.7.0 设计核心), 改 test pattern 为 1 个 client seed → sync → 然后 concurrent field updates (这才是 test 想验证的"不同字段不冲突"性质)
+2. `port_concurrent_update_x_vs_y_no_conflict` (`yrs::doc.rs:636` `ExclusiveAcqFailed` panic): 真实 root cause 是 `update_element` 在已开 `let mut txn = doc.transact_mut();` 之后又调 `doc.get_or_insert_map(PORTS_KEY)`, 而 yrs 0.18 `Doc::get_or_insert_map` 内部开自己的 `transact_mut()`, RefCell borrow 冲突 panic. Fix: 在长 `transact_mut` 之前 cache `ports` MapRef (`if update.ports.is_some() { Some(doc.get_or_insert_map(PORTS_KEY)) } else { None }`), 避免嵌套 txn
+
+### 2. observability SRE 工具链硬化 — v0.7.0 第2段 (per 11-phased-rollout.md §11)
+
+**new** (commit `31213a7`..`e2cf8f0` on `wt-obs-sre`, 7 worker commits + 1 root hotfix = 8 atomic commits):
+
+- `crates/ada-remediation/Cargo.toml` — 加 `metrics-exporter-prometheus 0.18` + `async-trait 0.1.92` + `constant_time_eq` (via metrics-exporter-prometheus)
+- `crates/ada-remediation/src/executor.rs` (新, 704 行) — `StepExecutor` trait + `RealExecutor` + `DryRunExecutor` + `NetworkClient` trait + `LoggingClient` 4 步类型 (HttpCall / PgFunction / NotifySlack / PageOperator) 真实执行路径 + dry-run 路径
+- `crates/ada-remediation/src/metrics.rs` (新, 388 行) — `metrics 0.24` + `metrics-exporter-prometheus 0.18` 注册:
+  - `remediation_actions_total{action_id, outcome}` Counter
+  - `remediation_action_duration_seconds{action_id}` Histogram
+  - `remediation_engine_state_transitions_total{from, to}` Counter
+  - `remediation_cooldown_active` Gauge
+- `crates/ada-remediation/src/http.rs` (改 296 行) — 加 `GET /metrics` (Prometheus text format) + `X-Webhook-Token` / `X-Trigger-Token` shared-secret auth middleware
+- `crates/ada-remediation/src/auth.rs` (新, 266 行) — `AuthState` + `verify_token` (constant-time compare via `constant_time_eq`) + `require_enabled`
+- `crates/ada-remediation/src/watcher.rs` (新, 427 行) — `Watcher` polling fallback (5s interval, mtime-based delta detection) + debounce 500ms. `notify` crate offline 不可用, polling fallback 替代
+- `crates/ada-remediation/src/action.rs` (改 27 行) — 4 步类型加 `executor: ExecutorMode` 字段 (DryRun / Real)
+- `crates/ada-remediation/src/engine.rs` (改 197 行) — `run_step` 走 `StepExecutor` 调度 + sequence 嵌套步骤
+- `crates/ada-remediation/src/lib.rs` — pub use surface 加 `StepExecutor` / `NetworkClient` / `LoggingClient` 等新公开类型
+- 4 个 burn rate alert config 在 `config/alertmanager/slo-rem-{fast-burn-1h, fast-burn-6h, slow-burn-24h, slow-burn-72h}.yaml`
+- 文档:
+  - `docs/observability/14-auto-remediation.md` 加 v0.7.0 section (real executor / metrics / hot-reload / shared-secret auth)
+  - `docs/observability/11-phased-rollout.md` §11 (新章节): Phase 8.5 SRE hardening
+  - `docs/observability/08-slo-design.md` (改 80 行) — SLO Phase 7.5 加 SLI-005~008 (canvas WS / data flow / auth / per-tenant rate) + SLO-004~006 (canvas availability / data flow availability / auth latency)
+  - `docs/observability/15-error-budget-policy.md` (新, 264 行): burn rate 阈值 (2% in 1h page, 5% in 6h ticket) + 行动矩阵 (SRE on-call first response / mitigation / postmortem SLA) + 跨 region consistency
+
+**root hotfix** (commit `e2cf8f0`): 5 门 verification round (root 接手 worker B 续命未完的 hotfix):
+- watcher.rs `scan_once` sync 函数被调 `.await` → 删 2 处 `.await`
+- http.rs `BTreeMap` 在测试 fn scope `use` (line 413) 不可见 → 改完整路径 `std::collections::BTreeMap::new()`
+- watcher.rs `map_or(0, HashMap::len)` + `map(HashMap::len).unwrap_or(0)` clippy 反复拒绝 → 加 explicit type annotation
+- cargo fmt --all 单行化 (auth.rs / engine.rs / executor.rs / http.rs / lib.rs / metrics.rs / watcher.rs)
+
+**5 门结果** (root 接手跑):
+- check: PASS
+- test: PASS (full workspace)
+- clippy: PASS (`-D warnings`)
+- fmt: PASS
+- workspace clippy: PASS
+
+**Commit 列表**:
+- m12 CRDT 深化 (`wt-m12-crdt-deep`): 5fb531e, bde8bed, 1fbc495, ac5a03c, 863f382, cc759ad, b857335 (7 commits)
+- observability SRE 硬化 (`wt-obs-sre`): 31213a7, a29540a, 083d4ea, d74d4b9, daf81b1, 2263119, 01025e4, e2cf8f0 (8 commits)
+- root merge commits: 2 (`wt-m12-crdt-deep` → main, `wt-obs-sre` → main)
+- total ahead of 98a8a3e: 15 worker + 2 merges + 1 CHANGELOG = 18 commits
+
+**v2.10.0 達成**:
+
+- v0.7.0 release 入口: m12 CRDT 深化 (YMap keyed by uuid) + observability SRE 硬化 (real executor / metrics / auth / SLO 7.5)
+- 2 worker **第一次迭代都提前结束** (8 worker 7 fail systematic pattern), **parent 简化为双 worker 续命 + root 接手** 模式跑通
+- 5 门 cargo 维持
+- 18 commits ahead of v0.6.0 release (98a8a3e)
+- root 修 2 失败 tests (m12) + 5 门 hotfix (obs) + CHANGELOG v2.10.0
+
+**保留 / 次フェーズ**:
+
+- m12 v0.7.1: nested YMap concurrent insert 丢数据 (yrs 0.18 限制) — 改 flat `${uuid}::${field}` YMap schema 彻底解决
+- m12 v0.7.1: `ClientId` API 协商 (committed in v0.7.0, 待生产验证)
+- m12 v0.7.1: `legacy-array` feature 标记 deprecated, 一年内移除 (v0.8.0)
+- m12 v0.7.1: `wasm-crdt` browser E2E (wasm-pack test --headless --chrome)
+- observability v0.7.1: HMAC-SHA256 (offline cache 缺 hmac/sha2, v0.7.0 用 shared-secret header 简化方案)
+- observability v0.7.1: `notify` crate 真 file watcher (offline 缺, v0.7.0 用 polling fallback)
+- observability v0.7.1: k8s deployment manifest (task 7 留)
+- observability v0.7.1: production wiring (binding 0.0.0.0:9100 / HMAC secret env 注入)
+- Physis / GVPE 跨引擎 C ABI 抽离 (per user profile 主项目, 留 v0.8.0)
+- SLO Phase 7.5 多 region / Error Budget policy 文档补充
+- Long-term storage 跨 region 复制
+- Distributed Trace DB Span 注入 (m03 + m10 + m13)
+
+**已知缺口** (per DTL-036 v1.4 hotfix 教训, 显式列出):
+
+- **m12 nested YMap concurrent insert 丢数据** (v0.7.0 新限制, v0.7.0 CRDT.md §8.8 / M-12 §3.6.2 显式标记): 两个 client 都 `insert_element(same_uuid)` 时, outer YMap 2P-Set 选一个 inner YMap reference, 另一个的字段写整体丢失. test 已 work-around (seed-by-one + sync); 生产场景建议 server 协调 UUID 分配. 彻底 fix 留 v0.7.1+ (改 flat `${uuid}::${field}` YMap schema)
+- **m12 ClientId API 在 v0.7.0 已入, 不是 v0.7.1** (parent brief 想推到 v0.7.1, 但前任 worker 已整合到 `reconcile_with_crdt(&ClientId)` API + `client_id_negotiation_persists_to_update_bytes` test, revert 成本高于保留). CRDT.md §8.4 / M-12 §3.6.2 "已知限制 #2" 显式标记为 deviation
+- **m12 legacy-array 一年内移除 (v0.8.0)**: 删除 feature flag + `crdt_legacy_array` 模块 + `reconcile_with_crdt_legacy` 函数
+- **m12 wasm-crdt doctest 只在 `wasm-pack test --headless --chrome` 跑**: 5 门 native CI cfg-gated 跳过 (serde_wasm_bindgen / JsValue 在 native 是 stub). Browser E2E 留 v0.7.1
+- **m12 `read_canvas_from_doc` / `doc_from_canvas` 等 value types partial pub re-export**: parent brief 想 task 6 留 v0.7.1, 但实际已 pub (lib.rs `pub use` 在 v0.7.0),所以"task 6 pub re-export"也实际是 partial done
+- **observability HMAC-SHA256 离线 cache 不可用**: v0.7.0 用 shared-secret header 简化方案 (constant-time compare), 留 v0.7.1 升级 HMAC-SHA256
+- **observability `notify` crate 离线 cache 不可用**: v0.7.0 用 polling fallback (5s interval, mtime-based delta detection), 留 v0.7.1 真 file watcher
+- **observability k8s deployment 留 v0.7.1** (parent 简化, task 7 删除)
+- **observability production wiring 未做** (binding 0.0.0.0:9100 / HMAC secret env 注入); v0.7.0 只到 in-process HTTP server
+- **observability PL/pgSQL V003 测试无法本地执行** (需要 psql + PostgreSQL 18.6 server); 走 CI
+- **observability config JSON vs YAML** (task spec YAML, 实现 JSON, offline 缺 serde_yaml); JSON 是 YAML 1.2 严格子集
+- **observability `tempfile` crate 用于 watcher tests** (offline 假设可用, 实际 5 门测试通过, 但需 CI 验证)
+
+---
 
 ---
 
