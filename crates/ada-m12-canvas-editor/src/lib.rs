@@ -22,6 +22,27 @@
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
 //! 設計書: docs/modules/M-12-canvas-editor.md (DOC-MOD-012)
+//!
+//! ## Feature flags
+//!
+//! - `default = []` — 纯 Rust,无 WASM / Bevy 编译负担。`cargo
+//!   test --workspace` 与 CI 5 门(检查/测试/clippy/fmt/wasm-pack)
+//!   走 default 路径。
+//! - `wasm` — 拉 `wasm-bindgen` / `js-sys` /
+//!   `serde-wasm-bindgen` / `console_error_panic_hook`,启用
+//!   [`wasm::WasmCanvas`] JS 绑定(见 `src/wasm.rs`)。
+//! - `bevy` — 拉 `bevy_ecs` 0.14 + `bevy_app` 0.14,启用
+//!   [`bevy_plugin::CanvasPlugin`] Bevy 插件(见
+//!   `src/bevy_plugin.rs` + `src/bevy_bridge.rs`)。
+//! - `full` — 同时启用 wasm + bevy,产出最大体积的 WASM。
+//! - `wasm-test` — 在 wasm feature 之上加 `wasm-bindgen-test`,
+//!   供 `wasm-pack test --headless --chrome` 跑浏览器内测试。
+//!
+//! 设计依据: `docs/decisions/02-design-adrs.md` D-02 (sandbox
+//! WASM), D-04 (Bevy 0.14 stable), D-05 (WASM 8 MB / gzip 3 MB),
+//! `docs/modules/M-12-canvas-editor-frontend.md` §3.4 (WASM ↔
+//! JS 桥接契约), `docs/architecture/06-rust-tech-selection.md`
+//! §10 (Bevy 0.14 + bevy_egui) + §20 (WASM size 风险对策).
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]
@@ -36,10 +57,32 @@ mod error;
 mod history;
 mod node;
 
+#[cfg(feature = "bevy")]
+mod bevy_bridge;
+#[cfg(feature = "bevy")]
+mod bevy_plugin;
+#[cfg(feature = "wasm")]
+mod wasm;
+
 pub use canvas::{Canvas, Edge};
 pub use error::{CanvasError, Result};
 pub use history::{EditHistory, EditOp};
 pub use node::{CanvasNode, NodeId, NodeKind, Port, Position};
+
+/// WASM 绑定模块。仅在 `--features wasm` 时存在。
+#[cfg(feature = "wasm")]
+pub mod wasm_bindings {
+    pub use crate::wasm::{CanvasSnapshot, WasmCanvas};
+}
+
+/// Bevy 插件模块。仅在 `--features bevy` 时存在。
+#[cfg(feature = "bevy")]
+pub mod bevy_integration {
+    pub use crate::bevy_bridge::sync_canvas_system;
+    pub use crate::bevy_plugin::{
+        CanvasNodeComp, CanvasPlugin, CanvasPositionComp, CanvasResource,
+    };
+}
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace
 /// version per D-09).

@@ -27,21 +27,25 @@ impl Edge {
 /// In-memory canvas document.
 #[derive(Debug, Default)]
 pub struct Canvas {
-    inner: Mutex<Inner>,
+    /// Mutex-guarded state. `pub(crate)` so the feature-gated WASM
+    /// bindings (`src/wasm.rs`) can do bulk snapshot / restore via
+    /// `replace_state` without going through the public mutation API
+    /// one node at a time.
+    pub(crate) inner: Mutex<Inner>,
 }
 
 #[derive(Debug, Default)]
-struct Inner {
+pub(crate) struct Inner {
     /// Document name (e.g. "ada-flow-1").
-    name: String,
+    pub(crate) name: String,
     /// All nodes, keyed by id.
-    nodes: HashMap<NodeId, CanvasNode>,
+    pub(crate) nodes: HashMap<NodeId, CanvasNode>,
     /// All edges. Stored as a list (not a set) so the order is
     /// deterministic and the same edge can be inspected for
     /// ordering.
-    edges: Vec<Edge>,
+    pub(crate) edges: Vec<Edge>,
     /// Optimistic-concurrency version, bumped on every write.
-    version: u64,
+    pub(crate) version: u64,
 }
 
 impl Canvas {
