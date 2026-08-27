@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.5.0
+> **バージョン**：v2.6.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
@@ -42,6 +42,7 @@
 | v2.3.0 | 2026-08-26 | v0.1.0 コードリリース + Rust 1.98.0 升版 + PostgreSQL 18.6 ドキュメント代換（13 ファイル横断、PR review 模式逐ファイル commit）| Mavis（per DEC-008）| TBD | TBD |
 | v2.4.0 | 2026-08-27 | v0.2.0 第1段: PL/pgSQL 6 存过（db/） + DOC-DEC-003 細化決議 25 ファイル + observability Phase 0-1 1-key-up stack（Prometheus/Loki/Grafana/Jaeger/OTel）| Mavis（per DEC-008）| TBD | TBD |
 | v2.5.0 | 2026-08-27 | v0.2.0 第2段: ada-telemetry v0.2.0 実装（OpenTelemetry SDK + OTLP + Prometheus） + m12 WASM compile + Bevy 0.14 integration（per D-02/D-04/D-05）| Mavis（per DEC-008）| TBD | TBD |
+| v2.6.0 | 2026-08-27 | v0.3.0: m12 bevy_egui 集成（双向 ECS↔Canvas + 拖拽 + 属性面板） + observability Phase 6（Alertmanager + MinIO Long-term storage）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1048,6 +1049,127 @@ docs/tests/
 - bevy_egui 集成（ECS → Canvas 反向 + 拖拽，per M-12 §3.6）
 - `wasm-opt` (binaryen) air-gapped CI 环境用 `wasm-pack build --no-opt`
 - CHANGELOG v2.6.0 留给 v0.3.0 阶段（m12 bevy_egui 集成 + observability Phase 2 + db CI）
+
+---
+
+## 2026-08-27 — v0.3.0（v2.6.0）
+
+**変更種別**：m12 bevy_egui 集成（双向 Canvas↔ECS）+ observability Phase 6（Alert + Long-term storage）
+
+**触发原因**：
+
+- v0.2.0 release (第1+2 段) 完成后, 进入 v0.3.0 阶段
+- 2 worktree + 2 worker 并行推进(模式同 v0.2.0 第2段)
+- WT-1 (m12 bevy_egui) 2 test failed, root 接手修 (test 设计错 + egui 0.28 API 变化)
+- WT-2 (observability alertmanager) 1 doctest failed, root 接手修 (pre-existing root bug)
+
+**変更内容**：
+
+### 1. m12 bevy_egui 集成（per M-12 §3.6 客户端乐观更新+服务端校正）
+
+**new** (commit `7e833d7` / merge `6b8bff2`, 6 files / 2894 insertions / 459 deletions):
+
+- `crates/ada-m12-canvas-editor/src/egui_integration.rs` (新模块 ~482 行)
+  - `CanvasInspectorPlugin` (Bevy Plugin, 挂 EguiPlugin + 3 systems)
+  - `NodeInspectorState` (Resource, 选中节点)
+  - `node_inspector_system` (egui 右侧 SidePanel, TextEdit + DragValue 写回 ECS)
+  - `sync_ecs_to_canvas_system` (ECS 组件变更 → Canvas 反向 push, try_lock 避免死锁)
+  - `drag_node_system` (host-driven begin_drag/update_drag/end_drag, 不绑死 input 源)
+  - `NodeDragState` (Resource, 拖拽状态)
+  - 4 unit tests
+- `crates/ada-m12-canvas-editor/Cargo.toml`
+  - 加 `bevy_egui` feature: dep:bevy_egui + dep:egui + dep:egui_extras
+  - 加 bevy_egui 跟 bevy feature 互斥(共用 bevy_ecs / bevy_app)
+- `crates/ada-m12-canvas-editor/src/lib.rs`
+  - 加 `#[cfg(feature = "bevy_egui")] pub mod egui_integration;`
+- `crates/ada-m12-canvas-editor/src/bevy_plugin.rs`
+  - `CanvasPlugin::build` 加 init_resource + add_systems
+- `crates/ada-m12-canvas-editor/src/node.rs`
+  - `Position` derive `Default + PartialEq` (egui_integration test 用)
+- `Cargo.lock` — 5 个新 deps 锁定
+
+**Root hotfixes** (per 代签新规则 / 无证据叙事 = 禁止):
+- `egui_integration.rs:472` `reverse_sync_writes_position` test 设计错: test 预先 `world.spawn(entity)`, forward sync 又 spawn 一次, q.iter() 拿到 2 个 entity 共享同一 NodeId, 第二次 reverse sync 把 (42, 7) 改回 (0, 0)
+  - 改: test 不预先 spawn entity, 让 forward sync 创建, 然后通过 query 找到 entity 改 position
+- `egui_integration.rs:379` `inspector_panel_renders` test 在 egui 0.28 panic ("Called available_rect() before Context::run()")
+  - 改: 用 `ctx.run(RawInput::default(), |ctx| { ... })` 包裹 SidePanel::show
+
+**検証**:
+- 5 门 cargo check/test/clippy -D warnings/fmt/workspace clippy 全 GREEN
+- m12 bevy_egui feature: 40 tests passed (32 unit baseline + 5 bevy sync + 3 egui_integration)
+- m12 default: 632 tests passed (workspace 全过)
+- WASM artifact size 验证略过 (host 无 wasm-pack, 但 wasm feature 没改动, 默认 build 不变)
+
+### 2. observability Phase 6 Alertmanager + MinIO Long-term storage
+
+**new** (commit `c95a971` / merge `2da20ae`, 21 files / 1016 insertions):
+
+- `observability/alertmanager/alertmanager.yml` (208 行) — route 树 + receivers + inhibit_rules
+- `observability/alertmanager/templates/{default,email,slack}.tmpl` (3 个通知模板)
+- `observability/minio/init-bucket.sh` (104 行) — MinIO bucket init (90d retention)
+- `observability/minio/README.md` (46 行) — MinIO 用法
+- `observability/prometheus/alerts/scaling_alert.yml` — P3 scaling 告警 (CPU > 80% 30m)
+- `observability/.env.example` — 环境变量模板 (PLACEHOLDER 占位)
+- `observability/scripts/init-prometheus-remote-write.sh` — remote_write 路径 init
+
+**改动** (10 files):
+- `observability/docker-compose.yml` — 加 alertmanager (9093) + minio (9000+9001) + mc init container
+- `observability/prometheus/prometheus.yml` — alerting.alertmanagers + remote_write (MinIO S3)
+- `observability/prometheus/alerts/{app_down,high_error_rate,high_latency,low_disk}.yml` — 改 severity 标签
+- `observability/grafana/provisioning/datasources/datasources.yml` — 加 Alertmanager UI URL
+- `observability/scripts/{init.sh,init.ps1,validate-configs.py}` — 加 healthcheck + lint
+- `crates/ada-telemetry/src/lib.rs` — 修 root 留下的重复 doc-test 注释块
+
+**Alertmanager 配置**:
+- 5 receivers: `default` / `pagerduty_critical` (P1) / `slack_warnings` (P2) / `email_digest` (P3) + templates
+- route: P1 group_wait 10s, repeat 1h; P2 30s/4h; P3 5m/24h
+- inhibit_rules: P1 inhibit P2 (相同 alertname + service)
+- 所有 secret 用 PLACEHOLDER 占位 (per 2026-08-27 11:06 JST user 硬规则)
+
+**MinIO Long-term storage**:
+- 镜: `minio/minio:RELEASE.2024-10-29T16-01-44Z` (锁 minor version, 不写 `latest`)
+- API 端口 9000 + Console 9001
+- bucket `prometheus-tsdb` (90d retention via lifecycle policy)
+- Prometheus remote_write: `http://minio:9000/api/v1/remote/admiral`
+- `write_relabel_configs` keep `ada_.*` (过滤只推 ada_ metrics, 减小存储)
+
+**Root hotfixes** (per 代签新规则 / 无证据叙事 = 禁止):
+- `ada-telemetry/src/lib.rs:100` 重复的 doc-test 注释块 (pre-existing root WT-1 v2 留下的 bug)
+  - 改: 删重复, 保留一份完整 doc-test
+
+**検証**:
+- 5 门 cargo check/test/clippy -D warnings/fmt/workspace clippy 全 GREEN
+- cargo test --workspace: 633 passed (632 + 1 fixed doctest)
+- yaml/json lint: 17/17 OK
+- docker compose config: 10 services 全部解析
+- 环境变量安全: 全部 PLACEHOLDER, 不 print 真实值
+
+### 3. governance 整理
+
+- `.gitignore` 一時ログ除外 (WT-1 v2 + WT-2 merge 残留)
+
+**影響範囲**:
+
+- `crates/ada-m12-canvas-editor/` 5 files 改 + 1 file 新增 (2894 行)
+- `crates/ada-telemetry/src/lib.rs` 1 file 改 (3 行 hotfix)
+- `observability/` 15 files 改 + 6 files 新增 (1016 行)
+- `Cargo.lock` 重生成 (合并 m12 bevy_egui + obs alertmanager 依赖)
+
+**v2.6.0 達成**:
+
+- v0.3.0 release 入口: 双向 Canvas↔ECS 编辑器 + 完整告警 + Long-term storage
+- 5 worker 全部 push (v0.2.0 第1段 3 + v0.2.0 第2段 2 + v0.3.0 2)
+- 5 门 cargo 维持 (633 tests passed)
+- 32 commits ahead of v2.3.0 (v0.1.0 release)
+
+**保留 / 次フェーズ**:
+
+- m12 bevy_egui 浏览器 E2E (Chrome headless wasm-pack test)
+- observability Phase 4 Distributed Trace (Tempo + 端到端 trace 拼接)
+- observability Phase 7 SLO/SLI 框架 (Error Budget policy)
+- m12 bevy_egui server-side reconciliation (M-12 §3.6 服务端校正逻辑)
+- Long-term storage 数据保留策略 (90d → 1y, 跨 region 复制)
+- CHANGELOG v2.7.0 留给 v0.4.0 阶段
 
 ---
 
