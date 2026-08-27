@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.8.0
+> **バージョン**：v2.9.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
@@ -45,6 +45,7 @@
 | v2.6.0 | 2026-08-27 | v0.3.0: m12 bevy_egui 集成（双向 ECS↔Canvas + 拖拽 + 属性面板） + observability Phase 6（Alertmanager + MinIO Long-term storage）| Mavis（per DEC-008）| TBD | TBD |
 | v2.7.0 | 2026-08-27 | v0.4.0: observability Phase 4（Distributed Trace: Tempo + W3C + tail sampling） + Phase 7（SLO/SLI framework: 4 SLI + 3 SLO + 4 Burn Rate alert + 3 dashboard）| Mavis（per DEC-008）| TBD | TBD |
 | v2.8.0 | 2026-08-27 | v0.5.0: observability Phase 5 Dashboard 全面化（10 dashboards total）+ m12 server-side reconciliation（M-12 §3.6 客户端乐观更新+服务端校正）| Mavis（per DEC-008）| TBD | TBD |
+| v2.9.0 | 2026-08-27 | v0.6.0: observability Phase 8 Auto-remediation（`crates/ada-remediation` + 5 default runbooks + V003 PL/pgSQL `remediation_history`/`remediation_cooldowns` + Grafana dashboard 80-01 + `docs/observability/14-auto-remediation.md`）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
