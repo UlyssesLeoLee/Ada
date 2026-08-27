@@ -1,0 +1,250 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Phase 5 Dashboard 全面化 — 90-04 Business Overview: 業務層 metrics dashboard。Active users / Sessions per tenant / Data flow executions / Canvas edits / Tenant count / Business event funnel。Per DOC-OBS-006 §13 業務別ビュー + DOC-OBS-011 §7 Phase 5。営業/データエンジニア/IT 管理者/SRE 共通の業務俯瞰用。",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "business-overview",
+  "title": "Business Overview (90-04)",
+  "tags": ["ada", "phase-5", "business", "tenant", "user", "canvas", "dataflow"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Active users (last 5m)",
+      "description": "直近 5 分間のアクティブユーザー数。distinct(user_id) from ada_user_active gauge。営業・経営層 KPI。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "count(count by (user_id) (ada_user_active))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "green", "value": 10}
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active tenants",
+      "description": "ada_tenant_active gauge。マルチテナント SaaS のテナント健全性。0 → 重大障害。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "expr": "count(ada_tenant_active == 1)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Sessions per tenant (top 10)",
+      "description": "テナント別アクティブセッション数。重いテナント (top 10) を俯瞰。multi-tenant capacity planning 用。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "topk(10, sum by (tenant_id) (ada_app_active_sessions))",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Data flow executions per minute (M-03 engine)",
+      "description": "M-03 Data Flow Engine の flow execution rate (1m)。データパイプライン稼働状況。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "targets": [
+        {
+          "expr": "sum(rate(ada_app_data_flow_executions_total[1m])) * 60",
+          "legendFormat": "executions/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Canvas edits per minute (CRDT operations)",
+      "description": "Canvas edit (CRDT operation) rate (1m)。コラボ編集アクティビティ俯瞰。リアルタイム协作密度指標。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(rate(ada_app_canvas_crdt_operations_total[1m])) * 60",
+          "legendFormat": "edits/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (canvas_id) (rate(ada_app_canvas_crdt_operations_total[1m])) * 60",
+          "legendFormat": "canvas {{canvas_id}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Business events funnel (by event_type, rate 5m)",
+      "description": "業務イベント funnel — user_login / canvas_created / flow_executed / rbac_granted 等。営業ファネル分析。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "sum by (event_type) (rate(ada_app_business_events_total[5m]))",
+          "legendFormat": "{{event_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "eps",
+          "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 70, "stacking": {"mode": "normal"}}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Per-tenant activity (top 5 by request rate)",
+      "description": "テナント別 HTTP リクエスト率 (top 5)。重いテナント / no-op テナントの検出。multi-tenant fair-share 検証。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "topk(5, sum by (tenant_id) (rate(ada_app_api_gateway_requests_total[5m])))",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Tenant DB rows (Postgres, sum across tenants)",
+      "description": "Postgres tenant 行数合計 (pg_stat_user_tables.n_live_tup sum)。データ量成長モニタリング。",
+      "datasource": {"type": "postgres", "uid": "postgres"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {
+          "rawSql": "SELECT sum(n_live_tup) AS rows FROM pg_stat_user_tables WHERE schemaname = 'public';",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    }
+  ]
+}

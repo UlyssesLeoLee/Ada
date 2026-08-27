@@ -1,0 +1,242 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Phase 5 Dashboard 全面化 — 60-03 Network Overview: ネットワーク層 metrics dashboard。HTTP request rate per service / status code distribution / TCP connection states / DNS query latency p99 / service-to-service latency matrix / packet drops。Per DOC-OBS-006 §9 60 Network + DOC-OBS-011 §7 Phase 5。オンコール時のトラフィック異常・接続品質問題特定用。",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "network-overview",
+  "title": "Network Overview (60-03)",
+  "tags": ["ada", "phase-5", "network", "http", "tcp", "dns"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "HTTP request rate (RPS) per service",
+      "description": "全サービスの HTTP リクエスト rate (5m)。api_gateway からの流入を俯瞰。ada_app_api_gateway_requests_total。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(ada_app_api_gateway_requests_total[5m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HTTP status code distribution (RPS by status)",
+      "description": "HTTP status code 別 RPS 分布。2xx / 4xx / 5xx 比率でエラー急増検出。high_error_rate alert 連動。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(ada_app_api_gateway_requests_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "p50 / p95 / p99 latency per service",
+      "description": "エンドツーエンド HTTP レイテンシ分位点。p99 = high_latency alert 閾値 1s。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (service, le) (rate(ada_app_api_gateway_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{service}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (service, le) (rate(ada_app_api_gateway_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{service}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (service, le) (rate(ada_app_api_gateway_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{service}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.5},
+              {"color": "red", "value": 1.0}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "TCP established connections per node (USE: Saturation)",
+      "description": "ノード別 TCP 確立中接続数。接続容量飽和検出。node_netstat_Tcp_CurrEstab。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "node_netstat_Tcp_CurrEstab",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "TCP retransmissions per node (network quality)",
+      "description": "TCP 再送セグメント数 / 秒。ネットワーク品質劣化の兆候。node_netstat_Tcp_RetransSegs。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "rate(node_netstat_Tcp_RetransSegs[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 100}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Service-to-service latency p99 (top 10 by call volume)",
+      "description": "サービス間 RPC p99 レイテンシ。トレース span duration histogram より算出。どのサービスペアが遅いかが一目瞭然。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.99, sum by (source_service, destination_service, le) (rate(ada_app_internal_rpc_duration_seconds_bucket[5m]))))",
+          "legendFormat": "{{source_service}} → {{destination_service}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.25},
+              {"color": "red", "value": 0.5}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Network packet drops per node (interface-level)",
+      "description": "ノード / インターフェース別ネットワークパケット drop。NIC 過負荷 / カーネル buffer 飽和検出。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {
+          "expr": "rate(node_network_mtu_drop_total[5m])",
+          "legendFormat": "mtu_drop {{instance}} {{device}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(node_network_transmit_drop_total{device!~\"lo\"}[5m])",
+          "legendFormat": "tx_drop {{instance}} {{device}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 10}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    }
+  ]
+}

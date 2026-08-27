@@ -1,0 +1,275 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Phase 5 Dashboard 全面化 — 10-02 Infrastructure Overview: ホスト/コンテナ/ネットワーク層 metrics dashboard。12 ノードクラスタの capacity view (CPU / Memory / Disk / Network per node) + container metrics (cAdvisor / node_exporter) + pod restart count。Per DOC-OBS-006 §4 10 Infrastructure + §5 20 Kubernetes + DOC-OBS-011 §7 Phase 5。SRE on-call 30 秒以内状況把握用。",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "infrastructure-overview",
+  "title": "Infrastructure Overview (10-02)",
+  "tags": ["ada", "phase-5", "infrastructure", "use", "node-exporter", "cadvisor"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "CPU usage per node (USE: Utilization)",
+      "description": "ノード別 CPU 使用率 (1 - idle rate)。閾値 70% yellow / 90% red (scaling_alert 連動)。node_exporter metrics。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.7},
+              {"color": "red", "value": 0.9}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Memory usage per node (USE: Utilization)",
+      "description": "ノード別メモリ使用率 (1 - MemAvailable / MemTotal)。閾値 80% yellow / 90% red。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.8},
+              {"color": "red", "value": 0.9}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Disk usage per node (USE: Utilization)",
+      "description": "ノード別ディスク使用率 (1 - avail / size)。閾値 80% yellow / 90% red (low_disk アラート連動)。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "1 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"})",
+          "legendFormat": "{{instance}} {{mountpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.8},
+              {"color": "red", "value": 0.9}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Network IO per node (USE: Utilization)",
+      "description": "ノード別ネットワーク受信バイト数 / 秒。帯域飽和の兆候。node_exporter。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "rate(node_network_receive_bytes_total{device!~\"lo|docker0|cbr0|flannel.*\"}[5m])",
+          "legendFormat": "{{instance}} {{device}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Cluster node count (capacity view)",
+      "description": "12 ノードクラスタ全体の UP 数。`up == 1` ノード数で健全性俯瞰。0 → app_down alert。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(up{job=\"node-exporter\"} == 1)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 9},
+              {"color": "green", "value": 12}
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Running containers (cAdvisor)",
+      "description": "ada namespace で動作中のコンテナ数合計。cAdvisor / kube-state-metrics。急減 → Pod eviction 兆候。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(kube_pod_container_status_running{namespace=\"ada\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "green", "value": 5}
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Pod restart count (rate, 1h) — 起動失敗兆候",
+      "description": "ada namespace 配下 Pod の再起動 rate。 CrashLoopBackOff / OOMKilled 兆候。kube_pod_container_status_restarts_total。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 16, "x": 0, "y": 22},
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(kube_pod_container_status_restarts_total{namespace=\"ada\"}[1h]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Load average (5m) per node",
+      "description": "ノード別 5 分平均 Load Average。CPU 飽和予兆検出 (USE: Saturation)。node_exporter / node_load5。",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 22},
+      "targets": [
+        {
+          "expr": "node_load5",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 4},
+              {"color": "red", "value": 8}
+            ]
+          }
+        }
+      },
+      "options": {"legend": {"showLegend": true, "displayMode": "table", "placement": "right"}}
+    }
+  ]
+}

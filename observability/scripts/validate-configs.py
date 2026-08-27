@@ -50,6 +50,10 @@ JSON_FILES = [
     "observability/grafana/dashboards/slo-overview.json",
     "observability/grafana/dashboards/slo-burn-rate.json",
     "observability/grafana/dashboards/slo-availability.json",
+    # Phase 5 Dashboard 全面化 (DOC-OBS-011 §7) — 10/10 完備
+    "observability/grafana/dashboards/infrastructure.json",
+    "observability/grafana/dashboards/network.json",
+    "observability/grafana/dashboards/business.json",
 ]
 
 
