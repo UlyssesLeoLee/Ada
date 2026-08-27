@@ -125,6 +125,13 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 #   bundle 场景)。
 # - wasm-test: 在 wasm feature 之上加 wasm-bindgen-test,供
 #   `wasm-pack test --headless --chrome` 跑浏览器内测试。
+# - server: M-12 v0.5.0 server-side reconciliation (server_recon.rs)
+#   + m13 reconcile endpoint integration tests。default off —
+#   不污染 5 门 default-build 路径。`serde` 已在主依赖列表
+#   (非 optional),所以这里只列 `serde/derive` 作为 re-export
+#   reminder,实际不引入新依赖。`chrono` 不需要(无时间戳字段
+#   — v0.5.0 LWW 策略按 server 时钟权威解析,client 不参与
+#   排序),留作 v0.6.0 CRDT 升级时再加。
 [features]
 default = []
 wasm = [
@@ -143,6 +150,12 @@ bevy = ["dep:bevy_ecs", "dep:bevy_app"]
 bevy_egui = ["bevy", "dep:bevy_egui", "dep:egui"]
 full = ["wasm", "bevy"]
 wasm-test = ["wasm", "dep:wasm-bindgen-test"]
+# v0.5.0 server-side reconciliation. Currently introduces no new
+# deps (serde is already non-optional in [dependencies]); the
+# feature flag exists to gate the `pub mod server_recon` block
+# and the integration tests under `tests/integration.rs` (which
+# use `#[cfg(feature = "server")]`).
+server = []
 
 [lints]
 workspace = true

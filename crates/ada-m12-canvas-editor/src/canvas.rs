@@ -60,6 +60,39 @@ impl Canvas {
         }
     }
 
+    /// Build a canvas from explicit parts. `pub(crate)` so the
+    /// feature-gated `server_recon` module can construct a merged
+    /// canvas without going through the version-bumping public
+    /// mutators one node at a time.
+    ///
+    /// Caller is responsible for supplying a `version` that is
+    /// consistent with the merge result (typically
+    /// `max(server.version, client.version) + 1`). Node ids in
+    /// `nodes` should be unique; duplicates are silently
+    /// overwritten (last write wins at the `HashMap` level —
+    /// callers that need strict dedup must pre-filter).
+    ///
+    /// Gated by `feature = "server"` to avoid dead-code warnings
+    /// in the default 5-gate CI build (the only caller,
+    /// `server_recon`, is itself feature-gated).
+    #[cfg(feature = "server")]
+    pub(crate) fn from_parts(
+        name: String,
+        nodes: Vec<CanvasNode>,
+        edges: Vec<Edge>,
+        version: u64,
+    ) -> Self {
+        let nodes_map = nodes.into_iter().map(|n| (n.id, n)).collect();
+        Self {
+            inner: Mutex::new(Inner {
+                name,
+                nodes: nodes_map,
+                edges,
+                version,
+            }),
+        }
+    }
+
     /// Current version.
     #[must_use]
     pub fn version(&self) -> u64 {

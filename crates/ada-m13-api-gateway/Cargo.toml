@@ -21,6 +21,15 @@ path = "src/lib.rs"
 name = "integration"
 path = "tests/integration.rs"
 
+# M-12 v0.5.0 server-side reconciliation smoke test. Registered
+# explicitly per the B2 lesson: when [lib] has a `path` and
+# tests/*.rs is non-trivial, [[test]] makes the target visible
+# to `cargo test --workspace`. The test pulls m12 with the
+# `server` feature (see [dev-dependencies]).
+[[test]]
+name = "reconcile_smoke"
+path = "tests/reconcile_smoke.rs"
+
 [dependencies]
 ada-core = { path = "../ada-core" }
 axum = "0.7"
@@ -49,6 +58,12 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+# M-12 v0.5.0 server-side reconciliation smoke tests. Pulled in
+# only for `tests/reconcile_smoke.rs` (dev-deps don't affect
+# `cargo build` of the lib / bin). The `server` feature gates
+# the `reconcile_canvas_state` API; without it the test file
+# would not compile.
+ada-m12-canvas-editor = { path = "../ada-m12-canvas-editor", features = ["server"] }
 
 [lints]
 workspace = true
