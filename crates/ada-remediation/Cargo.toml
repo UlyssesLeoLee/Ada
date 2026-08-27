@@ -67,7 +67,7 @@ async-trait = "0.1"
 [dev-dependencies]
 # In-memory store for the E2E test does not need sqlx; we exercise
 # the full engine through public APIs.
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
 

@@ -85,6 +85,7 @@ pub mod history;
 pub mod http;
 pub mod metrics;
 pub mod state;
+pub mod watcher;
 
 pub use action::{ActionOutcome, ActionStep, ExecutorMode, RemediationAction};
 pub use alert::AlertEvent;

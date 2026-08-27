@@ -5,6 +5,7 @@ use crate::alert::{AlertEvent, AlertStatus};
 use crate::error::{RemediationError, Result};
 use crate::executor::{DryRunExecutor, ExecutionContext, StepExecutor};
 use crate::state::EngineState;
+use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,8 +18,13 @@ const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct RemediationEngine {
     /// Runbook table. Populated by `with_runbooks` or
     /// `with_defaults` (the latter loads from
-    /// `config/remediation/` at startup).
-    runbooks: Vec<RemediationAction>,
+    /// `config/remediation/` at startup). Wrapped in an
+    /// `RwLock` so the v0.7.0
+    /// [`crate::watcher::Watcher`] can swap it via
+    /// [`RemediationEngine::reload_runbooks`] without
+    /// forcing every read path to take a `Mutex` on
+    /// `&mut self`.
+    runbooks: Arc<RwLock<Vec<RemediationAction>>>,
     /// Per-step executor. v0.7.0 defaults to `DryRunExecutor`
     /// so the v0.6.0 behaviour is preserved; v0.7.0 callers
     /// that want network side effects can swap in a
@@ -29,7 +35,7 @@ pub struct RemediationEngine {
 impl std::fmt::Debug for RemediationEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemediationEngine")
-            .field("runbooks", &self.runbooks)
+            .field("runbook_count", &self.runbooks.read().len())
             .field("executor", &"Arc<dyn StepExecutor>")
             .finish()
     }
@@ -38,7 +44,7 @@ impl std::fmt::Debug for RemediationEngine {
 impl Clone for RemediationEngine {
     fn clone(&self) -> Self {
         Self {
-            runbooks: self.runbooks.clone(),
+            runbooks: Arc::clone(&self.runbooks),
             executor: Arc::clone(&self.executor),
         }
     }
@@ -47,7 +53,7 @@ impl Clone for RemediationEngine {
 impl Default for RemediationEngine {
     fn default() -> Self {
         Self {
-            runbooks: Vec::new(),
+            runbooks: Arc::new(RwLock::new(Vec::new())),
             executor: Arc::new(DryRunExecutor),
         }
     }
@@ -64,7 +70,7 @@ impl RemediationEngine {
     #[must_use]
     pub fn with_runbooks(runbooks: Vec<RemediationAction>) -> Self {
         Self {
-            runbooks,
+            runbooks: Arc::new(RwLock::new(runbooks)),
             executor: Arc::new(DryRunExecutor),
         }
     }
@@ -79,9 +85,33 @@ impl RemediationEngine {
         let path = std::path::Path::new("config/remediation");
         let runbooks = crate::config::load_runbooks_from_dir(path).unwrap_or_default();
         Self {
-            runbooks,
+            runbooks: Arc::new(RwLock::new(runbooks)),
             executor: Arc::new(DryRunExecutor),
         }
+    }
+
+    /// Replace the runbook table. Called by
+    /// [`crate::watcher::Watcher`] when it detects a
+    /// change in the runbook directory. Subsequent calls
+    /// to [`Self::evaluate`] and [`Self::execute`] see
+    /// the new table on the next read.
+    ///
+    /// The current implementation is infallible (a
+    /// `Vec` swap). The method is named with a fallible
+    /// return type to leave room for v0.7.1 validation
+    /// hooks (e.g. cross-runbook id uniqueness) without
+    /// breaking the call site.
+    pub fn reload_runbooks(&self, new: Vec<RemediationAction>) {
+        let mut guard = self.runbooks.write();
+        *guard = new;
+    }
+
+    /// Snapshot of the current runbook table. Cheap
+    /// (`Vec::clone` of small structs). Used by tests
+    /// and the watcher's "fired" event.
+    #[must_use]
+    pub fn runbooks_snapshot(&self) -> Vec<RemediationAction> {
+        self.runbooks.read().clone()
     }
 
     /// Builder-style: swap the per-step executor. Used by
@@ -115,7 +145,8 @@ impl RemediationEngine {
         if !matches!(alert.status, AlertStatus::Firing) {
             return Vec::new();
         }
-        self.runbooks
+        let guard = self.runbooks.read();
+        guard
             .iter()
             .filter(|a| a.trigger.matches(&alert.alert_name))
             .filter(|a| {
