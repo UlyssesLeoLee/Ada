@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "_comment": "Phase 8 / 12-auto-remediation.md §5.3. P2/P3. The pg function `remediation_kill_idle` (v0.6.x future) closes idle sessions older than 5 min on the affected database. Notify #ada-ops so the postmortem picks up the burst.",
+  "actions": [
+    {
+      "id": "db-pool-exhausted-kill-idle",
+      "name": "DB connection pool exhausted — kill idle sessions",
+      "trigger": "DBConnectionPoolExhausted",
+      "severities": ["P2", "P3"],
+      "steps": [
+        {
+          "kind": "pg_function",
+          "name": "remediation_kill_idle",
+          "args": ["{{ $labels.database }}", "300"]
+        },
+        {
+          "kind": "notify_slack",
+          "channel": "#ada-ops",
+          "message": "auto-remediation killed idle sessions on {{ $labels.database }} (pool exhausted since {{ $labels.starts_at }})"
+        }
+      ],
+      "cooldown": 900,
+      "max_retries": 1
+    }
+  ]
+}

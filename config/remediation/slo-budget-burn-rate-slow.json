@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "_comment": "Phase 8 / 12-auto-remediation.md §5.5. SLIBurnRateSlow (5% budget in 6h) is the 'you have a few days' burn — no page, just a Slack post in #ada-warnings so the team sees it during standup. cooldown=7200 (2h) so a sustained slow burn does not flood the channel.",
+  "actions": [
+    {
+      "id": "slo-burn-slow-notify",
+      "name": "SLO budget burning slowly ({{ $labels.service }} / {{ $labels.slo }})",
+      "trigger": "SLIBurnRateSlow",
+      "severities": ["P2", "P3"],
+      "steps": [
+        {
+          "kind": "notify_slack",
+          "channel": "#ada-warnings",
+          "message": "SLO slow burn: service={{ $labels.service }} slo={{ $labels.slo }} window={{ $labels.window }} (per Phase 7 dashboard 90)"
+        }
+      ],
+      "cooldown": 7200,
+      "max_retries": 0
+    }
+  ]
+}

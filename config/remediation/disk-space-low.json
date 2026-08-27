@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "_comment": "Phase 8 / 12-auto-remediation.md §5.1. JSON (not YAML) due to offline build env (no serde_yaml in Cargo.lock). All step 'cmd'/'channel' values are template-free; alerting uses Alertmanager's separate Slack/PagerDuty receivers for the user-facing message — these auto-remediation steps are for the *operator* (sizing, postmortem trail).",
+  "actions": [
+    {
+      "id": "disk-space-low",
+      "name": "Disk space low on {{ $labels.instance }}",
+      "trigger": "DiskSpaceFillingFast",
+      "severities": ["P2", "P3"],
+      "steps": [
+        {
+          "kind": "run_command",
+          "cmd": "du",
+          "args": ["-sh", "/var/log"],
+          "timeout_secs": 30
+        },
+        {
+          "kind": "run_command",
+          "cmd": "find",
+          "args": ["/var/log", "-type", "f", "-name", "*.gz", "-mtime", "+7", "-delete"],
+          "timeout_secs": 60
+        },
+        {
+          "kind": "notify_slack",
+          "channel": "#ada-ops",
+          "message": "auto-remediation disk-space-low ran on {{ $labels.instance }} — see Phase 8 dashboard for step results"
+        }
+      ],
+      "cooldown": 1800,
+      "max_retries": 1
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "_comment": "Phase 8 / 12-auto-remediation.md §5.4. SLIBurnRateFast (2% budget in 1h) is the alert that pages the on-call per the Google SRE workbook. Auto-remediation here only *amplifies* the page; it does not attempt corrective action (the burn may be from a deploy, code regression, infra, or external — wrong retry is worse than no retry). Severity=high, cooldown=3600 so we do not double-page during a sustained burn.",
+  "actions": [
+    {
+      "id": "slo-burn-fast-page",
+      "name": "SLO budget burning fast ({{ $labels.service }} / {{ $labels.slo }})",
+      "trigger": "SLIBurnRateFast",
+      "severities": ["P1"],
+      "steps": [
+        {
+          "kind": "page_operator",
+          "severity": "high",
+          "runbook_url": "https://runbooks.ada.local/slo-burn-fast"
+        }
+      ],
+      "cooldown": 3600,
+      "max_retries": 0
+    }
+  ]
+}
