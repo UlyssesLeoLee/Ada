@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "M-12: Canvas editor. Nodes, edges, edit history with undo/redo."
+description = "M-12: Canvas editor. Nodes, edges, edit history with undo/redo. Compiles to WASM and integrates with Bevy 0.14."
 readme = "README.md"
 categories.workspace = true
 keywords.workspace = true
@@ -16,6 +16,16 @@ publish = false
 [lib]
 name = "ada_m12_canvas_editor"
 path = "src/lib.rs"
+# `crate-type = ["cdylib", "rlib"]` 是 wasm-pack 编译 WebAssembly
+# 的前提(`cdylib` 输出 .wasm,`rlib` 保留 native 默认构建以免
+# 拖累 5 门 CI 的检查/测试时间)。`cdylib` 本身在 native 目标下
+# 不会改变产物(.so / .dll / .dylib 之类),但会导致 Rust 为每
+# 个 crate-type 重新编译一次 — 接受这个 trade-off 是为了
+# `wasm-pack build` 不报错。注意 `cdylib` 在 Windows 上会尝试
+# 链接 cdylib,需要 `wasm32-unknown-unknown` 目标才能编出 .wasm;
+# native 目标 (x86_64-pc-windows-msvc) 仍然可以跑 `cargo build`
+# 走 rlib,wasm-pack 才走 cdylib。
+crate-type = ["cdylib", "rlib"]
 
 # B2 lesson: Cargo 1.85+ silently drops integration test targets
 # declared only via the implicit `tests/*.rs` discovery when the [lib]
@@ -28,7 +38,12 @@ path = "tests/integration.rs"
 
 [dependencies]
 ada-core = { path = "../ada-core" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# `tokio` baseline 是 wasm-friendly 子集(`macros,sync,time`)—
+# 这样 `--target wasm32-unknown-unknown` 直接可编。native
+# (含 CI default) 通过下面的 `[target.'cfg(not(...))']` 块
+# 累加 `rt-multi-thread` feature,保留多线程 runtime 能力。
+# 为什么不把 `rt-multi-thread` 放 baseline:`rt-multi-thread`
+# 在 wasm 上 `compile_error!` 直接拒绝编译。
 async-trait = "0.1"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -36,9 +51,67 @@ serde_json = "1"
 thiserror = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+# WASM 下 `uuid` 需要 explicit randomness source;通过 feature
+# gate 拉入 `uuid/js`(用 crypto.getRandomValues),native build
+# 不受影响。
+# (见 [features] 表 `wasm` 行尾的 "uuid/js")
+
+# === Optional WASM + Bevy integration deps ===
+# Per `docs/decisions/02-design-adrs.md` D-02 (sandbox WASM),
+# D-04 (Bevy 0.14 stable), D-05 (WASM 8 MB / gzip 3 MB).
+#
+# 所有 optional deps 默认不拉,保证 `cargo build` / `cargo test`
+# (default features) 走纯 Rust 路径,不引入 wasm-bindgen / bevy
+# 的编译期负担。feature gate 见下。
+
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+bevy_ecs = { version = "0.14", optional = true, default-features = false }
+bevy_app = { version = "0.14", optional = true, default-features = false }
+# `wasm-bindgen-test` 必须是 regular dep 才能做 optional;不能
+# 放在 `[dev-dependencies]`。`wasm-test` feature gate 控制
+# 它是否被拉入,所以 default build 不会触达。
+wasm-bindgen-test = { version = "0.3", optional = true }
+
+# Native (x86_64-pc-windows-msvc / x86_64-unknown-linux-gnu) 累加
+# `rt-multi-thread` 给 tokio — 保留现有 m12 native 行为。wasm32
+# target 不进入此块,走 baseline `macros,sync,time`。
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
+# dev-deps 同样分平台 — wasm test build 不需要 rt-multi-thread。
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+# === Features ===
+# - default: 仅 Rust 原生,不带任何 WASM / Bevy 编译负担。
+#   默认 5 门(cargo check/test/clippy/fmt + wasm-pack build)
+#   的"5 门"指 default 路径。
+# - wasm: 拉 wasm-bindgen / js-sys / serde-wasm-bindgen /
+#   console_error_panic_hook,启用 `src/wasm.rs` 暴露 JS 绑定。
+# - bevy: 拉 bevy_ecs + bevy_app,启用 `src/bevy_plugin.rs` +
+#   `src/bevy_bridge.rs` 暴露 Bevy 0.14 Plugin。
+# - full: 同时启用 wasm + bevy,产出最大体积的 WASM (前端单
+#   bundle 场景)。
+# - wasm-test: 在 wasm feature 之上加 wasm-bindgen-test,供
+#   `wasm-pack test --headless --chrome` 跑浏览器内测试。
+[features]
+default = []
+wasm = [
+    "dep:wasm-bindgen",
+    "dep:js-sys",
+    "dep:serde-wasm-bindgen",
+    "dep:console_error_panic_hook",
+    # uuid 1.x 在 wasm32 上要求显式声明 randomness source;
+    # 用 `uuid/js` 让 uuid 调 `crypto.getRandomValues`。
+    "uuid/js",
+]
+bevy = ["dep:bevy_ecs", "dep:bevy_app"]
+full = ["wasm", "bevy"]
+wasm-test = ["wasm", "dep:wasm-bindgen-test"]
 
 [lints]
 workspace = true
