@@ -78,6 +78,13 @@ pub mod crdt;
 /// release as a rollback path. v0.8.0 will remove this.
 #[cfg(feature = "legacy-array")]
 pub mod crdt_legacy_array;
+/// M-12 v0.7.0 WASM bindings for the CRDT (Yrs) sync path.
+/// Only compiled with `--features wasm-crdt` so the default
+/// 5-gate CI native path doesn't pull wasm-bindgen into the
+/// dep graph. See `src/wasm_crdt.rs` for the `WasmCrdtDoc`
+/// wrapper.
+#[cfg(feature = "wasm-crdt")]
+pub mod wasm_crdt;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
 /// M-12 v0.5.0 server-side reconciliation. Only compiled with

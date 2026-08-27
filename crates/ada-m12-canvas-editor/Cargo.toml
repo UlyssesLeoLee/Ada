@@ -196,6 +196,22 @@ legacy-lww = []
 # v0.7.0 YMap-keyed-by-uuid schema in `crdt.rs` (the default
 # `crdt` feature flag).
 legacy-array = ["crdt"]
+# v0.7.0: WASM bindings for the CRDT (Yrs) sync path. Pulls
+# in `wasm-bindgen` + `js-sys` + `serde-wasm-bindgen` and
+# enables `src/wasm_crdt.rs` (the `WasmCrdtDoc` wrapper).
+# Distinct from the existing `wasm` feature (which wraps the
+# v0.5.0 `Canvas` surface in `src/wasm.rs`); `wasm-crdt` is
+# the v0.7.0 forward path and exports the YMap-keyed-by-uuid
+# schema for the JS host. Default off: native 5-gate CI does
+# not need WASM bindings.
+wasm-crdt = [
+    "dep:wasm-bindgen",
+    "dep:js-sys",
+    "dep:serde-wasm-bindgen",
+    "dep:console_error_panic_hook",
+    "uuid/js",
+    "crdt",
+]
 
 [lints]
 workspace = true
