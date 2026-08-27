@@ -314,6 +314,66 @@ struct CollaborationState {
 
 **本地状态与服务端权威状态的一致性策略**：客户端对节点位置拖拽等高频操作采用乐观更新（本地 ECS 立即响应），通过 WebSocket 异步同步至服务端；服务端为最终权威源，若同步失败或与其他协作者的 CRDT 合并结果冲突，客户端接收服务端校正后的状态并静默纠正本地渲染（不打断用户当前操作）。
 
+#### 3.6.1 v0.6.0 CRDT 同步（Yrs）
+
+> v0.6.0 升级: v0.5.0 LWW（last-write-wins, server-wins）→ Yjs-compatible
+> CRDT（Yrs, MIT）。理由: 多人协作下 LWW 会静默丢并发客户端编辑,
+> 与 m11 rbac-collab 多人同时编辑预期不符。
+
+**CRDT 数据结构（per YDoc root layout）**:
+
+- `meta` (YMap) → `{ name, version }`
+- `elements` (YArray) → YMap 列表, 每个 YMap 含 `{ id (UUID), kind, x, y, label, ports, alive }`
+- `edges` (YArray) → YMap 列表, 每个 YMap 含 `{ from (UUID), to (UUID), alive }`
+
+每 element 是 YMap (不是 YArray 的一项) 是关键: 让 concurrent move
+同一 node 走 Yjs YMap 字段级 LWW, 而不是 YArray position conflict。
+
+**API surface** (`crates/ada-m12-canvas-editor/src/crdt.rs`,
+gated by `--features crdt`):
+
+| 函数 | 用途 |
+|---|---|
+| `merge_crdt_update(doc, remote_state, update_bytes) -> Vec<u8>` | apply remote update + return diff 让 remote 追平 |
+| `encode_state_as_update(doc) -> Vec<u8>` | full state snapshot (首次同步 / 落盘) |
+| `reconcile_with_crdt(server: &Canvas, client_update, client_version) -> CrdtReconcileResult` | end-to-end reconcile: server Canvas + client CRDT 互操作 |
+| `CrdtReconcileResult { merged_state: Vec<u8>, new_version: u64 }` | serde-derived, wire-friendly |
+
+**Fallback 开关** (Cargo features):
+
+| Feature | 状态 | 路径 |
+|---|---|---|
+| `crdt` | v0.6.0 默认 off (可 opt-in) | Yrs sync (新) |
+| `legacy-lww` | v0.6.0 默认 off | `server_recon.rs` 3-way LWW (v0.5.0) |
+| `server` | v0.5.0 alias of `legacy-lww` | 兼容 m13 集成测试 |
+
+5 门 CI 默认走 `default` (无 yrs 编译负担)。`--features crdt` 跑
+CRDT 套件, `--features legacy-lww` 跑 v0.5.0 LWW 套件 (回归)。
+
+**v0.6.0 同步协议 (3 客户端 star-shaped merge)**:
+
+```rust
+use ada_m12_canvas_editor::{
+    encode_state_as_update, merge_crdt_update, reconcile_with_crdt, Canvas,
+};
+use yrs::{Doc, Transact, WriteTxn};
+
+// Client → Server 增量同步
+let client_doc = yrs::Doc::new();
+let update = encode_state_as_update(&client_doc);
+let sv = server_doc.transact().state_vector().encode_v1();
+let diff = merge_crdt_update(&server_doc, &sv, &update)?;
+// client apply diff 后 = 同步
+
+// End-to-end reconcile (server Canvas + client CRDT)
+let result = reconcile_with_crdt(&server_canvas, &client_update_bytes, client_version)?;
+// result.merged_state: 新的 server snapshot
+// result.new_version: max(server.version, client_version) + 1
+```
+
+详细集成说明 / 迁移路径 / 已知限制见
+`crates/ada-m12-canvas-editor/CRDT.md`。
+
 ## 4. 验收要点
 
 1. **画布性能**：单画布 1,000 节点 5,000 条连线规模下，前端交互（拖拽/缩放/连线）保持 ≥ 30fps（[architecture/03-cross-cutting-risks.md §4.4](../architecture/03-cross-cutting-risks.md)）。
@@ -341,6 +401,9 @@ struct CollaborationState {
 | CodeMirror 6 | 支持 IME 的富文本编辑器 | §3.4 |
 | 协作者光标 | Awareness 渲染的远端光标 | §3.6 |
 | 服务端权威 | 服务端为最终状态源 | §3.6 |
+| CRDT | Conflict-free Replicated Data Type (Yjs-compatible) | §3.6.1 |
+| Yrs | Yjs 的 Rust 移植（m12 v0.6.0 CRDT 后端, MIT） | §3.6.1 |
+| LWW (legacy) | v0.5.0 3-way merge: server-wins on conflict | §3.6.1 |
 | WASM 包体积 | 控制首屏加载时间 | §3.5 [NF-ENV]【必須】 |
 | 帧率 (FPS) | 30fps 验收硬指标 | §3.5 [NF-PER]【必須】 |
 

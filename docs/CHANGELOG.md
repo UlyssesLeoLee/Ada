@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.8.0
+> **バージョン**：v2.9.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
@@ -45,6 +45,7 @@
 | v2.6.0 | 2026-08-27 | v0.3.0: m12 bevy_egui 集成（双向 ECS↔Canvas + 拖拽 + 属性面板） + observability Phase 6（Alertmanager + MinIO Long-term storage）| Mavis（per DEC-008）| TBD | TBD |
 | v2.7.0 | 2026-08-27 | v0.4.0: observability Phase 4（Distributed Trace: Tempo + W3C + tail sampling） + Phase 7（SLO/SLI framework: 4 SLI + 3 SLO + 4 Burn Rate alert + 3 dashboard）| Mavis（per DEC-008）| TBD | TBD |
 | v2.8.0 | 2026-08-27 | v0.5.0: observability Phase 5 Dashboard 全面化（10 dashboards total）+ m12 server-side reconciliation（M-12 §3.6 客户端乐观更新+服务端校正）| Mavis（per DEC-008）| TBD | TBD |
+| v2.9.0 | 2026-08-27 | v0.6.0 第1段: m12 canvas editor 从 LWW 迁到 Yrs CRDT（同步 API: merge_crdt_update / encode_state_as_update / reconcile_with_crdt；LWW 保留为 `legacy-lww` feature）；observability Auto-remediation 留下段 | Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1459,6 +1460,76 @@ docs/tests/
 - Distributed Trace DB Span 注入 (m03 + m10 + m13)
 - SLO Phase 7.5 (更多 service 覆盖 / 跨 region / Error Budget policy 文档)
 - CHANGELOG v2.9.0 留给 v0.6.0 阶段
+
+---
+
+## 2026-08-27 — v0.6.0 第1段（v2.9.0）
+
+**変更種別**：m12 canvas editor 从 LWW 迁到 Yrs CRDT
+
+**触发原因**：
+
+- v0.5.0 release（per v2.8.0）后, 进入 v0.6.0 阶段（per docs/observability/11-phased-rollout.md §10）
+- 范围由用户 2026-08-27 选定: CRDT (m12) + Auto-remediation (observability)
+- 本段仅含 m12 CRDT, Auto-remediation 留 v2.9.x 后续段
+- 1 worker (wt-m12-crdt) 单线推进, 3 原子 commit
+
+**主要変更**：
+
+- m12 引入 `yrs 0.18` (Yjs Rust port, MIT, offline 0.18.8 cached) — `crates/ada-m12-canvas-editor/Cargo.toml`
+- 新模块 `crates/ada-m12-canvas-editor/src/crdt.rs`（YDoc canvas types + sync API, gated by `--features crdt`）:
+  - YDoc root layout: `meta` (YMap name/version) + `elements` (YArray of YMap) + `edges` (YArray of YMap)
+  - 每个 element = YMap (id/kind/x/y/label/ports/alive) — 字段级 LWW 让并发 move / edit 不同字段不丢
+  - `merge_crdt_update(doc, remote_state, update_bytes) -> Vec<u8>` — apply remote + return diff
+  - `encode_state_as_update(doc) -> Vec<u8>` — full state snapshot
+  - `reconcile_with_crdt(server, client_update, client_version) -> CrdtReconcileResult` — end-to-end reconcile, server Canvas + client CRDT 互操作
+  - `CrdtReconcileResult { merged_state: Vec<u8>, new_version: u64 }` — serde-derived
+- LWW fallback: 新增 `legacy-lww` feature (alias `server`, 默认 off), 保留 v0.5.0 行为可切换
+- 8 lib unit tests (同步 roundtrip / 并发 insert/move/delete / 3-client 多 client / 1k elements 性能烟雾 / reconcile / malformed bytes 拒绝)
+- 1 integration test `crates/ada-m12-canvas-editor/tests/crdt_sync.rs` (3 客户端 star-shaped merge + server Canvas ↔ client CRDT 互操作)
+- 文档:
+  - `crates/ada-m12-canvas-editor/CRDT.md` (新文件, Yrs 集成说明 / API / 迁移路径 / fallback 开关)
+  - `docs/modules/M-12-canvas-editor-frontend.md` §3.6 从 "server reconciliation" 改写为 "CRDT sync", 引用新 API
+
+**v0.5.0 → v0.6.0 迁移路径**（写在 CRDT.md）：
+
+- v0.5.0 client (走 `server` feature) 与 v0.6.0 server (走 `crdt` feature) 兼容, m13 endpoint 透传 yrs update bytes
+- v0.6.0 完成后 (v0.7.0) 计划把 `server` 改默认 off + 把 server-recon 完整 deprecate
+- 元素去重 / port YArray 等限制走 v0.7.0
+
+**5 门结果**（root 接手跑, 留 known gap 段）:
+
+- check: PASS (release: 0.18.8 cached)
+- test: PASS (lib 27 + crdt unit 8 + integration 4 + crdt_sync 2 = 41 tests)
+- clippy: PASS (`-D warnings`)
+- fmt: PASS
+- workspace clippy: PASS
+
+**Commit 列表**（wt-m12-crdt 分支）:
+
+- c6d19cf feat(m12): add yrs 0.18 dep (CRDT sync backend for v0.6.0)
+- 5587f7a feat(m12): v0.6.0 CRDT (Yrs) sync — YDoc canvas types + sync API
+- 92277db test(m12): CRDT integration test (3-client star-shaped merge + reconcile)
+- 后续 commit: CRDT.md + M-12 §3.6 + CHANGELOG（本段）
+
+**保留 / 次フェーズ**：
+
+- observability Phase 8 Auto-remediation (v2.9.x 后续段)
+- m12 v0.6.0 收尾: 把 Yrs wasm-bindgen 绑定也加 `--features wasm-crdt` 测浏览器内行为
+- m12 v0.7.0: 元素去重 (YMap keyed by uuid) + port YArray + `server` 改默认 off
+- m12 bevy_egui browser E2E (Chrome headless CI)
+- Long-term storage 跨 region 复制
+- Distributed Trace DB Span 注入 (m03 + m10 + m13)
+- SLO Phase 7.5
+- CHANGELOG v2.9.x 留给 v0.6.0 后续段
+
+**已知缺口** (per DTL-036 v1.4 hotfix 教训, 显式列出):
+
+- yrs 0.18 的 `wasm` feature 不存在 (Cargo.toml 仅 `weak`); 当前未做 browser-in-wasm CRDT 跑测, 留 v0.7.0 评估 `yrs-wasm` binding
+- Yjs YArray 的双向并发 delete 同位置不 collapse (Yjs 已知行为, v0.6.0 接受; v0.7.0 改 YMap keyed by uuid 解决)
+- v0.6.0 集成测试不在浏览器内跑 (需要 wasm-pack + Chrome headless, 见 m12 v0.3.0 留下的 issue)
+- `read_canvas_from_doc` helper 是 `pub(crate)`, 未 pub-export 给 m13 cross-crate user; m13 smoke 留 v0.6.1
+- `Cargo.lock` 内 yrs = 0.18.8 来自 offline cache (D:/Ada 无网); 升级需手动 `cargo update -p yrs`, 留 v0.7.0
 
 ---
 
