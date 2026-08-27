@@ -17,34 +17,62 @@ publish = false
 name = "ada_telemetry"
 path = "src/lib.rs"
 
+# B2 lesson: Cargo 1.85+ silently drops integration test targets
+# declared only via the implicit `tests/*.rs` discovery when the [lib]
+# block also has an explicit `path = ...`. The `[[test]]` block makes
+# the test target explicit so `cargo test --workspace` actually runs
+# `tests/integration.rs`.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[features]
+# v0.2.0 default: enable OTLP trace export out of the box. Prometheus
+# pull endpoint stays opt-in (it opens a TCP listener; not every binary
+# wants that).
+default = ["otlp"]
+otlp = [
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:tracing-opentelemetry",
+]
+prometheus = [
+    "dep:metrics",
+    "dep:metrics-exporter-prometheus",
+]
+# Internal-only flag used by ada-telemetry's own tests; consumers
+# should not enable this directly.
+testing = []
+
+[dependencies]
+# Always-on: tracing facade + structured subscriber
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt", "registry"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+parking_lot = "0.12"
+time = { version = "0.3", features = ["formatting", "macros", "serde-well-known"] }
+
+# Always-on: OpenTelemetry facade (small; the SDK + exporter are gated)
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"] }
+
+# Optional — OTLP trace export
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["rt-tokio", "trace"], optional = true }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
+opentelemetry-semantic-conventions = { version = "0.32", optional = true }
+tracing-opentelemetry = { version = "0.33", default-features = false, features = ["tracing-log"], optional = true }
+tracing-core = "0.1"
+
+# Optional — Prometheus pull endpoint
+metrics = { version = "0.24", optional = true }
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"], optional = true }
+
+[dev-dependencies]
+ada-core = { path = "../ada-core" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
 [lints]
 workspace = true
-
-# ----------------------------------------------------------------------
-# Phase 0-1 OTLP exporter feature flag (per DOC-OBS-002 §2.1, 11-phased-
-# rollout.md §4). This is a **stub only** for now; the real implementation
-# is owned by the WT-1 worker ("ada-telemetry v0.2.0") and the
-# observability/ worker (this branch) must not pre-empt it.
-#
-# To enable in a follow-up:
-#   1. Land WT-1 (ada-telemetry v0.2.0) first.
-#   2. Uncomment the [features] block below.
-#   3. Add the matching dependencies from the WT-1 PR.
-#
-# Adding the feature here lets `cargo check --workspace` keep the
-# workspace valid while Phase 0-1 ships the docker-compose stack that
-# the v0.2.0 exporter will push to.
-# ----------------------------------------------------------------------
-# [features]
-# default = []
-# # Phase 1: enable the OTLP HTTP exporter so the 18 Rust crates can
-# # push metrics / logs / traces to the local otel-collector on
-# # :4317/:4318. The actual SDK binding is WT-1's scope; this flag
-# # gates the integration tests.
-# prometheus = ["dep:prometheus", "dep:opentelemetry", "dep:opentelemetry-prometheus"]
-#
-# [dependencies]
-# # Phase 1 — wired by WT-1, listed here as a reference.
-# prometheus = { version = "0.13", optional = true }
-# opentelemetry = { version = "0.24", optional = true }
-# opentelemetry-prometheus = { version = "0.16", optional = true }
