@@ -1,0 +1,72 @@
+# Error Rate SLI + SLO targets (Phase 7).
+#
+# Source: docs/observability/08-slo-design.md §2.3.
+#
+# This SLI is the **complement** of availability: it
+# counts all 5xx responses, including 5xx codes that the
+# customer may not have noticed (e.g. a 502 from a
+# down-stream service that retried internally). A 5xx
+# ratio above the target is a strong signal of systemic
+# trouble even when the user-visible availability is
+# still nominally green.
+#
+# We track the same 28-day window as availability so the
+# burn-rate calculations line up; per the SRE Workbook
+# ch. 5 this is the standard long-window for SLOs of this
+# class.
+
+slos:
+  - service: m13-api-gateway
+    sli:
+      spec:
+        # 5xx as a fraction of all requests. We deliberately
+        # *do not* subtract retries: a 5xx that was
+        # eventually retried successfully still counts
+        # against the error budget because it indicates
+        # a service that was sick long enough to need
+        # a retry.
+        success_criteria:
+          - http_response_status_class != "5xx"
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[28d]))
+    objectives:
+      - target: 0.995
+        window: 28d
+        description: |
+          5xx ratio must stay below 0.5% over 28 days.
+          This is a tighter sub-SLO of the availability
+          SLO: even when availability is met, a creeping
+          5xx ratio (e.g. from a noisy canary) is
+          tracked here.
+
+  - service: m03-data-flow-engine
+    sli:
+      spec:
+        success_criteria:
+          - http_response_status_class != "5xx"
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[28d]))
+    objectives:
+      - target: 0.99
+        window: 28d
+        description: |
+          5xx ratio must stay below 1% for the
+          data-flow engine. The higher target reflects
+          the engine's broader blast radius (a single
+          failed flow can affect many rows).
+
+  - service: m10-tenant-middleware
+    sli:
+      spec:
+        success_criteria:
+          - http_response_status_class != "5xx"
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[28d]))
+    objectives:
+      - target: 0.999
+        window: 28d
+        description: |
+          5xx ratio must stay below 0.1% for the tenant
+          middleware (auth path). A 5xx in this code path
+          is treated as a security event regardless of
+          the rate.

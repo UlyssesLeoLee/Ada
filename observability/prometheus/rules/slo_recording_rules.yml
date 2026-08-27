@@ -1,0 +1,161 @@
+# SLO recording rules (Phase 7).
+#
+# Source: docs/observability/08-slo-design.md §3.3.
+#
+# These rules pre-compute the SLI ratios over the
+# standard 4 windows (5m / 1h / 6h / 24h / 72h / 28d) so
+# the burn-rate alert expressions can be evaluated cheaply.
+# Without the pre-compute, every alert evaluation would
+# re-aggregate the raw `ada_app_*` series, which is
+# expensive at 18-crate × 6-window × N-rule cardinality.
+#
+# Naming convention (per Google SRE Workbook ch. 8):
+#   slo:sli_error:rate_<window>       — bad events / window
+#   slo:sli_total:rate_<window>       — total events / window
+#   slo:availability:ratio_<window>   — 1 - error/total
+#   slo:latency:ratio_<window>_<thr>   — fraction faster than <thr>
+#   slo:error_budget:remaining_28d     — 1 - used/total
+#   slo:burnrate:rate_<short>_<long>  — burn rate at given windows
+#
+# The service labels mirror the existing ada_app_*
+# family (`service="m13-api-gateway"` etc.) so the join
+# is automatic. The `slo` label carries the SLO name
+# (`availability`, `latency_p99`, etc.) so dashboards can
+# filter without parsing metric names.
+
+groups:
+  # -----------------------------------------------------------------
+  # 1. Error / total event rates per window. The 5m window
+  # powers the realtime burn-rate alerts; the 28d window
+  # powers the long-window burn rate and the budget
+  # remaining calculation.
+  # -----------------------------------------------------------------
+  - name: slo_event_rates
+    interval: 30s
+    rules:
+      - record: slo:sli_error:rate_5m
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[5m]))
+      - record: slo:sli_total:rate_5m
+        expr: sum by (service) (rate(ada_app_requests_total[5m]))
+      - record: slo:sli_error:rate_1h
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[1h]))
+      - record: slo:sli_total:rate_1h
+        expr: sum by (service) (rate(ada_app_requests_total[1h]))
+      - record: slo:sli_error:rate_6h
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[6h]))
+      - record: slo:sli_total:rate_6h
+        expr: sum by (service) (rate(ada_app_requests_total[6h]))
+      - record: slo:sli_error:rate_24h
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[24h]))
+      - record: slo:sli_total:rate_24h
+        expr: sum by (service) (rate(ada_app_requests_total[24h]))
+      - record: slo:sli_error:rate_72h
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[72h]))
+      - record: slo:sli_total:rate_72h
+        expr: sum by (service) (rate(ada_app_requests_total[72h]))
+      - record: slo:sli_error:rate_28d
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[28d]))
+      - record: slo:sli_total:rate_28d
+        expr: sum by (service) (rate(ada_app_requests_total[28d]))
+
+  # -----------------------------------------------------------------
+  # 2. Availability ratio. 1 - error/total. The threshold
+  # comparison is done in the alert rule, not here, so the
+  # recording rule stays SLO-agnostic and one rule serves
+  # all 3 services.
+  # -----------------------------------------------------------------
+  - name: slo_availability_ratios
+    interval: 30s
+    rules:
+      - record: slo:availability:ratio_5m
+        expr: 1 - (slo:sli_error:rate_5m / slo:sli_total:rate_5m)
+      - record: slo:availability:ratio_1h
+        expr: 1 - (slo:sli_error:rate_1h / slo:sli_total:rate_1h)
+      - record: slo:availability:ratio_6h
+        expr: 1 - (slo:sli_error:rate_6h / slo:sli_total:rate_6h)
+      - record: slo:availability:ratio_24h
+        expr: 1 - (slo:sli_error:rate_24h / slo:sli_total:rate_24h)
+      - record: slo:availability:ratio_72h
+        expr: 1 - (slo:sli_error:rate_72h / slo:sli_total:rate_72h)
+      - record: slo:availability:ratio_28d
+        expr: 1 - (slo:sli_error:rate_28d / slo:sli_total:rate_28d)
+
+  # -----------------------------------------------------------------
+  # 3. Latency ratios. The fraction of requests faster
+  # than the per-service threshold. Computed via
+  # histogram_quantile is not used here (we want a
+  # fraction, not a percentile) — the bucket-le technique
+  # gives the cumulative distribution.
+  # -----------------------------------------------------------------
+  - name: slo_latency_ratios
+    interval: 30s
+    rules:
+      # m13-api-gateway: < 200ms
+      - record: slo:latency_p99:ratio_5m:m13
+        expr: |
+          sum by (service) (rate(ada_app_request_duration_seconds_bucket{le="0.2", service="m13-api-gateway"}[5m]))
+          /
+          sum by (service) (rate(ada_app_request_duration_seconds_count{service="m13-api-gateway"}[5m]))
+      - record: slo:latency_p99:ratio_28d:m13
+        expr: |
+          sum by (service) (rate(ada_app_request_duration_seconds_bucket{le="0.2", service="m13-api-gateway"}[28d]))
+          /
+          sum by (service) (rate(ada_app_request_duration_seconds_count{service="m13-api-gateway"}[28d]))
+      # m03-data-flow-engine: < 500ms
+      - record: slo:latency_p99:ratio_5m:m03
+        expr: |
+          sum by (service) (rate(ada_app_request_duration_seconds_bucket{le="0.5", service="m03-data-flow-engine"}[5m]))
+          /
+          sum by (service) (rate(ada_app_request_duration_seconds_count{service="m03-data-flow-engine"}[5m]))
+      - record: slo:latency_p99:ratio_28d:m03
+        expr: |
+          sum by (service) (rate(ada_app_request_duration_seconds_bucket{le="0.5", service="m03-data-flow-engine"}[28d]))
+          /
+          sum by (service) (rate(ada_app_request_duration_seconds_count{service="m03-data-flow-engine"}[28d]))
+      # m10-tenant-middleware: < 50ms
+      - record: slo:latency_p99:ratio_5m:m10
+        expr: |
+          sum by (service) (rate(ada_app_request_duration_seconds_bucket{le="0.05", service="m10-tenant-middleware"}[5m]))
+          /
+          sum by (service) (rate(ada_app_request_duration_seconds_count{service="m10-tenant-middleware"}[5m]))
+      - record: slo:latency_p99:ratio_28d:m10
+        expr: |
+          sum by (service) (rate(ada_app_request_duration_seconds_bucket{le="0.05", service="m10-tenant-middleware"}[28d]))
+          /
+          sum by (service) (rate(ada_app_request_duration_seconds_count{service="m10-tenant-middleware"}[28d]))
+
+  # -----------------------------------------------------------------
+  # 4. Burn rates. For each (short, long) window pair, the
+  # burn rate is the ratio of (errors in short) /
+  # (allowed errors in long), per the Google SRE MWMB
+  # recipe. The alert rules below compare the burn rate
+  # against 14.4 / 6 / 3 / 1 depending on the window pair.
+  # -----------------------------------------------------------------
+  - name: slo_burn_rates
+    interval: 30s
+    rules:
+      # Fast burn 1h (page): 14.4× means "exhaust 2% of
+      # budget in 1 hour" → 2% / (1h/28d) = ~14.4. The
+      # 28d window denominator is implicit in the
+      # (1 - SLO_target) factor that the alert rules
+      # multiply in.
+      - record: slo:burnrate:1h_5m
+        expr: slo:sli_error:rate_5m / slo:sli_total:rate_1h
+      - record: slo:burnrate:6h_30m
+        expr: slo:sli_error:rate_30m / slo:sli_total:rate_6h
+      - record: slo:burnrate:24h_2h
+        expr: slo:sli_error:rate_2h / slo:sli_total:rate_24h
+      - record: slo:burnrate:72h_6h
+        expr: slo:sli_error:rate_6h / slo:sli_total:rate_72h
+      # Add 30m and 2h numerator series so the burn-rate
+      # recording rules above resolve cleanly. (Otherwise
+      # `rate(ada_app_requests_total[30m]` would be
+      # re-aggregated on every alert evaluation.)
+      - record: slo:sli_error:rate_30m
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[30m]))
+      - record: slo:sli_total:rate_30m
+        expr: sum by (service) (rate(ada_app_requests_total[30m]))
+      - record: slo:sli_error:rate_2h
+        expr: sum by (service) (rate(ada_app_requests_total{status=~"5.."}[2h]))
+      - record: slo:sli_total:rate_2h
+        expr: sum by (service) (rate(ada_app_requests_total[2h]))

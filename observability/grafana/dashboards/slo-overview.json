@@ -1,0 +1,157 @@
+{
+  "annotations": {"list": []},
+  "description": "Phase 7 SLO overview: error budget remaining (90d), 28d availability trend, burn-rate per service. Per DOC-OBS-008 (08-slo-design.md) §5.1 this is the on-call landing page after a P1 availability alert. Three rows × three columns; one row per SLO service (m13 / m03 / m10), one column per SLO class (availability / latency / error rate).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "slo-overview",
+  "title": "SLO Overview (50-01)",
+  "tags": ["ada", "phase-7", "slo", "error-budget"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-90d", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "m13-api-gateway availability budget remaining (90d)",
+      "description": "Error budget left in the 99.9% availability SLO for m13-api-gateway, expressed as a percentage of the 28-day budget (rolling 90d window). 0% means the budget is exhausted; 100% means no errors in the window.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "1 - (1 - slo:availability:ratio_28d{service=\"m13-api-gateway\"}) / 0.001",
+          "legendFormat": "budget remaining",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.25},
+              {"color": "green", "value": 0.5}
+            ]
+          },
+          "min": 0,
+          "max": 1
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "m03-data-flow-engine availability budget remaining (90d)",
+      "description": "Error budget left in the 99.5% availability SLO for m03-data-flow-engine (rolling 90d).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "1 - (1 - slo:availability:ratio_28d{service=\"m03-data-flow-engine\"}) / 0.005",
+          "legendFormat": "budget remaining",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.25},
+              {"color": "green", "value": 0.5}
+            ]
+          },
+          "min": 0,
+          "max": 1
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "m10-tenant-middleware availability budget remaining (90d)",
+      "description": "Error budget left in the 99.95% availability SLO for m10-tenant-middleware (rolling 90d). The tightest SLO in the fleet (4m 22s of budget per 28d).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "targets": [
+        {
+          "expr": "1 - (1 - slo:availability:ratio_28d{service=\"m10-tenant-middleware\"}) / 0.0005",
+          "legendFormat": "budget remaining",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.25},
+              {"color": "green", "value": 0.5}
+            ]
+          },
+          "min": 0,
+          "max": 1
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "28d availability ratio per service",
+      "description": "Rolling 28-day availability ratio per service. The dashed reference line at 99.9% / 99.5% / 99.95% marks the SLO target for each service. A line below its target for the full window = SLO breach.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 6},
+      "targets": [
+        {
+          "expr": "slo:availability:ratio_28d{service=\"m13-api-gateway\"}",
+          "legendFormat": "m13-gateway",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:availability:ratio_28d{service=\"m03-data-flow-engine\"}",
+          "legendFormat": "m03-dataflow",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:availability:ratio_28d{service=\"m10-tenant-middleware\"}",
+          "legendFormat": "m10-tenant",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0.9,
+          "max": 1.0,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      }
+    }
+  ]
+}

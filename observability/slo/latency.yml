@@ -1,0 +1,73 @@
+# Latency SLI + SLO targets (Phase 7).
+#
+# Source: docs/observability/08-slo-design.md §2.2.
+#
+# The SLI is the standard "fraction of requests faster
+# than X ms" — i.e. the inverse of the histogram_quantile
+# series. We pick p99 because the long tail is what
+# customers feel; p50 is rarely actionable.
+#
+# The "fast" threshold varies per service because the
+# business cost of slowness is asymmetric: a slow login
+# (M-10) is worse than a slow data-flow (M-03) because
+# login blocks every other request.
+#
+# Per Google SRE Workbook ch. 5, we use a "good request
+# budget" approach: count requests that are below the
+# threshold as good, anything above as bad. This is more
+# forgiving to the SLO model than tracking a single
+# percentile and gives a clean burn-rate calculation.
+
+slos:
+  - service: m13-api-gateway
+    sli:
+      spec:
+        # A request is "good" if it returns in < 200ms.
+        # p99 is the percentile we monitor; 200ms is the
+        # customer-facing "feels fast" threshold.
+        success_criteria:
+          - http_request_duration_seconds_bucket{le="0.2"} / http_request_duration_seconds_count
+        events:
+          query: sum by (service) (rate(ada_app_request_duration_seconds_count[28d]))
+    objectives:
+      - target: 0.99
+        window: 28d
+        description: |
+          99% of API gateway requests return in < 200ms.
+          This is the customer-facing latency budget. The
+          1% tail can absorb occasional GC pauses or
+          cold-start latency without breaking the
+          headline SLO.
+
+  - service: m03-data-flow-engine
+    sli:
+      spec:
+        success_criteria:
+          - http_request_duration_seconds_bucket{le="0.5"} / http_request_duration_seconds_count
+        events:
+          query: sum by (service) (rate(ada_app_request_duration_seconds_count[28d]))
+    objectives:
+      - target: 0.99
+        window: 28d
+        description: |
+          99% of data-flow executions return in < 500ms.
+          Data flows are inherently longer than API calls
+          (they iterate through nodes), so the threshold
+          is 2.5× the gateway's.
+
+  - service: m10-tenant-middleware
+    sli:
+      spec:
+        success_criteria:
+          - http_request_duration_seconds_bucket{le="0.05"} / http_request_duration_seconds_count
+        events:
+          query: sum by (service) (rate(ada_app_request_duration_seconds_count[28d]))
+    objectives:
+      - target: 0.99
+        window: 28d
+        description: |
+          99% of tenant resolution requests return in
+          < 50ms. Anything slower is visible to the user
+          as a UI lag spike, so the threshold is 10×
+          tighter than the gateway's. 1% of requests can
+          absorb a slow Postgres RLS check.

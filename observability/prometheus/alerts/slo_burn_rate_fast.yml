@@ -1,0 +1,120 @@
+# SLO Burn Rate — Fast (Phase 7).
+#
+# Source: docs/observability/08-slo-design.md §3.4 (MWMB).
+#
+# The "fast burn" alerts page on-call when the error
+# rate is consuming the 28-day error budget so fast that
+# if it kept up the budget would be exhausted within
+# hours. There are two windows:
+#   - 1h short / 5m long: 14.4× multiplier (page immediately)
+#   - 6h short / 30m long: 14.4× multiplier (page after 30m of sustained burn)
+#
+# The 14.4× number is the standard Google SRE choice
+# (`docs/observability/08-slo-design.md` §3.4 cites the
+# Workbook). It represents "exhaust 2% of the 28-day
+# budget in 1h" — i.e. the smallest event that is still
+# unambiguously actionable. Smaller multipliers (e.g.
+# 6×) create noise; larger ones (e.g. 30×) miss real
+# burns because they require a 100% error rate to fire.
+#
+# Per SLO target thresholds:
+#   m13-api-gateway:  availability 99.9%  → error budget 0.1%  → 14.4× = 1.44% / h
+#   m03-data-flow-engine: availability 99.5% → error budget 0.5%  → 14.4× = 7.20% / h
+#   m10-tenant-middleware: availability 99.95% → error budget 0.05% → 14.4× = 0.72% / h
+#
+# The expression below applies the 14.4× multiplier
+# uniformly; per-service targets are encoded in the
+# recording rules via a service-label join (or by the
+# alert's `expr` returning the burn rate, which the
+# Alertmanager routes to the right SLO by service label).
+# In this initial Phase 7 the alerts page if the burn
+# rate exceeds 14.4× of *any* SLO target, which is
+# intentionally conservative.
+
+groups:
+  - name: slo_burn_rate_fast
+    interval: 30s
+    rules:
+      # Fast burn 1h: 5m numerator / 1h denominator, page on > 14.4×
+      # budget consumption. The 0.1 minimum-total guard prevents
+      # a tiny number of requests from creating a misleading
+      # 100% error rate (per 08-slo-design.md §3.4).
+      - alert: SLOBurnRateFast1h
+        expr: |
+          (
+            slo:sli_error:rate_5m{service="m13-api-gateway"}
+            / (slo:sli_total:rate_1h{service="m13-api-gateway"} * 0.001)
+          ) > 14.4
+          and
+          slo:sli_total:rate_1h{service="m13-api-gateway"} > 1
+        for: 2m
+        labels:
+          severity: P1
+          slo: availability
+          window: 1h
+          burn_rate: fast
+          service: m13-api-gateway
+        annotations:
+          summary: "m13-gateway SLO burn rate 14.4x in 1h — P1"
+          description: |
+            The m13-api-gateway is consuming its
+            99.9% availability error budget 14.4x faster
+            than sustainable. If the current rate holds,
+            the 28-day budget is exhausted in ~2 days.
+            Page the on-call immediately.
+          runbook: "https://wiki.example/runbooks/slo-fast-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      - alert: SLOBurnRateFast1h_m03
+        expr: |
+          (
+            slo:sli_error:rate_5m{service="m03-data-flow-engine"}
+            / (slo:sli_total:rate_1h{service="m03-data-flow-engine"} * 0.005)
+          ) > 14.4
+          and
+          slo:sli_total:rate_1h{service="m03-data-flow-engine"} > 1
+        for: 2m
+        labels:
+          severity: P1
+          slo: availability
+          window: 1h
+          burn_rate: fast
+          service: m03-data-flow-engine
+        annotations:
+          summary: "m03-dataflow SLO burn rate 14.4x in 1h — P1"
+          description: |
+            The m03-data-flow-engine is consuming its
+            99.5% availability error budget 14.4x faster
+            than sustainable. If the current rate holds,
+            the 28-day budget is exhausted in ~2 days.
+            Page the on-call immediately.
+          runbook: "https://wiki.example/runbooks/slo-fast-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      - alert: SLOBurnRateFast1h_m10
+        expr: |
+          (
+            slo:sli_error:rate_5m{service="m10-tenant-middleware"}
+            / (slo:sli_total:rate_1h{service="m10-tenant-middleware"} * 0.0005)
+          ) > 14.4
+          and
+          slo:sli_total:rate_1h{service="m10-tenant-middleware"} > 1
+        for: 2m
+        labels:
+          severity: P1
+          slo: availability
+          window: 1h
+          burn_rate: fast
+          service: m10-tenant-middleware
+        annotations:
+          summary: "m10-tenant SLO burn rate 14.4x in 1h — P1"
+          description: |
+            The m10-tenant-middleware is consuming its
+            99.95% availability error budget 14.4x
+            faster than sustainable. If the current rate
+            holds, the 28-day budget is exhausted in
+            ~2 days. Auth-path breaches are escalated to
+            a security review in addition to the SRE
+            post-mortem.
+          runbook: "https://wiki.example/runbooks/slo-fast-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"

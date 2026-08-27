@@ -1,0 +1,139 @@
+{
+  "annotations": {"list": []},
+  "description": "Phase 7 availability-focused SLO dashboard. The first row is a 24h short-window view for fast investigation; the second row is the 28d SLO window with the budget-remaining gauge. Used by the on-call as the second stop after the burn-rate dashboard fires.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "slo-availability",
+  "title": "SLO Availability (50-03)",
+  "tags": ["ada", "phase-7", "slo", "availability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-7d", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "24h availability ratio per service",
+      "description": "Rolling 24h availability ratio per service. The dashed reference line at 99.9% / 99.5% / 99.95% marks the per-service SLO target. Useful for short-window investigation when a P1 alert fires.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "slo:availability:ratio_24h{service=\"m13-api-gateway\"}",
+          "legendFormat": "m13-gateway (target 99.9%)",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:availability:ratio_24h{service=\"m03-data-flow-engine\"}",
+          "legendFormat": "m03-dataflow (target 99.5%)",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:availability:ratio_24h{service=\"m10-tenant-middleware\"}",
+          "legendFormat": "m10-tenant (target 99.95%)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0.95,
+          "max": 1.0,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "m13-api-gateway budget remaining (28d)",
+      "description": "Percentage of the 99.9% availability error budget remaining in the rolling 28d window for m13-api-gateway.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 8, "x": 0, "y": 9},
+      "targets": [
+        {
+          "expr": "1 - (1 - slo:availability:ratio_28d{service=\"m13-api-gateway\"}) / 0.001",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.25},
+              {"color": "green", "value": 0.5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "m03-data-flow-engine budget remaining (28d)",
+      "description": "Percentage of the 99.5% availability error budget remaining in the rolling 28d window for m03-data-flow-engine.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 8, "x": 8, "y": 9},
+      "targets": [
+        {
+          "expr": "1 - (1 - slo:availability:ratio_28d{service=\"m03-data-flow-engine\"}) / 0.005",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.25},
+              {"color": "green", "value": 0.5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "m10-tenant-middleware budget remaining (28d)",
+      "description": "Percentage of the 99.95% availability error budget remaining in the rolling 28d window for m10-tenant-middleware.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 9},
+      "targets": [
+        {
+          "expr": "1 - (1 - slo:availability:ratio_28d{service=\"m10-tenant-middleware\"}) / 0.0005",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 0.25},
+              {"color": "green", "value": 0.5}
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
