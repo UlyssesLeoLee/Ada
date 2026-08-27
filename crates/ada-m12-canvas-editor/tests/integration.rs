@@ -97,7 +97,11 @@ fn history_branching_resets_redo_stack() {
 // - clock skew: client_version > server_version,deterministic
 // ===================================================================
 
-#[cfg(feature = "server")]
+/// v0.7.0: was gated by `#[cfg(feature = "server")]`,
+/// but the `server` feature is now part of the default
+/// features so the gate is removed. The server-side
+/// reconciliation tests are part of the default 5-gate
+/// CI build.
 mod server_recon_integration {
     use ada_m12_canvas_editor::server_recon::reconcile_canvas_state;
     use ada_m12_canvas_editor::{Canvas, CanvasNode, NodeId, NodeKind, Position};
