@@ -96,3 +96,15 @@ commit-msg*.txt
 regen*.txt
 test*.txt
 fmt2*.txt
+
+# v0.3.0 release 残留
+clippy-old.txt
+clippy-old2.txt
+check-old*.txt
+test-old*.txt
+fmt-old.txt
+fmt-old2.txt
+push.txt
+push-old.txt
+push2.txt
+push2-old.txt
