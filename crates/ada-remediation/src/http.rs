@@ -335,6 +335,7 @@ mod tests {
             trigger: Trigger::Exact("DiskSpaceFillingFast".into()),
             severities: vec![],
             steps: vec![ActionStep::NotifySlack {
+                executor: crate::executor::ExecutorMode::DryRun,
                 channel: "#ada-ops".into(),
                 message: "disk low".into(),
             }],

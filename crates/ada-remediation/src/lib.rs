@@ -80,14 +80,19 @@ pub mod alert;
 pub mod config;
 pub mod engine;
 pub mod error;
+pub mod executor;
 pub mod history;
 pub mod http;
 pub mod state;
 
-pub use action::{ActionOutcome, ActionStep, RemediationAction};
+pub use action::{ActionOutcome, ActionStep, ExecutorMode, RemediationAction};
 pub use alert::AlertEvent;
 pub use config::{load_runbooks_from_dir, RunbookFile};
 pub use engine::RemediationEngine;
 pub use error::{RemediationError, Result};
+pub use executor::{
+    DryRunExecutor, ExecutionContext, LoggingClient, NetworkClient, RealExecutor,
+    RecordedRequest, StepExecutionResult, StepExecutor,
+};
 pub use history::{HistoryQuery, HistoryRecord, MemoryStore};
 pub use state::EngineState;

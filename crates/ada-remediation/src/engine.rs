@@ -3,7 +3,9 @@
 use crate::action::{ActionOutcome, ActionStep, RemediationAction, StepResult};
 use crate::alert::{AlertEvent, AlertStatus};
 use crate::error::{RemediationError, Result};
+use crate::executor::{DryRunExecutor, ExecutionContext, StepExecutor};
 use crate::state::EngineState;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Default step timeout, used when a runbook step does not
@@ -12,12 +14,43 @@ const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The remediation engine. Constructed once per process, shared
 /// via `Arc` (or cloned; this type is `Clone` and cheap).
-#[derive(Debug, Clone, Default)]
 pub struct RemediationEngine {
     /// Runbook table. Populated by `with_runbooks` or
     /// `with_defaults` (the latter loads from
     /// `config/remediation/` at startup).
     runbooks: Vec<RemediationAction>,
+    /// Per-step executor. v0.7.0 defaults to `DryRunExecutor`
+    /// so the v0.6.0 behaviour is preserved; v0.7.0 callers
+    /// that want network side effects can swap in a
+    /// `RealExecutor` via [`RemediationEngine::with_executor`].
+    executor: Arc<dyn StepExecutor>,
+}
+
+impl std::fmt::Debug for RemediationEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemediationEngine")
+            .field("runbooks", &self.runbooks)
+            .field("executor", &"Arc<dyn StepExecutor>")
+            .finish()
+    }
+}
+
+impl Clone for RemediationEngine {
+    fn clone(&self) -> Self {
+        Self {
+            runbooks: self.runbooks.clone(),
+            executor: Arc::clone(&self.executor),
+        }
+    }
+}
+
+impl Default for RemediationEngine {
+    fn default() -> Self {
+        Self {
+            runbooks: Vec::new(),
+            executor: Arc::new(DryRunExecutor),
+        }
+    }
 }
 
 impl RemediationEngine {
@@ -30,7 +63,10 @@ impl RemediationEngine {
     /// Engine with the given runbook table.
     #[must_use]
     pub fn with_runbooks(runbooks: Vec<RemediationAction>) -> Self {
-        Self { runbooks }
+        Self {
+            runbooks,
+            executor: Arc::new(DryRunExecutor),
+        }
     }
 
     /// Engine with the runbook table loaded from
@@ -42,7 +78,30 @@ impl RemediationEngine {
     pub fn with_defaults() -> Self {
         let path = std::path::Path::new("config/remediation");
         let runbooks = crate::config::load_runbooks_from_dir(path).unwrap_or_default();
-        Self { runbooks }
+        Self {
+            runbooks,
+            executor: Arc::new(DryRunExecutor),
+        }
+    }
+
+    /// Builder-style: swap the per-step executor. Used by
+    /// production wiring to inject a `RealExecutor`.
+    ///
+    /// ```ignore
+    /// let engine = RemediationEngine::with_defaults()
+    ///     .with_executor(Arc::new(RealExecutor::with_logging_client()));
+    /// ```
+    #[must_use]
+    pub fn with_executor(mut self, executor: Arc<dyn StepExecutor>) -> Self {
+        self.executor = executor;
+        self
+    }
+
+    /// Read-only access to the inner executor. Tests use
+    /// this to assert what was dispatched.
+    #[must_use]
+    pub fn executor(&self) -> &Arc<dyn StepExecutor> {
+        &self.executor
     }
 
     /// Find every runbook whose trigger matches `alert`. An
@@ -80,21 +139,18 @@ impl RemediationEngine {
     /// short-circuits; the rest are skipped. The total time is
     /// recorded in `ActionOutcome::total_duration_ms`.
     ///
-    /// `HttpCall` and `PgFunction` are executed through a
-    /// *dry-run* path by default: the engine records the intent
-    /// in the step result and returns success. This is
-    /// deliberate — the offline build environment forbids a
-    /// real HTTP client, and the real wiring is a separate
-    /// deployment that supplies an `Executor` impl. The trait
-    /// is in the next commit.
+    /// `HttpCall` / `PgFunction` / `NotifySlack` /
+    /// `PageOperator` are dispatched through the configured
+    /// [`StepExecutor`]. The default is a [`DryRunExecutor`]
+    /// that records intent and returns success; production
+    /// wiring swaps in a [`RealExecutor`].
     pub async fn execute(&self, action: &RemediationAction) -> Result<ActionOutcome> {
         let started = Instant::now();
         let mut outcome = ActionOutcome::new(action.id.clone());
+        let ctx = ExecutionContext::new(action.id.clone(), String::new());
 
         for (idx, step) in action.steps.iter().enumerate() {
-            let step_started = Instant::now();
-            let (status, message) = self.run_step(idx, step, action).await;
-            let duration_ms = u64::try_from(step_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let (status, message, duration_ms) = self.run_step(idx, step, &ctx).await;
             let kind = step_kind_name(step);
             let result = if status {
                 StepResult::ok(idx, kind, message, duration_ms)
@@ -111,57 +167,47 @@ impl RemediationEngine {
         Ok(outcome)
     }
 
-    /// Run a single step. Returns `(true, message)` on success
-    /// and `(false, message)` on failure. Sub-steps of a
-    /// `Sequence` are inlined.
+    /// Run a single step. Returns
+    /// `(success, message, duration_ms)`. Sub-steps of a
+    /// `Sequence` are inlined; if any sub-step fails the
+    /// whole `Sequence` fails with that message.
     async fn run_step(
         &self,
         _idx: usize,
         step: &ActionStep,
-        action: &RemediationAction,
-    ) -> (bool, String) {
+        ctx: &ExecutionContext,
+    ) -> (bool, String, u64) {
         match step {
             ActionStep::RunCommand {
                 cmd,
                 args,
                 timeout_secs,
-            } => run_shell_command(cmd, args, Duration::from_secs(*timeout_secs)).await,
-            ActionStep::HttpCall {
-                url,
-                method,
-                body,
-                headers,
             } => {
-                tracing::info!(target: "ada_remediation", url, method = method.as_str(), "http call (dry-run)");
-                let _ = (body, headers);
-                (true, format!("dry-run http {} {}", method.as_str(), url))
-            }
-            ActionStep::PgFunction { name, args } => {
-                tracing::info!(target: "ada_remediation", function = name, "pg function (dry-run)");
-                let _ = args;
-                (true, format!("dry-run pg function {name}"))
-            }
-            ActionStep::NotifySlack { channel, message } => {
-                tracing::info!(target: "ada_remediation", channel, "slack notify (dry-run)");
-                let _ = message;
-                (true, format!("dry-run slack notify {channel}"))
-            }
-            ActionStep::PageOperator {
-                severity,
-                runbook_url,
-            } => {
-                tracing::warn!(target: "ada_remediation", ?severity, runbook_url, "page operator (dry-run)");
-                (true, format!("dry-run page operator severity={severity:?}"))
+                let (ok, msg) =
+                    run_shell_command(cmd, args, Duration::from_secs(*timeout_secs)).await;
+                (ok, msg, 0)
             }
             ActionStep::Sequence { steps } => {
                 for (i, sub) in steps.iter().enumerate() {
-                    let (ok, msg) = Box::pin(self.run_step(i, sub, action)).await;
+                    let (ok, sub_msg, _dur) =
+                        Box::pin(self.run_step(i, sub, ctx)).await;
                     if !ok {
-                        return (false, format!("sequence sub-step {i} failed: {msg}"));
+                        return (
+                            false,
+                            format!("sequence sub-step {i} failed: {sub_msg}"),
+                            0,
+                        );
                     }
                 }
-                (true, "sequence ok".to_string())
+                (true, "sequence ok".to_string(), 0)
             }
+            other => match self.executor.execute(other, ctx).await {
+                Ok(r) => {
+                    let dur_ms = u64::try_from(r.duration.as_millis()).unwrap_or(u64::MAX);
+                    (true, r.message, dur_ms)
+                }
+                Err(e) => (false, e.to_string(), 0),
+            },
         }
     }
 }
@@ -256,6 +302,7 @@ mod tests {
             trigger: crate::action::Trigger::Exact("DiskSpaceFillingFast".into()),
             severities: vec![],
             steps: vec![ActionStep::NotifySlack {
+                executor: crate::executor::ExecutorMode::DryRun,
                 channel: "#ada-ops".into(),
                 message: "disk low".into(),
             }],
@@ -346,6 +393,7 @@ mod tests {
                     timeout_secs: 5,
                 },
                 ActionStep::NotifySlack {
+                    executor: crate::executor::ExecutorMode::DryRun,
                     channel: "#never".into(),
                     message: "never".into(),
                 },

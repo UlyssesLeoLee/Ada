@@ -22,7 +22,9 @@ use ada_remediation::http::{
     router, AlertmanagerAlert, AlertmanagerPayload, AppState, WebhookResponse,
 };
 use ada_remediation::MemoryStore;
-use ada_remediation::{load_runbooks_from_dir, AlertEvent, RemediationAction, RemediationEngine};
+use ada_remediation::{
+    load_runbooks_from_dir, AlertEvent, ExecutorMode, RemediationAction, RemediationEngine,
+};
 use axum::body::Body;
 use axum::http::Request;
 use std::sync::Arc;
@@ -156,6 +158,7 @@ fn sample_action() -> RemediationAction {
         trigger: Trigger::Exact("DiskSpaceFillingFast".into()),
         severities: vec![],
         steps: vec![ActionStep::NotifySlack {
+            executor: ExecutorMode::DryRun,
             channel: "#ada-ops".into(),
             message: "disk low".into(),
         }],
