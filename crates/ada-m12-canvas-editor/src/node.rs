@@ -51,7 +51,7 @@ impl std::fmt::Display for NodeKind {
 
 /// 2-D position. Coordinates are unit-less; the skeleton does
 /// not enforce bounds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
     /// X coordinate.
     pub x: i32,

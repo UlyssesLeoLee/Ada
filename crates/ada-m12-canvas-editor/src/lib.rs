@@ -61,6 +61,8 @@ mod node;
 mod bevy_bridge;
 #[cfg(feature = "bevy")]
 mod bevy_plugin;
+#[cfg(feature = "bevy_egui")]
+mod egui_integration;
 #[cfg(feature = "wasm")]
 mod wasm;
 
@@ -83,6 +85,25 @@ pub mod bevy_integration {
         CanvasNodeComp, CanvasPlugin, CanvasPositionComp, CanvasResource,
     };
 }
+
+/// bevy_egui 集成模块 — M-12 v0.3.0 新增。仅在
+/// `--features bevy_egui` 时存在(native-only,不会拖入 WASM
+/// 体积)。提供 inspector 面板 + 拖拽事件 + ECS↔Canvas
+/// 双向 sync。
+///
+/// 包含:
+/// - [`CanvasInspectorPlugin`] — Bevy Plugin
+/// - [`NodeInspectorState`] — 选中节点 Resource
+/// - [`NodeDragState`] — 拖拽状态 Resource
+/// - [`begin_drag`]/[`update_drag`]/[`end_drag`] — host-driven
+///   拖拽 API
+/// - [`node_inspector_system`] / [`sync_ecs_to_canvas_system`] —
+///   注册到 Plugin 的 ECS 系统
+#[cfg(feature = "bevy_egui")]
+pub use egui_integration::{
+    begin_drag, end_drag, node_inspector_system, sync_ecs_to_canvas_system, update_drag,
+    CanvasInspectorPlugin, NodeDragState, NodeInspectorState,
+};
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace
 /// version per D-09).
