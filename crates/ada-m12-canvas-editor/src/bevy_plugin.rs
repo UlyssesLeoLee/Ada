@@ -85,6 +85,20 @@ impl Plugin for CanvasPlugin {
         // We do NOT panic on missing resource, to keep startup robust
         // when the host lazily inserts the resource mid-frame.
         app.add_systems(Update, crate::bevy_bridge::sync_canvas_system);
+        // 若 host 同时挂了 `bevy_egui` feature,把 inspector +
+        // 反向 sync 也接上(避免 host 重复注册)。
+        #[cfg(feature = "bevy_egui")]
+        {
+            app.init_resource::<crate::egui_integration::NodeInspectorState>();
+            app.add_systems(
+                Update,
+                (
+                    crate::egui_integration::node_inspector_system,
+                    crate::egui_integration::sync_ecs_to_canvas_system,
+                )
+                    .after(crate::bevy_bridge::sync_canvas_system),
+            );
+        }
     }
 }
 

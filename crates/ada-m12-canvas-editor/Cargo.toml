@@ -74,6 +74,29 @@ bevy_app = { version = "0.14", optional = true, default-features = false }
 # 放在 `[dev-dependencies]`。`wasm-test` feature gate 控制
 # 它是否被拉入,所以 default build 不会触达。
 wasm-bindgen-test = { version = "0.3", optional = true }
+# === Bevy + egui inspector integration (M-12 v0.3.0) ===
+# 任务: m12 canvas editor v0.3.0 升级,在 Bevy 0.14 App 中提供
+# egui 右侧属性面板 + 拖拽事件,实现 ECS↔Canvas 双向同步。
+#
+# 版本配套 (实测 bevy_egui 0.28 ↔ egui 0.28 ↔ bevy 0.14):
+# - `bevy_egui 0.28` re-export `egui 0.28`,与 bevy 0.14 配套
+#   (用户提示中写的 egui "0.32" 实为误;以 bevy_egui 0.28 实
+#   际依赖为准,见 docs.rs/bevy_egui/0.28.0/dependencies)
+# - `default-features = false` 关闭 bevy_egui 的 `render` /
+#   `manage_clipboard` / `open_url` features,避免拉入
+#   bevy_render(完整渲染管线,WASM 体积敏感,违反 D-05 8 MB
+#   ceiling)
+# - 不引入 egui_extras(用户提示中标注"可选,用于 syntax
+#   highlighting"; inspector 面板用不到,移除以减少编译负担)
+#
+# 行为:
+# - `bevy_egui` feature 是 native-only(走 default build 路径
+#   不会被拉入,WASM build 不变);只用于 native 拖拽 + egui
+#   inspector 集成测试。
+# - WASM 5 门(走 `--features wasm`)不拉 bevy_egui / egui,
+#   所以 pkg/ada_m12_canvas_editor_bg.wasm 大小不变。
+bevy_egui = { version = "0.28", default-features = false, optional = true }
+egui = { version = "0.28", default-features = false, optional = true }
 
 # Native (x86_64-pc-windows-msvc / x86_64-unknown-linux-gnu) 累加
 # `rt-multi-thread` 给 tokio — 保留现有 m12 native 行为。wasm32
@@ -94,6 +117,10 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 #   console_error_panic_hook,启用 `src/wasm.rs` 暴露 JS 绑定。
 # - bevy: 拉 bevy_ecs + bevy_app,启用 `src/bevy_plugin.rs` +
 #   `src/bevy_bridge.rs` 暴露 Bevy 0.14 Plugin。
+# - bevy_egui: 在 bevy 基础上加 bevy_egui + egui,启用
+#   `src/egui_integration.rs` 暴露 Inspector + 拖拽事件。这是
+#   M-12 v0.3.0 新增 feature,实现 ECS↔Canvas 双向 push。
+#   default off:native 拖拽测试场景用,WASM build 不拉。
 # - full: 同时启用 wasm + bevy,产出最大体积的 WASM (前端单
 #   bundle 场景)。
 # - wasm-test: 在 wasm feature 之上加 wasm-bindgen-test,供
@@ -110,6 +137,10 @@ wasm = [
     "uuid/js",
 ]
 bevy = ["dep:bevy_ecs", "dep:bevy_app"]
+# bevy_egui 必须 transitively 拉 bevy + egui(be 自身 crate 拉
+# 整个 bevy);bevy_egui = bevy + egui。详见 `src/egui_integration.rs`
+# 顶部注释对 native-only 行为 + D-05 体积约束的说明。
+bevy_egui = ["bevy", "dep:bevy_egui", "dep:egui"]
 full = ["wasm", "bevy"]
 wasm-test = ["wasm", "dep:wasm-bindgen-test"]
 
