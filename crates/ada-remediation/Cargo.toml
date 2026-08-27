@@ -59,6 +59,12 @@ metrics-exporter-prometheus = { version = "0.18", default-features = false }
 base64 = "0.22"
 blake3 = "1.8"
 
+# v0.7.0 hardening: constant-time compare for the
+# shared-secret webhook token. Reused as a transitive
+# dep of `blake3`, so this line does not pull any new
+# crate into the offline cache.
+constant_time_eq = "0.4"
+
 # v0.7.0 hardening: object-safe async trait for `StepExecutor`.
 # `dyn StepExecutor` is held by the engine, so the impl needs
 # `#[async_trait]` (native RPITIT is not object-safe).

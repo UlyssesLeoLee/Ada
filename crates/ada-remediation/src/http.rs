@@ -15,6 +15,7 @@
 
 use crate::action::ActionOutcome;
 use crate::alert::{AlertEvent, AlertStatus};
+use crate::auth::{AuthError, AuthState, HEADER_NAME};
 use crate::engine::RemediationEngine;
 use crate::error::RemediationError;
 use crate::history::{HistoryQuery, MemoryStore};
@@ -31,6 +32,11 @@ use std::sync::Arc;
 pub struct AppState {
     pub engine: Arc<RemediationEngine>,
     pub store: MemoryStore,
+    /// Webhook + manual-trigger shared-secret auth. The
+    /// v0.6.0 handlers accepted every request; v0.7.0
+    /// requires a matching `X-Webhook-Token` header on
+    /// every state-changing endpoint.
+    pub auth: AuthState,
 }
 
 /// Build the axum `Router`. The caller is responsible for
@@ -155,8 +161,20 @@ pub struct WebhookResponse {
 
 async fn handle_alertmanager_webhook(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<AlertmanagerPayload>,
 ) -> Result<Json<WebhookResponse>, HttpError> {
+    // Webhook auth. `check_token` returns
+    //   Ok(())                     - header matched
+    //   Err(AuthError::Disabled)   - no env var, fail-closed 503
+    //   Err(AuthError::MissingToken)  - 401
+    //   Err(AuthError::InvalidToken)  - 403
+    let provided = headers
+        .get(HEADER_NAME)
+        .and_then(|v| v.to_str().ok());
+    if let Err(e) = state.auth.check_token(provided) {
+        return Err(map_auth_error(e));
+    }
     let received = payload.alerts.len();
     let mut outcomes = Vec::new();
     let mut matched = 0;
@@ -281,6 +299,9 @@ async fn handle_manual_trigger(
     State(state): State<AppState>,
     Json(req): Json<ManualTriggerRequest>,
 ) -> Result<Json<ManualTriggerResponse>, HttpError> {
+    // Manual-trigger auth is added in v0.7.0 task 5
+    // (commit-4). For task 3 (commit-3) only the
+    // Alertmanager webhook is gated.
     let mut event = AlertEvent::builder(req.alert_name.clone())
         .with_status(AlertStatus::Firing)
         .build();
@@ -343,6 +364,30 @@ impl IntoResponse for HttpError {
     }
 }
 
+/// Map an [`AuthError`] to the appropriate HTTP status
+/// for the response body. Production wiring is
+/// fail-closed: a missing `REMEDIATION_WEBHOOK_SECRET`
+/// at startup yields 503 for every webhook request
+/// until the operator sets the var and restarts. This
+/// is the safe default — better to refuse traffic
+/// than to silently accept it.
+fn map_auth_error(e: AuthError) -> HttpError {
+    match e {
+        AuthError::Disabled => HttpError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "webhook auth is disabled (REMEDIATION_WEBHOOK_SECRET unset)".into(),
+        ),
+        AuthError::MissingToken => HttpError(
+            StatusCode::UNAUTHORIZED,
+            "missing X-Webhook-Token header".into(),
+        ),
+        AuthError::InvalidToken => HttpError(
+            StatusCode::FORBIDDEN,
+            "invalid X-Webhook-Token".into(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,10 +413,28 @@ mod tests {
         }
     }
 
+    /// Default app for tests that do not exercise
+    /// auth. Auth is disabled, which means the
+    /// webhook / trigger handlers return 503. Tests
+    /// that need auth wire up [`authed_app`].
     fn app() -> Router {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
+            auth: crate::auth::AuthState::disabled(),
+        };
+        router(state)
+    }
+
+    /// App with webhook auth enabled. The shared
+    /// secret is `TEST_SECRET`. Tests that exercise
+    /// the webhook / trigger paths send the matching
+    /// `X-Webhook-Token: TEST_SECRET` header.
+    fn authed_app() -> Router {
+        let state = AppState {
+            engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
+            store: MemoryStore::new(),
+            auth: crate::auth::AuthState::enabled("TEST_SECRET"),
         };
         router(state)
     }
@@ -392,12 +455,13 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_dispatches_matching_action() {
-        let r = app()
+        let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
                     .body(Body::from(
                         serde_json::to_vec(&AlertmanagerPayload {
                             version: Some("4".into()),
@@ -428,12 +492,13 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_with_unknown_alert_is_noop() {
-        let r = app()
+        let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
                     .body(Body::from(
                         serde_json::to_vec(&AlertmanagerPayload {
                             version: Some("4".into()),
@@ -467,6 +532,7 @@ mod tests {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
+            auth: crate::auth::AuthState::enabled("TEST_SECRET"),
         };
         let app = router(state);
         let r = app
@@ -476,6 +542,7 @@ mod tests {
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
                     .body(Body::from(
                         serde_json::to_vec(&AlertmanagerPayload {
                             version: Some("4".into()),
@@ -521,6 +588,7 @@ mod tests {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
+            auth: crate::auth::AuthState::disabled(),
         };
         let r = router(state)
             .oneshot(
@@ -553,5 +621,88 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // Webhook shared-secret auth (v0.7.0 hardening)
+    // ----------------------------------------------------------------------
+
+    /// The unit-level "valid token" path is already
+    /// covered by [`crate::auth::tests::valid_token_returns_ok`].
+    /// The end-to-end HTTP test below exercises the
+    /// header -> handler -> engine path.
+    #[tokio::test]
+    async fn webhook_accepts_valid_token() {
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-token", "TEST_SECRET")
+                    .body(Body::from(
+                        serde_json::to_vec(&AlertmanagerPayload {
+                            version: Some("4".into()),
+                            status: Some("firing".into()),
+                            alerts: vec![],
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::OK);
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_missing_token() {
+        // Auth is enabled but the request omits the
+        // header. Expect 401 Unauthorized.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&AlertmanagerPayload {
+                            version: Some("4".into()),
+                            status: Some("firing".into()),
+                            alerts: vec![],
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_invalid_token() {
+        // Auth is enabled and the header is present but
+        // wrong. Expect 403 Forbidden.
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-token", "WRONG-SECRET")
+                    .body(Body::from(
+                        serde_json::to_vec(&AlertmanagerPayload {
+                            version: Some("4".into()),
+                            status: Some("firing".into()),
+                            alerts: vec![],
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::FORBIDDEN);
     }
 }

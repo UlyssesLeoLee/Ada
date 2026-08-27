@@ -355,6 +355,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "constant_time_eq",
  "metrics",
  "metrics-exporter-prometheus",
  "parking_lot",
