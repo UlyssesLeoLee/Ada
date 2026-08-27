@@ -170,7 +170,7 @@ pub fn reconcile_canvas_state(
 
     // 2. Snapshot client (read-only) state
     let client_nodes_vec = client.nodes();
-    let _client_edges = client.edges();
+    let client_edges = client.edges();
 
     // 3. Index server by node id
     let mut server_by_id: HashMap<NodeId, CanvasNode> =
@@ -233,19 +233,21 @@ pub fn reconcile_canvas_state(
     let mut seen_edges: HashSet<Edge> = HashSet::new();
 
     // Walk client edges first; they're the "user intent".
-    for ce in &_client_edges {
-        if merged_node_ids.contains(&ce.from) && merged_node_ids.contains(&ce.to) {
-            if seen_edges.insert(*ce) {
-                merged_edges.push(*ce);
-            }
+    for ce in &client_edges {
+        if merged_node_ids.contains(&ce.from)
+            && merged_node_ids.contains(&ce.to)
+            && seen_edges.insert(*ce)
+        {
+            merged_edges.push(*ce);
         }
     }
     // Then server edges (collaborator's, or pre-existing).
     for se in &server_edges {
-        if merged_node_ids.contains(&se.from) && merged_node_ids.contains(&se.to) {
-            if seen_edges.insert(*se) {
-                merged_edges.push(*se);
-            }
+        if merged_node_ids.contains(&se.from)
+            && merged_node_ids.contains(&se.to)
+            && seen_edges.insert(*se)
+        {
+            merged_edges.push(*se);
         }
     }
 

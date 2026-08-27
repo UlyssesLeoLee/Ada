@@ -4,8 +4,8 @@
 //!
 //! - the m12 `reconcile_canvas_state` function returns a result
 //!   the m13 handler can ship to the client;
-//! - the result carries the four scalar fields (new_version /
-//!   server_wins / client_wins / had_conflict) plus the in-memory
+//! - the result carries the four scalar fields (`new_version` /
+//!   `server_wins` / `client_wins` / `had_conflict`) plus the in-memory
 //!   merged `Canvas`;
 //! - applying the merged canvas's nodes/edges to a fresh
 //!   downstream `Canvas` reproduces the expected end state.
@@ -14,7 +14,7 @@
 //! `docs/observability/05-tracing-design.md` §3.4, the W3C
 //! `traceparent` header is propagated by `tower-http`'s
 //! `TraceLayer` (already wired in m13's `Cargo.toml`); we do
-//! not need to test OTel SDK internals here — that's the
+//! not need to test `OTel` SDK internals here — that's the
 //! `ada-telemetry` v0.2.0 test surface's job.
 //!
 //! The m12 dependency is declared in `[dev-dependencies]` with
@@ -38,7 +38,7 @@ fn node_with_id(id: NodeId, label: &str, x: i32, y: i32) -> CanvasNode {
     n
 }
 
-/// Smoke: building the AppState and router (the m13 "container")
+/// Smoke: building the `AppState` and router (the m13 "container")
 /// does not require m12's `server_recon` types — the m12 module
 /// is just a leaf dependency here. We still verify it imports
 /// cleanly to catch a feature-gating regression.
