@@ -16,8 +16,8 @@ groups:
         expr: up == 0
         for: 1m
         labels:
-          severity: sev1
-          phase: "0-1"
+          severity: P1
+          phase: "0-1+6"
         annotations:
           summary: "Target {{ $labels.job }}/{{ $labels.instance }} is down"
           description: |

@@ -20,7 +20,12 @@ global:
   external_labels:
     cluster: ada-dev
     environment: dev
-    phase: "0-1"
+    phase: "0-1+6"
+  # Storage retention is set via CLI flags in
+  # docker-compose.yml (15d for local TSDB). Long-term
+  # archival beyond 15d is done through the `remote_write`
+  # block below — samples are pushed to MinIO for the
+  # 90-day bucket retention window.
 
 # ----------------------------------------------------------------------
 # Rule files. The four Phase 0-1 alerts live under alerts/*.yml
@@ -31,15 +36,53 @@ rule_files:
   - "alerts/*.yml"
 
 # ----------------------------------------------------------------------
-# Alertmanager. Phase 0-1 does NOT ship Alertmanager (that's
-# Phase 6 per 11-phased-rollout.md §8). When Phase 6 lands,
-# uncomment the `alerting:` block and the matching
-# `observability/alertmanager/alertmanager.yml`.
+# Alertmanager. Phase 6 (per 11-phased-rollout.md §8) enables
+# the routing layer. The `alerting:` block below points
+# Prometheus at the local `alertmanager` docker-compose
+# service on :9093; the route tree, receivers and inhibit
+# rules live in `observability/alertmanager/alertmanager.yml`.
 # ----------------------------------------------------------------------
-# alerting:
-#   alertmanagers:
-#     - static_configs:
-#         - targets: ["alertmanager:9093"]
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager:9093"
+
+# ----------------------------------------------------------------------
+# Remote write — long-term storage.
+#
+# Phase 6 prototype: Prometheus pushes every `ada_*` sample
+# to a MinIO S3-compatible bucket via the Prometheus
+# remote_write protocol. The URL below is the in-cluster
+# MinIO service; the `__name__ = ada_.*` relabel keeps the
+# write path narrow (the `pg_*` and `node_*` families are
+# scraped for dashboards but not archived long-term).
+#
+# NOTE: the MinIO S3 API does not speak Prometheus's
+# remote_write protocol directly. The container shipped in
+# this stack (minio/minio:RELEASE.2024-10-29T16-01-44Z) is
+# configured here as a *placeholder target*; a remote_write
+# adapter (e.g. mimir-distributor or thanos-receiver) is
+# expected to sit in front of the bucket in production per
+# 10-deployment-design.md §4.3. For dev the bucket is
+# created regardless so the 90-day lifecycle policy is
+# in place when the adapter lands.
+# ----------------------------------------------------------------------
+remote_write:
+  - url: 'http://minio:9000/api/v1/remote/admiral'
+    basic_auth:
+      username: '${MINIO_ROOT_USER:-minioadmin}'
+      password: '${MINIO_ROOT_PASSWORD:-minioadmin}'
+    queue_config:
+      capacity: 10000
+      max_samples_per_send: 2000
+      batch_send_deadline: 5s
+      min_backoff: 30ms
+      max_backoff: 5s
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'ada_.*'
+        action: keep
 
 # ----------------------------------------------------------------------
 # Scrape jobs.

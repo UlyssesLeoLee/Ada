@@ -45,6 +45,20 @@ GRAFANA_ADMIN_PASSWORD=ada
 POSTGRES_USER=ada
 POSTGRES_PASSWORD=ada
 POSTGRES_DB=ada
+
+# Phase 6 — MinIO (long-term storage) + Alertmanager integrations.
+# Defaults are dev-only placeholders; override in prod.
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+PAGERDUTY_ROUTING_KEY=PLACEHOLDER_PAGERDUTY_ROUTING_KEY
+SLACK_WEBHOOK_WARNINGS=https://hooks.slack.com/services/PLACEHOLDER
+SLACK_WEBHOOK_CLUSTER=https://hooks.slack.com/services/PLACEHOLDER
+SMTP_SMARTHOST=smtp.example.com:587
+SMTP_FROM=alerts@ada.local
+SMTP_REQUIRE_TLS=true
+SMTP_AUTH_USERNAME=alerts@ada.local
+SMTP_AUTH_PASSWORD=PLACEHOLDER_SMTP_PASSWORD
+ALERT_DIGEST_TO=oncall@ada.local
 '@ | Set-Content -Path $EnvFile -Encoding UTF8
 }
 

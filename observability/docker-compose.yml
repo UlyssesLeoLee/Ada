@@ -225,6 +225,110 @@ services:
     # Phase 0-1 and the prometheus job keeps `up == 0`
     # in the meantime.
 
+  # --------------------------------------------------------------------
+  # Alertmanager — Phase 6 alert routing layer.
+  #   image: prom/alertmanager:v0.27.0 (per
+  #          10-deployment-design.md §4.6)
+  #   config: ./alertmanager/alertmanager.yml + ./alertmanager/templates/
+  #   port: 9093 (UI + API)
+  #   silences / inhibit state: alertmanager-data named volume
+  #   no smtp / pagerduty keys in YAML — the config file uses
+  #   ${...} placeholders that docker-compose interpolates from
+  #   .env. The defaults below are safe in dev (no real
+  #   integration) and must be overridden in prod.
+  # --------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: ada-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.external-url=http://localhost:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - observability
+    environment:
+      - PAGERDUTY_ROUTING_KEY=${PAGERDUTY_ROUTING_KEY:-PLACEHOLDER_PAGERDUTY_ROUTING_KEY}
+      - SLACK_WEBHOOK_WARNINGS=${SLACK_WEBHOOK_WARNINGS:-https://hooks.slack.com/services/PLACEHOLDER}
+      - SLACK_WEBHOOK_CLUSTER=${SLACK_WEBHOOK_CLUSTER:-https://hooks.slack.com/services/PLACEHOLDER}
+      - SMTP_SMARTHOST=${SMTP_SMARTHOST:-smtp.example.com:587}
+      - SMTP_FROM=${SMTP_FROM:-alerts@ada.local}
+      - SMTP_REQUIRE_TLS=${SMTP_REQUIRE_TLS:-true}
+      - SMTP_AUTH_USERNAME=${SMTP_AUTH_USERNAME:-alerts@ada.local}
+      - SMTP_AUTH_PASSWORD=${SMTP_AUTH_PASSWORD:-PLACEHOLDER_SMTP_PASSWORD}
+      - ALERT_DIGEST_TO=${ALERT_DIGEST_TO:-oncall@ada.local}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  # --------------------------------------------------------------------
+  # MinIO — S3-compatible long-term storage. Phase 6 ships
+  # MinIO + the `mc` init container (below). Bucket creation
+  # + lifecycle policy live in ./minio/init-bucket.sh which
+  # the mc container runs once at boot.
+  #   API: 9000 (S3 protocol)
+  #   Console: 9001 (web UI)
+  #   data: minio-data named volume
+  # --------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2024-10-29T16-01-44Z
+    container_name: ada-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------
+  # mc — MinIO init container. Runs the bucket-bootstrap
+  # script and exits. restart: "no" so the script is not
+  # re-run on every docker restart (the script is
+  # idempotent, but exit-after-success is the conventional
+  # pattern for init containers).
+  # --------------------------------------------------------------------
+  mc:
+    image: minio/mc:RELEASE.2024-10-29T16-01-44Z
+    container_name: ada-minio-mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: -c "sleep 5 && /scripts/init-bucket.sh"
+    volumes:
+      - ./minio/init-bucket.sh:/scripts/init-bucket.sh:ro
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_BUCKET=prometheus-tsdb
+      - MINIO_RETENTION_DAYS=90
+    networks:
+      - observability
+    restart: "no"
+
 networks:
   observability:
     driver: bridge
@@ -237,3 +341,7 @@ volumes:
     name: ada-loki-data
   grafana-data:
     name: ada-grafana-data
+  alertmanager-data:
+    name: ada-alertmanager-data
+  minio-data:
+    name: ada-minio-data

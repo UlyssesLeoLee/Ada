@@ -1,0 +1,56 @@
+{{/*
+  email.tmpl — Email templates for the P3 digest receiver.
+  Alertmanager's `email_configs` block references these
+  via `html:` and `text:` keys, so both formats are
+  produced from the same alert payload.
+*/}}
+
+{{ define "email.digest.text" }}
+Ada Observability — Alert Digest
+================================
+
+Status:   {{ .Status }}
+Receiver: {{ .Receiver }}
+Group:    {{ .GroupLabels.alertname }} / {{ .GroupLabels.service }}
+Cluster:  {{ .CommonLabels.cluster }}
+Severity: {{ .CommonLabels.severity }}
+
+{{ range .Alerts }}
+---
+Summary: {{ .Annotations.summary }}
+
+{{ .Annotations.description }}
+
+Runbook:   {{ .Annotations.runbook }}
+Dashboard: {{ .Annotations.dashboard }}
+Started:   {{ .StartsAt }}
+{{ if .EndsAt }}Ended: {{ .EndsAt }}{{ end }}
+{{ end }}
+{{ end }}
+
+{{ define "email.digest.html" }}
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Ada Alert Digest</title></head>
+  <body style="font-family: -apple-system, sans-serif; color:#222;">
+    <h2 style="color:#c33;">Ada Observability — Alert Digest</h2>
+    <table style="border-collapse:collapse;">
+      <tr><td><b>Status</b></td><td>{{ .Status }}</td></tr>
+      <tr><td><b>Receiver</b></td><td>{{ .Receiver }}</td></tr>
+      <tr><td><b>Group</b></td><td>{{ .GroupLabels.alertname }} / {{ .GroupLabels.service }}</td></tr>
+      <tr><td><b>Severity</b></td><td>{{ .CommonLabels.severity }}</td></tr>
+      <tr><td><b>Cluster</b></td><td>{{ .CommonLabels.cluster }}</td></tr>
+    </table>
+    <hr>
+    {{ range .Alerts }}
+    <h3>{{ .Annotations.summary }}</h3>
+    <p>{{ .Annotations.description }}</p>
+    <p>
+      <a href="{{ .Annotations.dashboard }}">Dashboard</a> &middot;
+      <a href="{{ .Annotations.runbook }}">Runbook</a>
+    </p>
+    <p><small>Started: {{ .StartsAt }}{{ if .EndsAt }} &middot; Ended: {{ .EndsAt }}{{ end }}</small></p>
+    {{ end }}
+  </body>
+</html>
+{{ end }}

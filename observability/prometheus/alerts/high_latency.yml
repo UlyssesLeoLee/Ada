@@ -21,8 +21,8 @@ groups:
           ) > 1.0
         for: 5m
         labels:
-          severity: sev2
-          phase: "0-1"
+          severity: P2
+          phase: "0-1+6"
         annotations:
           summary: "{{ $labels.service }} p99 latency > 1s for 5m"
           description: |

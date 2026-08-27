@@ -22,6 +22,8 @@ YAML_FILES = [
     "observability/prometheus/alerts/high_error_rate.yml",
     "observability/prometheus/alerts/high_latency.yml",
     "observability/prometheus/alerts/low_disk.yml",
+    "observability/prometheus/alerts/scaling_alert.yml",
+    "observability/alertmanager/alertmanager.yml",
     "observability/loki/loki-config.yaml",
     "observability/loki/promtail-config.yaml",
     "observability/grafana/provisioning/datasources/datasources.yml",

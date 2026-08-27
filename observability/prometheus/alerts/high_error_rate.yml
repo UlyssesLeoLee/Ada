@@ -27,8 +27,8 @@ groups:
           ) > 0.05
         for: 5m
         labels:
-          severity: sev2
-          phase: "0-1"
+          severity: P2
+          phase: "0-1+6"
         annotations:
           summary: "{{ $labels.service }} 5xx error rate > 5% for 5m"
           description: |
