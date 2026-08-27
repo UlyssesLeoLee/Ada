@@ -1,0 +1,68 @@
+# Throughput SLI (Phase 7, capacity-planning metric).
+#
+# Source: docs/observability/08-slo-design.md §2.4.
+#
+# Throughput is not an SLO target — you cannot "violate"
+# a request rate the way you can violate a latency or
+# error-rate SLO. We track it as an SLI only so the
+# capacity-planning dashboard has a single source of
+# truth, and so the burn-rate alerts know what "normal"
+# looks like for the optional `ada_app_rps` denominator.
+#
+# The capacity target column below is the *guidance* for
+# the platform team, not an SLO commitment. It says
+# "design for this level of traffic; if you go above it
+# for 7 consecutive days, the next sprint plans
+# horizontal scaling".
+
+slos:
+  - service: m13-api-gateway
+    sli:
+      spec:
+        # 5-minute rate of requests. RPS is the canonical
+        # throughput metric; we avoid peak-burst metrics
+        # because they trigger scaling alarms too easily.
+        success_criteria:
+          - rate(ada_app_requests_total[5m])
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[5m]))
+    capacity_targets:
+      - sustained_rps: 5000
+        p99_rps: 12000
+        description: |
+          Design target: 5k sustained RPS, 12k p99
+          burst. The K3s HPA in
+          `observability/k8s/ada-app-hpa.yaml` (future PR)
+          scales at 70% of sustained, i.e. 3500 RPS.
+
+  - service: m03-data-flow-engine
+    sli:
+      spec:
+        success_criteria:
+          - rate(ada_app_requests_total[5m])
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[5m]))
+    capacity_targets:
+      - sustained_rps: 2000
+        p99_rps: 5000
+        description: |
+          Data flows are heavier than API calls (each
+          flow runs multiple node iterations), so the
+          sustained RPS is lower even though the byte
+          throughput is comparable.
+
+  - service: m10-tenant-middleware
+    sli:
+      spec:
+        success_criteria:
+          - rate(ada_app_requests_total[5m])
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[5m]))
+    capacity_targets:
+      - sustained_rps: 10000
+        p99_rps: 25000
+        description: |
+          Tenant middleware handles every authenticated
+          request, so its RPS is roughly 1.5× the
+          gateway's. The Postgres connection pool must
+          scale to match.

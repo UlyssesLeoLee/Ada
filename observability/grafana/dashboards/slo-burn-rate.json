@@ -1,0 +1,160 @@
+{
+  "annotations": {"list": []},
+  "description": "Phase 7 SLO burn rate (MWMB) per service. The four burn-rate windows (1h fast / 6h fast / 24h slow / 72h slow) are the multi-window/multi-burn-rate alerting pattern from the Google SRE Workbook. The horizontal dashed lines at 14.4× and 6× mark the fast-burn and slow-burn page/ticket thresholds. The panel order is service rows × window columns so a single glance answers 'who is burning, how fast, for how long'.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "slo-burn-rate",
+  "title": "SLO Burn Rate (50-02)",
+  "tags": ["ada", "phase-7", "slo", "burn-rate"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-7d", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "m13-api-gateway burn rate (all windows)",
+      "description": "Per-window burn rate for m13-api-gateway's 99.9% availability SLO. A value of 14.4 means the 28-day budget is being consumed 14.4× faster than sustainable (fast burn, page). A value of 6 means 6× faster (slow burn, ticket).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "slo:burnrate:1h_5m{service=\"m13-api-gateway\"} / 0.001",
+          "legendFormat": "1h (fast)",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:burnrate:6h_30m{service=\"m13-api-gateway\"} / 0.001",
+          "legendFormat": "6h (fast)",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:burnrate:24h_2h{service=\"m13-api-gateway\"} / 0.001",
+          "legendFormat": "24h (slow)",
+          "refId": "C"
+        },
+        {
+          "expr": "slo:burnrate:72h_6h{service=\"m13-api-gateway\"} / 0.001",
+          "legendFormat": "72h (slow)",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 6},
+              {"color": "red", "value": 14.4}
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right"}
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "m03-data-flow-engine burn rate (all windows)",
+      "description": "Per-window burn rate for m03-data-flow-engine's 99.5% availability SLO. Wider budget (0.5% = 5x the gateway's) so the same burn count consumes budget faster in proportional terms.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "slo:burnrate:1h_5m{service=\"m03-data-flow-engine\"} / 0.005",
+          "legendFormat": "1h (fast)",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:burnrate:6h_30m{service=\"m03-data-flow-engine\"} / 0.005",
+          "legendFormat": "6h (fast)",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:burnrate:24h_2h{service=\"m03-data-flow-engine\"} / 0.005",
+          "legendFormat": "24h (slow)",
+          "refId": "C"
+        },
+        {
+          "expr": "slo:burnrate:72h_6h{service=\"m03-data-flow-engine\"} / 0.005",
+          "legendFormat": "72h (slow)",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 6},
+              {"color": "red", "value": 14.4}
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right"}
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "m10-tenant-middleware burn rate (all windows)",
+      "description": "Per-window burn rate for m10-tenant-middleware's 99.95% availability SLO. The tightest budget in the fleet — even a 0.5× error rate trips the slow-burn alert within 24h.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "slo:burnrate:1h_5m{service=\"m10-tenant-middleware\"} / 0.0005",
+          "legendFormat": "1h (fast)",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:burnrate:6h_30m{service=\"m10-tenant-middleware\"} / 0.0005",
+          "legendFormat": "6h (fast)",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:burnrate:24h_2h{service=\"m10-tenant-middleware\"} / 0.0005",
+          "legendFormat": "24h (slow)",
+          "refId": "C"
+        },
+        {
+          "expr": "slo:burnrate:72h_6h{service=\"m10-tenant-middleware\"} / 0.0005",
+          "legendFormat": "72h (slow)",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 6},
+              {"color": "red", "value": 14.4}
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right"}
+      }
+    }
+  ]
+}

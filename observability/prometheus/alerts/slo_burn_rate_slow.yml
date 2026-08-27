@@ -1,0 +1,189 @@
+# SLO Burn Rate — Slow (Phase 7).
+#
+# Source: docs/observability/08-slo-design.md §3.4 (MWMB).
+#
+# The "slow burn" alerts create a ticket (not a page)
+# when the error rate is slowly eating the 28-day budget.
+# There are two windows:
+#   - 24h short / 2h long:  6× multiplier (ticket)
+#   - 72h short / 6h long:  6× multiplier (ticket, but at lower severity)
+#
+# The 6× multiplier represents "exhaust 5% of the budget
+# in 24h" — the smallest event that is still
+# unambiguously actionable over a workday. The 24h
+# window is the longest that still allows a team to
+# act *within* the 28-day budget window; the 72h window
+# is for chronic issues that have slipped past every
+# other detection.
+#
+# These alerts are P3 (digest, not page) so they don't
+# wake anyone up, but the daily SRE digest surfaces them
+# for review. Sustained slow burns become budget
+# adjustments or project-priority shifts, per the
+# standard SRE error-budget policy.
+
+groups:
+  - name: slo_burn_rate_slow
+    interval: 30s
+    rules:
+      # Slow burn 24h: 2h numerator / 24h denominator, ticket
+      # on > 6×. The numerator (2h) is shorter than the
+      # 24h window so the alert reacts within hours, not
+      # days.
+      - alert: SLOBurnRateSlow24h_m13
+        expr: |
+          (
+            slo:sli_error:rate_2h{service="m13-api-gateway"}
+            / (slo:sli_total:rate_24h{service="m13-api-gateway"} * 0.001)
+          ) > 6
+          and
+          slo:sli_total:rate_24h{service="m13-api-gateway"} > 1
+        for: 30m
+        labels:
+          severity: P3
+          slo: availability
+          window: 24h
+          burn_rate: slow
+          service: m13-api-gateway
+        annotations:
+          summary: "m13-gateway SLO slow burn 6x in 24h"
+          description: |
+            The m13-api-gateway is consuming its 99.9%
+            availability error budget 6x faster than
+            sustainable over 24h. If the current rate
+            holds, the 28-day budget is exhausted in
+            ~4-5 days. Investigate the cause; consider
+            freezing new features on this service.
+          runbook: "https://wiki.example/runbooks/slo-slow-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      - alert: SLOBurnRateSlow24h_m03
+        expr: |
+          (
+            slo:sli_error:rate_2h{service="m03-data-flow-engine"}
+            / (slo:sli_total:rate_24h{service="m03-data-flow-engine"} * 0.005)
+          ) > 6
+          and
+          slo:sli_total:rate_24h{service="m03-data-flow-engine"} > 1
+        for: 30m
+        labels:
+          severity: P3
+          slo: availability
+          window: 24h
+          burn_rate: slow
+          service: m03-data-flow-engine
+        annotations:
+          summary: "m03-dataflow SLO slow burn 6x in 24h"
+          description: |
+            The m03-data-flow-engine is consuming its
+            99.5% availability error budget 6x faster
+            than sustainable over 24h.
+          runbook: "https://wiki.example/runbooks/slo-slow-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      - alert: SLOBurnRateSlow24h_m10
+        expr: |
+          (
+            slo:sli_error:rate_2h{service="m10-tenant-middleware"}
+            / (slo:sli_total:rate_24h{service="m10-tenant-middleware"} * 0.0005)
+          ) > 6
+          and
+          slo:sli_total:rate_24h{service="m10-tenant-middleware"} > 1
+        for: 30m
+        labels:
+          severity: P3
+          slo: availability
+          window: 24h
+          burn_rate: slow
+          service: m10-tenant-middleware
+        annotations:
+          summary: "m10-tenant SLO slow burn 6x in 24h"
+          description: |
+            The m10-tenant-middleware is consuming its
+            99.95% availability error budget 6x faster
+            than sustainable over 24h. Auth-path slow
+            burns are escalated to a security review.
+          runbook: "https://wiki.example/runbooks/slo-slow-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      # Slow burn 72h: 6h numerator / 72h denominator, ticket
+      # on > 6×. This is the chronic-issue tier — fires
+      # only when a problem has been silently degrading
+      # the service for 3+ days without tripping the
+      # faster alerts.
+      - alert: SLOBurnRateSlow72h_m13
+        expr: |
+          (
+            slo:sli_error:rate_6h{service="m13-api-gateway"}
+            / (slo:sli_total:rate_72h{service="m13-api-gateway"} * 0.001)
+          ) > 6
+          and
+          slo:sli_total:rate_72h{service="m13-api-gateway"} > 1
+        for: 2h
+        labels:
+          severity: P3
+          slo: availability
+          window: 72h
+          burn_rate: slow
+          service: m13-api-gateway
+        annotations:
+          summary: "m13-gateway SLO slow burn 6x in 72h (chronic)"
+          description: |
+            The m13-api-gateway has been consuming its
+            99.9% availability error budget 6x faster
+            than sustainable for 3+ days. This is a
+            chronic issue — check the SLI dashboard for
+            the root-cause service and consider an
+            explicit budget adjustment.
+          runbook: "https://wiki.example/runbooks/slo-chronic-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      - alert: SLOBurnRateSlow72h_m03
+        expr: |
+          (
+            slo:sli_error:rate_6h{service="m03-data-flow-engine"}
+            / (slo:sli_total:rate_72h{service="m03-data-flow-engine"} * 0.005)
+          ) > 6
+          and
+          slo:sli_total:rate_72h{service="m03-data-flow-engine"} > 1
+        for: 2h
+        labels:
+          severity: P3
+          slo: availability
+          window: 72h
+          burn_rate: slow
+          service: m03-data-flow-engine
+        annotations:
+          summary: "m03-dataflow SLO slow burn 6x in 72h (chronic)"
+          description: |
+            The m03-data-flow-engine has been consuming
+            its 99.5% availability error budget 6x
+            faster than sustainable for 3+ days.
+          runbook: "https://wiki.example/runbooks/slo-chronic-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"
+
+      - alert: SLOBurnRateSlow72h_m10
+        expr: |
+          (
+            slo:sli_error:rate_6h{service="m10-tenant-middleware"}
+            / (slo:sli_total:rate_72h{service="m10-tenant-middleware"} * 0.0005)
+          ) > 6
+          and
+          slo:sli_total:rate_72h{service="m10-tenant-middleware"} > 1
+        for: 2h
+        labels:
+          severity: P3
+          slo: availability
+          window: 72h
+          burn_rate: slow
+          service: m10-tenant-middleware
+        annotations:
+          summary: "m10-tenant SLO slow burn 6x in 72h (chronic)"
+          description: |
+            The m10-tenant-middleware has been consuming
+            its 99.95% availability error budget 6x
+            faster than sustainable for 3+ days.
+            Auth-path chronic slow burns require a
+            security review.
+          runbook: "https://wiki.example/runbooks/slo-chronic-burn"
+          dashboard: "http://localhost:3000/d/slo-burn-rate"

@@ -28,12 +28,16 @@ global:
   # 90-day bucket retention window.
 
 # ----------------------------------------------------------------------
-# Rule files. The four Phase 0-1 alerts live under alerts/*.yml
+# Rule files. The Phase 0-1 alerts live under alerts/*.yml
 # (split per file so Phase 2+ can drop in additional rule files
-# without merging YAML).
+# without merging YAML). The recording rules under rules/*.yml
+# pre-compute the SLI ratios that the burn-rate alerts
+# reference; this keeps the alert expressions cheap and
+# lets the same recording series feed multiple dashboards.
 # ----------------------------------------------------------------------
 rule_files:
   - "alerts/*.yml"
+  - "rules/*.yml"
 
 # ----------------------------------------------------------------------
 # Alertmanager. Phase 6 (per 11-phased-rollout.md §8) enables

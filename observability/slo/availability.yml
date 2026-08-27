@@ -1,0 +1,73 @@
+# Availability SLI + SLO targets (Phase 7).
+#
+# Source: docs/observability/08-slo-design.md §2.1.
+#
+# The SLI is the classic Google SRE "good events / total
+# events" ratio over a 28-day rolling window. A 5xx status
+# code is the canonical "bad event" for HTTP-shaped services;
+# we add a 5xx-prefixed regex rather than a literal "5.."
+# match so the rule covers 500-599 inclusive.
+#
+# The SLO targets (99.9% / 99.5% / 99.95%) are pinned at the
+# most-frequently-asked-business-question level: "what
+# fraction of customer-facing requests succeed?". Anything
+# below the target for 28 consecutive days is an SLO breach
+# and triggers a post-mortem per the SRE review process.
+
+slos:
+  - service: m13-api-gateway
+    sli:
+      spec:
+        # Successful = status < 500. We treat any 5xx as
+        # an availability failure; 4xx are user errors and
+        # don't count.
+        success_criteria:
+          - http_response_status_class != "5xx"
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[28d]))
+    objectives:
+      - target: 0.999
+        window: 28d
+        description: |
+          The API gateway is the single ingress for every
+          customer-facing request, so this is the headline
+          SLO. 0.1% budget = 43m 49s of error per 28d, or
+          about 1.5 minutes per day. Sustained breaches
+          trigger a 5-day freeze on new features per the
+          standard SRE error-budget policy.
+
+  - service: m03-data-flow-engine
+    sli:
+      spec:
+        success_criteria:
+          - http_response_status_class != "5xx"
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[28d]))
+    objectives:
+      - target: 0.995
+        window: 28d
+        description: |
+          The data-flow engine executes canvas-defined
+          flows. A failed flow is usually retriable (the
+          flow engine persists intermediate state), so
+          99.5% is the pragmatic target. 0.5% budget =
+          3h 39m 22s per 28d.
+
+  - service: m10-tenant-middleware
+    sli:
+      spec:
+        success_criteria:
+          - http_response_status_class != "5xx"
+        events:
+          query: sum by (service) (rate(ada_app_requests_total[28d]))
+    objectives:
+      - target: 0.9995
+        window: 28d
+        description: |
+          The tenant middleware sits on the auth critical
+          path; a 5xx here means login fails. 99.95% is
+          the tightest SLO in the fleet (4m 22s of error
+          budget per 28d). A breach is escalated to a
+          security review in addition to the standard
+          SRE post-mortem because failed authentication
+          can mask a credential-stuffing attack.

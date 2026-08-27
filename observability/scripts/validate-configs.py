@@ -23,6 +23,14 @@ YAML_FILES = [
     "observability/prometheus/alerts/high_latency.yml",
     "observability/prometheus/alerts/low_disk.yml",
     "observability/prometheus/alerts/scaling_alert.yml",
+    "observability/prometheus/alerts/trace_high_error_rate.yml",
+    "observability/prometheus/alerts/slo_burn_rate_fast.yml",
+    "observability/prometheus/alerts/slo_burn_rate_slow.yml",
+    "observability/prometheus/rules/slo_recording_rules.yml",
+    "observability/slo/availability.yml",
+    "observability/slo/latency.yml",
+    "observability/slo/error_rate.yml",
+    "observability/slo/throughput.yml",
     "observability/alertmanager/alertmanager.yml",
     "observability/loki/loki-config.yaml",
     "observability/loki/promtail-config.yaml",
@@ -30,6 +38,7 @@ YAML_FILES = [
     "observability/grafana/provisioning/dashboards/dashboards.yml",
     "observability/jaeger/jaeger-config.yaml",
     "observability/jaeger/otel-collector-config.yaml",
+    "observability/tempo/tempo-config.yaml",
     "observability/docker-compose.yml",
 ]
 
@@ -37,6 +46,10 @@ JSON_FILES = [
     "observability/grafana/dashboards/app-overview.json",
     "observability/grafana/dashboards/rust-runtime.json",
     "observability/grafana/dashboards/db-overview.json",
+    "observability/grafana/dashboards/trace-overview.json",
+    "observability/grafana/dashboards/slo-overview.json",
+    "observability/grafana/dashboards/slo-burn-rate.json",
+    "observability/grafana/dashboards/slo-availability.json",
 ]
 
 
