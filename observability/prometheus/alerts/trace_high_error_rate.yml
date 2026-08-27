@@ -1,0 +1,53 @@
+# ALT-103 / TraceErrorRate — Sev2 (per 07-alert-policy.md §4.2).
+#
+# Phase 4 alert: derived from Tempo's spanmetrics processor
+# output (metric family `traces_spanmetrics_latency`). The
+# spanmetrics generator must be wired in the OTel Collector
+# when the trace_pipeline is enabled — see
+# observability/jaeger/otel-collector-config.yaml.
+#
+# Fires when the **trace-level** error rate for any
+# service exceeds 10% sustained over 5 minutes. The 10%
+# threshold is intentionally loose: trace data is sampled
+# (10% head + 100% error tails), so a 10% error rate on
+# the sampled stream is already a strong signal of a
+# real regression. Tighter thresholds (e.g. 5%) trip on
+# sampling noise.
+#
+# Note: the source-of-truth HTTP-level error rate lives
+# in `high_error_rate.yml` (the Phase 1 alert). This file
+# adds the trace-derived signal as a second opinion;
+# `Alertmanager`'s `inhibit_rules` ensure the two are
+# correlated rather than paged independently for the same
+# incident.
+groups:
+  - name: trace_high_error_rate
+    interval: 30s
+    rules:
+      - alert: TraceErrorRate
+        expr: |
+          (
+            sum by (service) (
+              rate(traces_spanmetrics_latency_count{status_code="ERROR"}[5m])
+            )
+            /
+            sum by (service) (
+              rate(traces_spanmetrics_latency_count[5m])
+            )
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: P2
+          phase: "4"
+          source: trace
+        annotations:
+          summary: "{{ $labels.service }} trace error rate > 10% for 5m"
+          description: |
+            Trace-derived error rate for {{ $labels.service }} has
+            been above 10% for 5 minutes (current value:
+            {{ $value | humanizePercentage }}).
+            The 10% threshold is loose because trace data is
+            tail-sampled; investigate the traces dashboard
+            for the underlying exception cause.
+          runbook: "https://wiki.example/runbooks/trace-error-rate"
+          dashboard: "http://localhost:3000/d/trace-overview"

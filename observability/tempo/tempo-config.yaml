@@ -1,0 +1,88 @@
+# Tempo 2.5 configuration for the Ada observability Phase 4 stack.
+#
+# Single binary ("all-in-one") mode: Tempo ingests OTLP traces
+# from the OTel Collector, persists blocks to MinIO, and
+# serves them via the HTTP API (port 3200). Grafana connects
+# over the HTTP API and turns the trace store into a data
+# source.
+#
+# Source of truth: docs/observability/05-tracing-design.md
+# (per §6 Phase 4 of 11-phased-rollout.md).
+#
+# Image: grafana/tempo:2.5.0 (matches DOC-OBS-002 ��3
+# "Tracing backend — Tempo 2.5+").
+#
+# W3C Trace Context: the OpenTelemetry SDK already emits
+# W3C traceparent / tracestate headers, so the collector
+# receivers (otlp grpc :4317 + http :4318) carry the
+# context across services without any extra wiring on the
+# Rust side beyond `tracing-opentelemetry` (added in v0.2.0
+# of ada-telemetry).
+
+server:
+  http_listen_port: 3200
+
+# The distributor is the OTLP receiver front-end. It fans
+# out to the ingesters and validates the trace structure.
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+# Ingester buffers traces before flushing them to long-term
+# storage. `trace_idle_period: 10s` is the default per
+# 05-tracing-design.md ��3.2.
+ingester:
+  trace_idle_period: 10s
+  max_block_duration: 5m
+
+# Compactor merges the time-windowed blocks into larger
+# ones and enforces the retention policy. 90d matches the
+# MinIO bucket lifecycle (observability/minio/init-bucket.sh).
+compactor:
+  compaction:
+    block_retention: 168h  # 7d active compaction window
+  retention:
+    # Per-trace retention. 90d is the Phase 4 default; future
+    # phases may extend this for compliance use cases.
+    trace_id: {}
+    block: {}
+
+# Long-term storage. We use the S3 backend targeting the
+# same MinIO instance the Prometheus remote_write flow uses
+# (per Phase 6, observability/prometheus/prometheus.yml).
+#
+# NOTE: secret access is supplied via env vars at runtime
+# (`S3_ACCESS_KEY` / `S3_SECRET_KEY`) — never commit real
+# credentials. The `insecure: true` flag skips TLS for the
+# in-cluster MinIO service.
+storage:
+  trace:
+    backend: s3
+    s3:
+      bucket: "tempo-blocks"
+      endpoint: "minio:9000"
+      access_key: "${S3_ACCESS_KEY}"
+      secret_key: "${S3_SECRET_KEY}"
+      insecure: true
+  wal:
+    path: /var/tempo/wal
+
+# The querier is the read path. We pin `frontend_worker` to
+# the same address (single binary mode).
+querier:
+  frontend_worker:
+    frontend_address: "tempo-query-frontend:9095"
+
+# The query-frontend is the HTTP entry point. It caches
+# recent query results so dashboards don't re-scan the
+# block store on every page load.
+query_range:
+  results_cache:
+    cache:
+      enable_fifo_cache: true
+    max_cache_freshness: 1m

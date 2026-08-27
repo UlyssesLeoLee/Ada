@@ -92,3 +92,35 @@ datasources:
     jsonData:
       implementation: prometheus
       handleGrafanaManagedAlerts: false
+
+  # --------------------------------------------------------------------
+  # Tempo (Phase 4 — long-term trace store). The HTTP API
+  # is the Grafana query path; traceql queries are routed
+  # to this datasource. The `tracesToLogsV2` block lets users
+  # jump from a span straight to the matching Loki logs,
+  # and `tracesToMetrics` jumps to Prometheus exemplars
+  # for the same trace. `serviceMap` builds the service
+  # topology graph from the trace edges.
+  # --------------------------------------------------------------------
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        tags: ['service.name', 'http.method', 'http.target']
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags: [{ key: 'service.name', value: 'service' }]
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true

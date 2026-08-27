@@ -39,6 +39,16 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# Phase 4 — dev-only distributed-trace smoke test. The
+# `tracing` crate already supports W3C `traceparent`
+# header parsing via `Span::current()` once the
+# `tracing-opentelemetry` layer is wired. We add the dev-dep
+# only; production compilation does not pull it in. The
+# smoke test (in tests/trace_smoke.rs) verifies that a
+# nested `#[tracing::instrument]` call inherits the parent
+# trace_id when one is provided via
+# `tracing::Span::current().context()`.
+tracing-opentelemetry = { version = "0.33", default-features = false, features = ["tracing-log"] }
 
 [lints]
 workspace = true

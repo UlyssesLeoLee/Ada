@@ -329,6 +329,52 @@ services:
       - observability
     restart: "no"
 
+  # --------------------------------------------------------------------
+  # Tempo 2.5 (Phase 4 — long-term trace store).
+  #
+  # Single binary "all-in-one" mode: ingests OTLP traces
+  # from the OTel Collector on :4317 (gRPC) and :4318
+  # (HTTP), persists blocks to MinIO S3 (bucket
+  # `tempo-blocks`, created by the `mc` init container
+  # above via the MINIO_EXTRA_BUCKETS env var), and
+  # serves them via the HTTP API on :3200.
+  #
+  # Grafana reads from this API; the Tempo UI itself is
+  # embedded inside Grafana's Explore tab.
+  # --------------------------------------------------------------------
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: ada-tempo
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo-config.yaml"]
+    volumes:
+      - ./tempo/tempo-config.yaml:/etc/tempo/tempo-config.yaml:ro
+      - tempo-data:/var/tempo
+    environment:
+      # Per 2026-08-27 11:06 JST user hard rule (env-var
+      # safety): real credentials are injected at runtime
+      # via .env / Kubernetes Secret, never committed. The
+      # PLACEHOLDER fallback lets `docker compose up` boot
+      # locally without exposing real keys.
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-PLACEHOLDER}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-PLACEHOLDER}
+    ports:
+      - "3200:3200"   # HTTP (Grafana / TraceQL)
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - observability
+    depends_on:
+      minio:
+        condition: service_healthy
+      mc:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   observability:
     driver: bridge
@@ -345,3 +391,5 @@ volumes:
     name: ada-alertmanager-data
   minio-data:
     name: ada-minio-data
+  tempo-data:
+    name: ada-tempo-data

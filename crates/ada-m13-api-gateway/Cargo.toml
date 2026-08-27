@@ -34,6 +34,16 @@ thiserror = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
+# Phase 4 distributed-trace support: M-13's outbound
+# spans already flow through `tower-http`'s `TraceLayer`
+# (the `trace` feature above) which carries the inbound
+# W3C `traceparent` header. The M-13-internal layer is
+# wired into the global subscriber by `ada-telemetry`
+# v0.2.0 (per WT-1, commit `ab5d4c9`); spans reach the
+# local OTel Collector via the OTLP exporter. We do not
+# add an extra axum-tracing-opentelemetry dep here —
+# the upstream crate is 0.12.0-alpha.7 (unstable) and the
+# W3C propagation is already covered by tower-http.
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
