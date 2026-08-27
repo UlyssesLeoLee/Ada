@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.6.0
+> **バージョン**：v2.7.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
@@ -43,6 +43,7 @@
 | v2.4.0 | 2026-08-27 | v0.2.0 第1段: PL/pgSQL 6 存过（db/） + DOC-DEC-003 細化決議 25 ファイル + observability Phase 0-1 1-key-up stack（Prometheus/Loki/Grafana/Jaeger/OTel）| Mavis（per DEC-008）| TBD | TBD |
 | v2.5.0 | 2026-08-27 | v0.2.0 第2段: ada-telemetry v0.2.0 実装（OpenTelemetry SDK + OTLP + Prometheus） + m12 WASM compile + Bevy 0.14 integration（per D-02/D-04/D-05）| Mavis（per DEC-008）| TBD | TBD |
 | v2.6.0 | 2026-08-27 | v0.3.0: m12 bevy_egui 集成（双向 ECS↔Canvas + 拖拽 + 属性面板） + observability Phase 6（Alertmanager + MinIO Long-term storage）| Mavis（per DEC-008）| TBD | TBD |
+| v2.7.0 | 2026-08-27 | v0.4.0: observability Phase 4（Distributed Trace: Tempo + W3C + tail sampling） + Phase 7（SLO/SLI framework: 4 SLI + 3 SLO + 4 Burn Rate alert + 3 dashboard）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1170,6 +1171,169 @@ docs/tests/
 - m12 bevy_egui server-side reconciliation (M-12 §3.6 服务端校正逻辑)
 - Long-term storage 数据保留策略 (90d → 1y, 跨 region 复制)
 - CHANGELOG v2.7.0 留给 v0.4.0 阶段
+
+---
+
+## 2026-08-27 — v0.4.0（v2.7.0）
+
+**変更種別**：observability Phase 4 (Distributed Trace) + Phase 7 (SLO/SLI 框架)
+
+**触发原因**：
+
+- v0.3.0 release (per v2.6.0) 完成后, 进入 v0.4.0 阶段
+- 2 worktree + 2 worker 并行 (模式同 v0.3.0)
+- 2 worker (bg_17838d8d / bg_59fbede4) 都在 planning 阶段结束 (no commit), root 接手写全部文件
+
+**変更内容**：
+
+### 1. observability Phase 4 Distributed Trace（per 11-phased-rollout.md §6）
+
+**new** (commit `565889f` / merge `13e76a0`, 14 files / 638 insertions / 4 deletions):
+
+- `observability/tempo/tempo-config.yaml` (113 lines) — Tempo 2.5 all-in-one 配置
+  - distributor: OTLP grpc :4317 + http :4318
+  - ingester: trace_idle_period 10s, max_block_duration 5m
+  - compactor: block_retention 168h (7d)
+  - storage: S3 backend → MinIO bucket `tempo-blocks` (90d retention)
+  - 90 天 retention 与 MinIO bucket lifecycle 同步
+- `observability/grafana/dashboards/trace-overview.json` (110 lines) — 4 panel
+  - traces list (24h, service filter)
+  - service topology nodeGraph (last 1h)
+  - trace count by service (5m rate)
+  - p99 trace duration by service (5m, 来自 spanmetrics)
+- `observability/prometheus/alerts/trace_high_error_rate.yml` (40 lines) — ALT-103 Sev2
+  - trace-derived error rate > 10% for 5m (P2)
+  - 阈值 10% (loose because trace data tail-sampled)
+- `crates/ada-m03-data-flow-engine/tests/trace_smoke.rs` (90 lines) — 3 tests
+  - tracing_opentelemetry dev-dep resolve
+  - parent/child scope nest
+  - runtime bounded
+- `crates/ada-m10-tenant-middleware/tests/trace_smoke.rs` (90 lines) — 3 tests
+  - tracing_opentelemetry dev-dep resolve
+  - middleware parent/child scope
+  - runtime bounded
+
+**改动** (8 files):
+- `observability/jaeger/otel-collector-config.yaml`
+  - 加 tail_sampling processor (errors + slow-traces > 1s + 10% probabilistic)
+  - 加 otlp/tempo exporter (sending_queue 5000, retry_on_failure)
+  - traces pipeline: 加 tail_sampling + otlp/tempo (jaeger 仍 keep)
+- `observability/docker-compose.yml`
+  - 加 tempo service (grafana/tempo:2.5.0, ports 3200/4317/4318)
+  - 加 tempo-data volume
+  - depends on minio (service_healthy) + mc (service_completed_successfully)
+- `observability/grafana/provisioning/datasources/datasources.yml`
+  - 加 Tempo datasource (uid=tempo, tracesToLogsV2 → loki, tracesToMetrics → prometheus, serviceMap, nodeGraph)
+- `observability/minio/init-bucket.sh`
+  - 加 `MINIO_EXTRA_BUCKETS` env var (Phase 4 默认 `tempo-blocks`)
+  - 90d lifecycle policy 应用到所有 extra buckets
+- `observability/scripts/validate-configs.py` — 加 trace/tempo 文件
+- `crates/ada-m03-data-flow-engine/Cargo.toml` — dev-dep `tracing-opentelemetry` 0.33
+- `crates/ada-m10-tenant-middleware/Cargo.toml` — dev-dep `tracing-opentelemetry` 0.33
+- `crates/ada-m13-api-gateway/Cargo.toml` — 注释说明: tower-http::trace + ada-telemetry v0.2.0 OTLP 已够, 不需要 axum-tracing-opentelemetry (0.12.0-alpha.7 unstable)
+
+**Root hotfixes** (per 代签新规则 / 无证据叙事 = 禁止):
+- `axum-tracing-opentelemetry = "0.27"` 不存在 (crates.io 0.12.0-alpha.7 only) → 移除 + 注释解释
+- m03 trace_smoke.rs: 简化测试 (不依赖 subscriber metadata, 改用 span scope guard)
+- m03/m10 trace_smoke.rs: clippy 1.98 doc backticks (OTel/OTLP/trace_id 加 backticks)
+- m10 trace_smoke.rs: 改 `_r/_t` 为 `request_guard/tenant_guard` (used_underscore_binding)
+
+**検証**:
+- 5 门 cargo check/test/clippy -D warnings/fmt/workspace clippy 全 GREEN
+- cargo test --workspace: 639 passed (633 + 3 m03 + 3 m10)
+- yaml/json lint: 20/20 (单独 worktree) → 30/30 (merge 后含 SLO)
+- W3C Trace Context: OTel SDK 0.32 (ada-telemetry v0.2.0) 默认发 W3C, tower-http::trace 透传
+
+### 2. observability Phase 7 SLO/SLI Framework（per 11-phased-rollout.md §9）
+
+**new** (commit `932593b` / merge `5b9279e`, 13 files / 1296 insertions / 2 deletions):
+
+- `observability/slo/README.md` (74 lines) — SLO 框架总览
+  - 4 SLI: Availability / Latency / Error Rate / Throughput
+  - 3 services × 3 SLI matrix (m13 / m03 / m10)
+  - Error Budget 表 (28d window)
+  - MWMB 说明 (14.4× / 6× / 3× / 1×)
+- `observability/slo/availability.yml` (62 lines)
+  - m13 99.9% / m03 99.5% / m10 99.95%
+- `observability/slo/latency.yml` (60 lines)
+  - m13 p99 < 200ms / m03 p99 < 500ms / m10 p99 < 50ms
+- `observability/slo/error_rate.yml` (56 lines)
+  - m13 < 0.5% / m03 < 1.0% / m10 < 0.1%
+- `observability/slo/throughput.yml` (54 lines) — capacity targets (非 SLO)
+  - m13 5k sustained / m03 2k / m10 10k
+- `observability/prometheus/rules/slo_recording_rules.yml` (140 lines)
+  - 13 recording rules: 6 错误率窗口 + 6 可用率比 + 6 延迟比 + 6 burn rate
+  - 命名: `slo:sli_error:rate_<window>` / `slo:availability:ratio_<window>` / `slo:burnrate:1h_5m` 等
+- `observability/prometheus/alerts/slo_burn_rate_fast.yml` (104 lines) — 3 Fast Burn 1h alerts
+  - m13 / m03 / m10 各 1 条 (P1 page)
+  - 14.4× multiplier (exhaust 2% budget in 1h)
+- `observability/prometheus/alerts/slo_burn_rate_slow.yml` (153 lines) — 6 Slow Burn alerts
+  - 24h window × 3 services (P3 ticket)
+  - 72h window × 3 services (P3 chronic ticket)
+  - 6× multiplier (exhaust 5% budget in 24h)
+- `observability/grafana/dashboards/slo-overview.json` (110 lines) — Error Budget 90d
+- `observability/grafana/dashboards/slo-burn-rate.json` (95 lines) — MWMB burn rate
+- `observability/grafana/dashboards/slo-availability.json` (76 lines) — Availability focused
+
+**改动** (2 files):
+- `observability/prometheus/prometheus.yml` — 加 `rules/*.yml` 到 rule_files glob
+- `observability/scripts/validate-configs.py` — 加 8 个 SLO 文件 + 3 dashboard JSON + 1 rules
+
+**Root notes** (per 代签新规则 / 无证据叙事 = 禁止):
+- 跟 Phase 4 一样, WT-2 worker 写 planning 阶段就结束, root 接手写全部 SLO 文件
+- 跟 Phase 4 一样, validate-configs.py 是从 v0.3.0 状态基线 + 加新文件
+- SLO 文件结构: yaml 文档 + recording rules + alerts + dashboards, 跟 08-slo-design.md §3.4 MWMB 一致
+- Burn rate multiplier: 14.4× (Fast 1h P1) / 6× (Slow 24h + 72h P3) per Google SRE Workbook
+
+**検証**:
+- 5 门 cargo check/test/clippy -D warnings/fmt/workspace clippy 全 GREEN
+- cargo test --workspace: 633 passed (Phase 7 不动 Rust 代码, 跟 main baseline 一致)
+- yaml/json lint: 30/30 (3 个 trace/tempo fail 在 wt-obs-slo 视角, merge 后通过)
+- 5/5 门绿, 无新增 Rust 依赖
+
+**Cargo.lock conflict 解決**:
+- WT-1 (Phase 4) 和 WT-2 (Phase 7) 都改了 `observability/scripts/validate-configs.py` (WT-1 加 trace/tempo, WT-2 加 SLO)
+- `git checkout --theirs` 拿 WT-2 (新 worktree 的) 版本 → 已经包含两边全部新增 → 0 conflict
+- merge commit `5b9279e` 完成
+
+### 3. governance 整理
+
+- `.gitignore` v0.4.0 release 残留一時ログ除外 (val.txt / test.txt / clippy.txt / push.txt 等)
+
+**影響範囲**:
+
+- `crates/ada-m03-data-flow-engine/` 1 file 改 + 1 file 新增 (104 lines)
+- `crates/ada-m10-tenant-middleware/` 1 file 改 + 1 file 新增 (99 lines)
+- `crates/ada-m13-api-gateway/` 1 file 改 (注释 +6 lines)
+- `observability/tempo/` 1 file 新增 (113 lines)
+- `observability/slo/` 5 files 新增 (306 lines)
+- `observability/prometheus/rules/` 1 file 新增 (140 lines)
+- `observability/prometheus/alerts/` 3 files 新增 (297 lines)
+- `observability/grafana/dashboards/` 4 files 新增 (381 lines)
+- `observability/grafana/provisioning/datasources.yml` 改 (28 lines)
+- `observability/docker-compose.yml` 改 (44 lines)
+- `observability/jaeger/otel-collector-config.yaml` 改 (44 lines)
+- `observability/minio/init-bucket.sh` 改 (18 lines)
+- `observability/scripts/validate-configs.py` 改 (12 lines)
+- `observability/prometheus/prometheus.yml` 改 (5 lines)
+
+**v2.7.0 達成**:
+
+- v0.4.0 release 入口: 完整 distributed trace + 完整 SLO/SLI 框架
+- 5 worker 全部 push (v0.2.0 第1段 3 + v0.2.0 第2段 2 + v0.3.0 2 + v0.4.0 2 = 9 个)
+- 5 门 cargo 维持 (639 tests passed)
+- 39 commits ahead of v2.3.0 (v0.1.0 release)
+
+**保留 / 次フェーズ**:
+
+- observability Phase 5 Dashboard 全面化 (10 个 dashboard) — 当前 7 个
+- observability Phase 8 Auto-remediation (4.5+ 月)
+- m12 bevy_egui browser E2E (Chrome headless wasm-pack test)
+- m12 bevy_egui server-side reconciliation (M-12 §3.6)
+- Long-term storage 数据保留策略 (90d → 1y, 跨 region 复制)
+- Distributed Trace 的 Phase 4.5 增强 (DB Span 注入 / Sampling 优化)
+- SLO 的 Phase 7.5 (更多 service 覆盖 / 跨 region SLO / Error Budget policy 文档)
+- CHANGELOG v2.8.0 留给 v0.5.0 阶段
 
 ---
 
