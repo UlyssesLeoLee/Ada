@@ -72,10 +72,11 @@ impl Canvas {
     /// overwritten (last write wins at the `HashMap` level —
     /// callers that need strict dedup must pre-filter).
     ///
-    /// Gated by `feature = "server"` to avoid dead-code warnings
-    /// in the default 5-gate CI build (the only caller,
+    /// Gated by `feature = "server"` (or its v0.6.0 alias
+    /// `legacy-lww`) to avoid dead-code warnings in the
+    /// default 5-gate CI build (the only caller,
     /// `server_recon`, is itself feature-gated).
-    #[cfg(feature = "server")]
+    #[cfg(any(feature = "server", feature = "legacy-lww"))]
     pub(crate) fn from_parts(
         name: String,
         nodes: Vec<CanvasNode>,

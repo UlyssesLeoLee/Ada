@@ -166,6 +166,18 @@ wasm-test = ["wasm", "dep:wasm-bindgen-test"]
 # and the integration tests under `tests/integration.rs` (which
 # use `#[cfg(feature = "server")]`).
 server = []
+# v0.6.0 CRDT (Yrs) sync. Pulls in `yrs` (already declared in
+# [dependencies] above — this flag only gates the `pub mod
+# crdt` block and the `tests/crdt_sync.rs` integration test).
+# Default off: 5-gate CI default build does not exercise CRDT.
+crdt = []
+# v0.6.0 rename of the v0.5.0 `server` feature. `server` is kept
+# as a stable alias for cross-crate compat (m13 etc.); new
+# crates should depend on `legacy-lww` for clarity that this
+# path is on the deprecation roadmap (replaced by `crdt`).
+# `server` and `legacy-lww` are functionally equivalent in
+# v0.6.0; both enable the same `pub mod server_recon` block.
+legacy-lww = []
 
 [lints]
 workspace = true
