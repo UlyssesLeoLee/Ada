@@ -5,9 +5,9 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.3.0
+> **バージョン**：v2.4.0
 > **制定日**：2026-08-19
-> **最終更新日**：2026-08-26
+> **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
@@ -40,6 +40,7 @@
 | v2.1.0 | 2026-08-20 | 意思決定ドキュメント（`docs/decisions/`、3 ファイル / 11 P0 + 15 D-ADR）+ Cargo Workspace 18 crate scaffold 追加 |
 | v2.2.0 | 2026-08-20 | Observability Platform 設計（`docs/observability/`、14 ファイル / 210 KB / DOC-OBS-INDEX + 13 章 + 10 OBS-ADR + Phase 0-8 9 ヶ月導入計画）追加 | Ada プロジェクトチーム | TBD | TBD |
 | v2.3.0 | 2026-08-26 | v0.1.0 コードリリース + Rust 1.98.0 升版 + PostgreSQL 18.6 ドキュメント代換（13 ファイル横断、PR review 模式逐ファイル commit）| Mavis（per DEC-008）| TBD | TBD |
+| v2.4.0 | 2026-08-27 | v0.2.0 第1段: PL/pgSQL 6 存过（db/） + DOC-DEC-003 細化決議 25 ファイル + observability Phase 0-1 1-key-up stack（Prometheus/Loki/Grafana/Jaeger/OTel）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -826,6 +827,122 @@ docs/tests/
 - `crates/ada-telemetry/` v0.2.0 実装（v0.1.0 範囲外）
 - フロントエンド Bevy 0.14 canvas 統合（m12 の WASM ビルド）
 - PR push（`git push`）— `github.com:443` RST 障壁のため deferred、ローカル 23 commits ahead of origin/main
+
+---
+
+## 2026-08-27 — v0.2.0 第1段（v2.4.0）
+
+**変更種別**：PL/pgSQL 6 本存过 实施 + 25 文档 P0/P1 决议细化 + observability Phase 0-1 落地
+
+**触发原因**：
+
+- v0.1.0 release 升版后 (main f8a6646)，按 DEC-008 用户「所有 + 多 worktree 多子代理」指令开 5 个 worktree + 5 worker 并行推进
+- 3 worker 完工 (WT-3/WT-4/WT-5) 立即 merge，2 worker (WT-1/WT-2) 仍在跑
+
+**変更内容**：
+
+### 1. PL/pgSQL 6 存过 实施（per M-10 §4.6 设计文档）
+
+**new**: `db/` 目录（commit `d6bbfd9` / merge `3d791f8`、8 files / 2002 lines / 91.6 KB）
+
+- `db/migrations/V001__init_schema.sql`（368 lines）— 11 tables + `event_seq_global` SEQUENCE per M-10 §4.2-§4.5
+  - `tenant` / `module_registry` / `module_upgrade_history` / `module_instance` /
+  - `event_topic` / `event_subscription` / `event_log` / `consumer_offset` /
+  - `cluster_node` / `leader_lease` / `shard_assignment`
+- `db/migrations/V002__plpgsql_functions.sql`（513 lines）— 6 存过 per M-10 §4.6
+  - `register_module` (§4.6.1) 幂等 + module.registered 発火
+  - `atomic_module_swap` (§4.6.2) advisory_lock 串列化 + 双書
+  - `append_event` (§4.6.3) nextval + pg_notify
+  - `acquire_lease` (§4.6.4) FOR UPDATE + ON CONFLICT renew/takeover
+  - `release_lease` (§4.6.4) 保持者のみ成功
+  - `register_node_heartbeat` (§4.6.5) upsert + state flip + load 計算
+- `db/tests/V002__plpgsql_functions_test.sql`（554 lines）— 15 SAVEPOINT/ROLLBACK TO 测试
+  - 3 register / 2 swap / 2 event / 5 lease / 2 heartbeat / 1 notify
+- `db/Makefile` / `db/run-tests.sh` / `db/README.md`（331 lines）— テストランナー + 使い方
+
+**配套改动**:
+- `Cargo.toml` workspace 根: db/ 路径注释追加（members 変更なし）
+- `scripts/dev-setup.ps1`: Step 13.5/14 で db/ 検出時のみオプショナル実行
+
+**検証**:
+- 5 门 cargo 维持 (582 tests pass)
+- psql 実機未検証 (host 未導入、`Tested via syntax check only`)
+
+### 2. DOC-DEC-003 細化決議 25 ファイル（per DOC-DEC-001 / qa-register §5）
+
+**new**: `docs/decisions/03-p0-p1-detail/`（commit `a45a5b0` / merge `6b35e12`、27 files / 3021 insertions / 104.4 KB）
+
+- **11 P0 細化決議**（per qa-register §5.1）:
+  - p0-01-人员（Solo+AI+B 併用）/ p0-02-组织（最小 5 名）/ p0-03-FK（DEFERRABLE）
+  - p0-04-Manifest（JSON Schema 2020-12）/ p0-05-audit_partition（月次 RANGE）
+  - p0-06-KMS（AWS KMS + Vault OSS）/ p0-07-JWT（kid + JWKS）
+  - p0-08-GDPR（30 日 SLA + PL/pgSQL）/ p0-09-log（Loki + Promtail）
+  - p0-10-Backup（4 段 + 週次リストア）/ p0-11-ADR判定（週次アーキ会議）
+- **14 P1 細化決議**（per qa-register §5.2）:
+  - p1-01-模块边界 ~ p1-14-渗透测试（涵盖 QA-A01~T06 全部 P1）
+- 各文件 §1-§7 構造: 背景 / 決策 / 選択肢≥3 / RACI / 期限 / 影響 / 參考 + 修訂履歴
+
+**索引更新**:
+- `docs/decisions/01-p0-decision-matrix.md`: v1.0.0 → v1.1.0，加 §14 P0 細化決議リンク + §15/§16 目次
+- `docs/decisions/README.md`: v1.0.0 → v1.1.0，加 §3.1 DOC-DEC-003 索引（11 P0 + 14 P1 テーブル）
+
+**残課題**（per worker 报告）:
+- P1 推荐案是推断, 需 Ulysses 审核
+- RACI 多数 ⏳ 待（无人员配置信息）
+
+### 3. observability Phase 0-1 1-key-up stack
+
+**new**: `observability/` 目录（commit `7ad32c1` / merge `7f34381`、22 files / 2501 insertions）
+
+- `observability/docker-compose.yml` — 8 services 1-key-up
+  - Prometheus / Loki / Promtail / Grafana / Jaeger / otel-collector / node-exporter / postgres-exporter
+- `observability/prometheus/prometheus.yml` + 4 alert rules
+  - app_down / high_error_rate / high_latency / low_disk
+- `observability/loki/loki-config.yaml` + `promtail-config.yaml`
+- `observability/grafana/provisioning/datasources.yml` + 3 dashboards
+  - app-overview / rust-runtime / db-overview
+- `observability/jaeger/jaeger-config.yaml` + `otel-collector-config.yaml`
+- `observability/scripts/init.sh` + `init.ps1` + `validate-configs.py`
+
+**crates 改动**:
+- `crates/ada-m09-exporter/src/otlp.rs` — 加 `OtlpPushExporter`（std::net::TcpStream 直发 HTTP, 0 新依赖）+ 7 unit tests
+- `crates/ada-m09-exporter/src/lib.rs` — re-export
+- `crates/ada-telemetry/Cargo.toml` — prometheus feature stub 注释（等 WT-1 接管）
+
+**検証**:
+- yaml/json lint: 15/15 OK
+- docker compose config: 8 services 全部解析
+- cargo test: 582 → **589 passed**（+7 OtlpPushExporter tests）
+
+### 4. governance 整理
+
+- `.gitignore`: `/ada-changelog-bak/` / `check-old*.txt` / `test-old*.txt` / `clippy-old*.txt` / `fmt-old*.txt` / `push-old*.txt` 一時ログ除外追加
+
+**影響範囲**：
+
+- `db/` 8 files（91.6 KB、PL/pgSQL 6 存过实施）
+- `docs/decisions/03-p0-p1-detail/` 25 files（104.4 KB、25 細化決議）
+- `observability/` 19 files（Prometheus / Loki / Grafana / Jaeger / OTel collector 1-key-up stack）
+- `crates/ada-m09-exporter/` 2 files（OtlpPushExporter + 7 tests）
+- `crates/ada-telemetry/Cargo.toml`（feature stub 注释、WT-1 接管予定）
+- `docs/decisions/{01-p0-decision-matrix.md,README.md}` 索引
+- `Cargo.toml` workspace 根 / `scripts/dev-setup.ps1` 配套
+- `.gitignore` 一時ログ除外
+
+**v2.4.0 達成**：
+
+- v0.1.0 release 后的**第1段実装** (PL/pgSQL + 決議细化 + observability)
+- 多 worktree + 多子代理 並行推進のワークフロー実証（5 worker 中 3 worker 完工）
+- 5 门 cargo 维持（582 → 589 tests、+7 OtlpPushExporter）
+- 5 commits ahead of v2.3.0
+
+**保留 / 次フェーズ**：
+
+- WT-1 ada-telemetry v0.2.0（worker 仍在跑、workspace 衝突回避待ち）
+- WT-2 m12 WASM + Bevy 0.14 集成（worker 仍在跑）
+- `ada-telemetry v0.2.0` 完全実装（WT-1 merge 后正式入 CHANGELOG v2.5.0）
+- m12 WASM 编译验证（worker merge 后）
+- 部署环境 PSQL 実机検証（host 工具链问题、user authorization 必要）
 
 ---
 
