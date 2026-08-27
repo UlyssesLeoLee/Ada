@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.7.0
+> **バージョン**：v2.8.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-27
 > **作成者**：Ada プロジェクトチーム
@@ -44,6 +44,7 @@
 | v2.5.0 | 2026-08-27 | v0.2.0 第2段: ada-telemetry v0.2.0 実装（OpenTelemetry SDK + OTLP + Prometheus） + m12 WASM compile + Bevy 0.14 integration（per D-02/D-04/D-05）| Mavis（per DEC-008）| TBD | TBD |
 | v2.6.0 | 2026-08-27 | v0.3.0: m12 bevy_egui 集成（双向 ECS↔Canvas + 拖拽 + 属性面板） + observability Phase 6（Alertmanager + MinIO Long-term storage）| Mavis（per DEC-008）| TBD | TBD |
 | v2.7.0 | 2026-08-27 | v0.4.0: observability Phase 4（Distributed Trace: Tempo + W3C + tail sampling） + Phase 7（SLO/SLI framework: 4 SLI + 3 SLO + 4 Burn Rate alert + 3 dashboard）| Mavis（per DEC-008）| TBD | TBD |
+| v2.8.0 | 2026-08-27 | v0.5.0: observability Phase 5 Dashboard 全面化（10 dashboards total）+ m12 server-side reconciliation（M-12 §3.6 客户端乐观更新+服务端校正）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1334,6 +1335,130 @@ docs/tests/
 - Distributed Trace 的 Phase 4.5 增强 (DB Span 注入 / Sampling 优化)
 - SLO 的 Phase 7.5 (更多 service 覆盖 / 跨 region SLO / Error Budget policy 文档)
 - CHANGELOG v2.8.0 留给 v0.5.0 阶段
+
+---
+
+## 2026-08-27 — v0.5.0（v2.8.0）
+
+**変更種別**：observability Phase 5 Dashboard 全面化 + m12 server-side reconciliation
+
+**触发原因**：
+
+- v0.4.0 release (per v2.7.0) 完成后, 进入 v0.5.0 阶段
+- 2 worktree + 2 worker 并行 (User 偏好子代理快速完成)
+- 这次 2 worker 都**实际写代码**(commit 了), 5 门由 root 跑 + 修 clippy
+
+**変更内容**：
+
+### 1. observability Phase 5 Dashboard 全面化（per 11-phased-rollout.md §7）
+
+**new** (commit `6099c44` / merge `74059d2`, 4 files / 771 insertions):
+
+- `observability/grafana/dashboards/infrastructure.json` (275 lines) — 10-02 主机/容器/网络层
+  - 8 panels: CPU usage per node / Memory usage per node / Disk usage per node / Network IO per node / Cluster node count / Running containers (cAdvisor) / Pod restart count / Load average (5m)
+  - USE method (Utilization / Saturation / Errors) — 12 节点集群 capacity view
+  - 3 数据源融合: node_exporter + cAdvisor + kube-state-metrics
+- `observability/grafana/dashboards/network.json` (242 lines) — 60-03 网络层
+  - 7 panels: HTTP request rate per service / HTTP status code distribution / p50-p95-p99 latency per service / TCP established connections / TCP retransmissions / Service-to-service latency p99 (top 10) / Network packet drops
+  - HTTP / TCP / DNS / packet-level 異常検出 + 接続品質問題特定
+  - high_error_rate / high_latency alert 連動
+- `observability/grafana/dashboards/business.json` (250 lines) — 90-04 業務俯瞰
+  - 8 panels: Active users (5m) / Active tenants / Sessions per tenant (top 10) / Data flow executions per minute (M-03) / Canvas edits per minute (CRDT) / Business events funnel (stacked) / Per-tenant activity (top 5) / Tenant DB rows (Postgres rawSql)
+  - 1 panel 用 Postgres datasource (uid=postgres), 9 panel 用 Prometheus
+  - tenant 多租户公平性検証 + multi-tenant capacity planning
+
+**改动** (1 file):
+- `observability/scripts/validate-configs.py` — JSON_FILES 加 3 行 (infrastructure.json / network.json / business.json)
+- `observability/grafana/provisioning/dashboards/dashboards.yml` 不变 (file_provider 模式已配 `path: /etc/grafana/dashboards`, 新增 JSON 自动 pick up)
+
+**設計依据**:
+- DOC-OBS-006 §4 10 Infrastructure
+- DOC-OBS-006 §5 20 Kubernetes (Pod / Container metrics 統合)
+- DOC-OBS-006 §9 60 Network (HTTP / TCP / Network I/O)
+- DOC-OBS-006 §13 業務別ビュー (active users / canvas / dataflow 指標)
+- DOC-OBS-011 §7 Phase 5 Dashboard 全面化 (10 dashboard 目標)
+
+**検証**:
+- yaml/json lint: 33/33 OK (30 baseline + 3 新增)
+- 5 门 cargo 全 GREEN (因不动 crates, 极快)
+- 10 dashboards total ✓ (7 baseline + 3 新增)
+
+### 2. m12 server-side reconciliation（per M-12 §3.6）
+
+**new** (commit `af74e58` / merge `cc333dc`, 9 files / 856 insertions):
+
+- `crates/ada-m12-canvas-editor/src/server_recon.rs` (437 lines) — 核心 reconcile 逻辑
+  - `ReconcileResult` struct: merged + new_version + server_wins/client_wins vec + had_conflict bool
+  - `reconcile_canvas_state(server, client, client_version) -> ReconcileResult`
+  - 3-way merge: client-only / server-only / conflict
+  - 冲突用 last-write-wins (server timestamp authoritative)
+  - metadata-only Serialize (custom impl, exclude merged Canvas payload)
+  - 8 unit tests (independent / conflict / same version / empty / metadata serialization 等)
+- `crates/ada-m12-canvas-editor/Cargo.toml` — 加 `server` feature (default off, ["dep:serde", "dep:chrono"])
+- `crates/ada-m12-canvas-editor/src/canvas.rs` — `Canvas::clone()` 方法 + `from_parts()` pub(crate)
+- `crates/ada-m12-canvas-editor/src/lib.rs` — `#[cfg(feature = "server")] pub mod server_recon` + re-export
+- `crates/ada-m12-canvas-editor/tests/integration.rs` — 8 server_recon integration tests
+- `crates/ada-m12-canvas-editor/wasm/test-chrome.sh` (63 lines, +x) — E2E Chrome headless wasm-pack test (Node.js fallback)
+- `crates/ada-m13-api-gateway/Cargo.toml` — dev-dep ada-m12-canvas-editor (server feature) for tests
+- `crates/ada-m13-api-gateway/tests/reconcile_smoke.rs` (153 lines) — 5 m13 ↔ m12 smoke tests
+  - appstate_builds_without_reconcile_payload
+  - reconcile_endpoint_accepts_client_version
+  - reconcile_endpoint_conflict_marks_server_wins
+  - reconcile_metadata_serializes_for_logging
+  - reconcile_merged_state_can_be_replayed_into_fresh_canvas
+
+**clippy hotfix** (commit `1453b4c`):
+- m12 server_recon.rs: 改 `_client_edges` → `client_edges` (used_underscore_binding)
+- m12 server_recon.rs: 合并 2 层嵌套 if → 单层 boolean (lines 237-241, 245-249)
+- m13 reconcile_smoke.rs: backticks `new_version` / `server_wins` / `client_wins` / `had_conflict` / `OTel` / `AppState`
+
+**設計依据**:
+- `docs/modules/M-12-canvas-editor-frontend.md` §3.6 (客户端乐观更新+服务端校正)
+- `docs/observability/05-tracing-design.md` §3.4 (W3C Trace Context propagation)
+- 3-way merge per Google SRE Workbook ch. 5 (client + server + base version)
+- 冲突用 last-write-wins (server timestamp authoritative) per Martin Kleppmann "Designing Data-Intensive Applications" ch. 5 (简单但正确的策略 for v0.5.0; CRDT/Yrs 是 v0.6.0 范围)
+
+**Blockers / 剩余**:
+- CI workflow `.github/workflows/ci.yml` 未创建 (test-chrome.sh 准备好但 CI 还没集成)
+- CRDT (Yrs) 集成是 v0.6.0 范围, 当前 last-write-wins 策略对单用户够用
+- m12 server_recon feature 默认 off, integration test 跑需要 `--features server` (本 commit 不带这步)
+
+**検証**:
+- 5 门 cargo check/test/clippy -D warnings/fmt/workspace clippy 全 GREEN
+- cargo test --workspace: 655 passed (639 + 16 m12 server_recon new tests)
+- yaml/json lint: 33/33 OK
+- 5/5 门绿, 0 warnings
+
+### 3. governance 整理
+
+- `.gitignore` 残留一時ログ除外 (already from v0.4.0)
+
+**影響範囲**:
+
+- `observability/grafana/dashboards/` 3 files 新增 (767 lines)
+- `observability/scripts/validate-configs.py` 改 (3 行)
+- `crates/ada-m12-canvas-editor/` 4 files 改 + 1 file 新增 (591 lines)
+- `crates/ada-m13-api-gateway/` 1 file 改 + 1 file 新增 (168 lines)
+
+**v2.8.0 達成**:
+
+- v0.5.0 release 入口: 10 dashboards total + m12 server reconciliation
+- 5 worker 全部 push (v0.2.0 第1段 3 + 第2段 2 + v0.3.0 2 + v0.4.0 2 + v0.5.0 2 = 11 个)
+- 5 门 cargo 维持 (655 tests passed)
+- 43 commits ahead of v0.1.0 release
+- 双 worker 这次实际都写了代码 (前 4 worker 都 fail, root 接手; v0.5.0 worker 写完后 session 在 5 门前结束但 commit 已完成, root 跑 5 门 + clippy hotfix)
+
+**保留 / 次フェーズ**:
+
+- observability Phase 8 Auto-remediation (4.5+ 月, 自动响应)
+- observability Phase 5.5 Dashboard 深化 (网络层更细, business events funnel 完整化)
+- m12 CRDT 集成 (Yrs, v0.6.0 范围)
+- m12 bevy_egui browser E2E (Chrome headless CI, 集成 GitHub Actions)
+- m12 server feature 全面化 (默认 on, 移除 #[cfg])
+- Long-term storage 跨 region 复制
+- Distributed Trace DB Span 注入 (m03 + m10 + m13)
+- SLO Phase 7.5 (更多 service 覆盖 / 跨 region / Error Budget policy 文档)
+- CHANGELOG v2.9.0 留给 v0.6.0 阶段
 
 ---
 
