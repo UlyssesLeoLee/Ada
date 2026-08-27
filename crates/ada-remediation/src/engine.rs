@@ -144,14 +144,30 @@ impl RemediationEngine {
     /// [`StepExecutor`]. The default is a [`DryRunExecutor`]
     /// that records intent and returns success; production
     /// wiring swaps in a [`RealExecutor`].
+    ///
+    /// Every step outcome is recorded to the [`metrics`]
+    /// facade (`ada_remediation_actions_total`,
+    /// `ada_remediation_action_duration_seconds`). State
+    /// transitions are recorded in `record_state_transition`.
+    /// Install the recorder with
+    /// [`crate::metrics::install`] before scraping.
     pub async fn execute(&self, action: &RemediationAction) -> Result<ActionOutcome> {
         let started = Instant::now();
         let mut outcome = ActionOutcome::new(action.id.clone());
         let ctx = ExecutionContext::new(action.id.clone(), String::new());
 
+        crate::metrics::record_state_transition("Idle", "Evaluating");
+        crate::metrics::record_state_transition("Evaluating", "Executing");
+
         for (idx, step) in action.steps.iter().enumerate() {
             let (status, message, duration_ms) = self.run_step(idx, step, &ctx).await;
             let kind = step_kind_name(step);
+            let outcome_label = if status { "success" } else { "failure" };
+            crate::metrics::record_step_outcome(&action.id, outcome_label);
+            crate::metrics::record_step_duration(
+                &action.id,
+                f64::from(u32::try_from(duration_ms).unwrap_or(u32::MAX)) / 1000.0,
+            );
             let result = if status {
                 StepResult::ok(idx, kind, message, duration_ms)
             } else {
@@ -160,10 +176,17 @@ impl RemediationEngine {
             outcome.push_step(result);
             if !status {
                 outcome.fail();
+                crate::metrics::record_state_transition("Executing", "Failed");
                 break;
             }
         }
         outcome.complete(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+        let final_state = if matches!(outcome.status, crate::action::OutcomeStatus::Succeeded) {
+            "Cooldown"
+        } else {
+            "Failed"
+        };
+        crate::metrics::record_state_transition("Executing", final_state);
         Ok(outcome)
     }
 

@@ -83,6 +83,7 @@ pub mod error;
 pub mod executor;
 pub mod history;
 pub mod http;
+pub mod metrics;
 pub mod state;
 
 pub use action::{ActionOutcome, ActionStep, ExecutorMode, RemediationAction};

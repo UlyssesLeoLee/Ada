@@ -38,6 +38,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(handle_metrics))
         .route("/webhook/alertmanager", post(handle_alertmanager_webhook))
         .route("/remediation/history", get(handle_history))
         .route("/remediation/cooldowns", get(handle_cooldowns))
@@ -47,6 +48,29 @@ pub fn router(state: AppState) -> Router {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+// ----------------------------------------------------------------------
+// Prometheus exposition
+// ----------------------------------------------------------------------
+
+/// Render the current Prometheus snapshot. Mirrors the
+/// `/metrics` endpoint convention from `ada-telemetry`:
+/// plain text, no auth (relies on k8s NetworkPolicy to
+/// keep the path private to the cluster's Prometheus
+/// scraper).
+async fn handle_metrics(State(state): State<AppState>) -> ([(axum::http::HeaderName, &'static str); 1], String) {
+    // Update the cooldown gauge from the live in-memory
+    // store before rendering. Cheap: O(active count).
+    crate::metrics::set_cooldown_gauge(state.store.active_cooldowns().len() as f64);
+    let body = crate::metrics::render();
+    (
+        [(
+            axum::http::HeaderName::from_static("content-type"),
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
 }
 
 // ----------------------------------------------------------------------
@@ -487,5 +511,47 @@ mod tests {
         let arr = v["history"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["action_id"], "disk-space-low");
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_serves_prometheus_text() {
+        // Install the recorder so `/metrics` returns real
+        // Prometheus text instead of the empty string.
+        let _ = crate::metrics::install();
+        let state = AppState {
+            engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
+            store: MemoryStore::new(),
+        };
+        let r = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::OK);
+        // Content-Type is the Prometheus text exposition
+        // format. `render()` may still be empty if no
+        // metric has been recorded yet, but the body must
+        // be ASCII text either way.
+        let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
+        let body = std::str::from_utf8(&body_bytes).expect("prometheus text is utf-8");
+        if !body.is_empty() {
+            // Every non-comment line must be a
+            // `name{labels} value` triple. Skip blank
+            // lines (Prometheus text ends with a trailing
+            // newline).
+            for line in body.lines() {
+                if line.starts_with('#') || line.trim().is_empty() {
+                    continue;
+                }
+                assert!(
+                    line.split_whitespace().count() >= 2,
+                    "malformed prometheus line: {line:?}"
+                );
+            }
+        }
     }
 }
