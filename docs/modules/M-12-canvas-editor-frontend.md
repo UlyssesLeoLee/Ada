@@ -374,6 +374,137 @@ let result = reconcile_with_crdt(&server_canvas, &client_update_bytes, client_ve
 详细集成说明 / 迁移路径 / 已知限制见
 `crates/ada-m12-canvas-editor/CRDT.md`。
 
+#### 3.6.2 v0.7.0 CRDT schema 升 YMap keyed by uuid
+
+> v0.7.0 升级: v0.6.0 "YArray of YMap" → v0.7.0 "YMap keyed by
+> uuid"。理由: v0.6.0 在三种场景下不收敛或丢数据 —
+> ① 两 replica 并发 `remove(idx)` 留两份 tombstone 不 collapse
+> ② `ports` 字段是 JSON 字符串,字段级 LWW 不覆盖端口子结构
+> ③ Edge 没有 dedup,两 client 并发加同 edge 留两份。
+> v0.7.0 用外层 YMap 2P-Set 把这三类冲突全部转为"按 key
+> 自然 dedup / 收敛"。详细设计见 `CRDT.md §8`。
+
+**v0.7.0 schema (YDoc root layout, vs v0.6.0)**:
+
+| Root | v0.6.0 | v0.7.0 | 关键差异 |
+|---|---|---|---|
+| `meta` | YMap | YMap | 无 |
+| `elements` | **YArray of YMap** | **YMap<uuid, YMap>** | 外层换为 YMap,key = element UUID;删除 = tombstone (alive=false),不删 key |
+| `ports` | (嵌套 element YMap 里的 JSON 字符串) | **YMap<`${elem}::${port}`, YMap>** (顶层) | 升为顶层 YMap,key = `element_uuid::port_uuid`;字段级 LWW 覆盖 |
+| `edges` | **YArray of YMap** | **YMap<`${from}::${to}`, YMap>** | 外层换为 YMap,key = `from_uuid::to_uuid`;并发同 edge 自然 dedup |
+
+**元素级 API surface** (v0.7.0 新增, pub):
+
+```rust
+// element-level
+insert_element(&doc, &node)        // key = node.id.uuid(), YMap 2P-Set
+remove_element(&doc, id)           // tombstone (alive=false), YMap 2P-Set
+update_element(&doc, id, ElementUpdate)
+get_element(&doc, id) -> Option<ElementSnapshot>
+iter_elements(&doc) -> impl Iterator<Item = (Uuid, ElementSnapshot)>
+
+// port-level
+add_port(&doc, element_id, port: PortSnapshot)     // key = element_uuid::port_uuid
+remove_port(&doc, element_id, port_id)
+
+// edge-level
+insert_edge(&doc, from, to, label) -> Result<(), CanvasError>  // key = from::to
+remove_edge(&doc, from, to)
+update_edge(&doc, from, to, label)
+get_edge(&doc, from, to) -> Option<EdgeSnapshot>
+iter_edge_keys(&doc) -> impl Iterator<Item = (NodeId, NodeId)>
+```
+
+**`ClientId` 协议** (v0.7.0 新增, pub):
+
+```rust
+// server / client 配对永远不 alias (yrs 把 client_id 编码
+// 在 update 头 varint 里,同 client_id 同状态向量)
+let server_id = ClientId::new("server-1");
+let doc = Doc::with_client_id(server_id.uuid.as_u128() as u64);
+let result = reconcile_with_crdt(
+    &server_canvas, &client_update, client_version, &server_id
+)?;
+```
+
+`reconcile_with_crdt` v0.7.0 比 v0.6.0 多一个 `&ClientId` 参数 —
+显式协商,避免 v0.6.0 隐式 `Doc::new()` 拿 rand client_id 撞车
+(m13 多 server 部署时易触发的 corner case)。
+
+**Fallback 开关** (Cargo features, v0.7.0):
+
+| Feature | 状态 | 路径 |
+|---|---|---|
+| `default` | `["server"]` (v0.7.0 改) | `server_recon` 3-way LWW (v0.5.0) always-on |
+| `server` | stable alias (no-op) | 兼容 m13 集成测试 |
+| `legacy-lww` | **DEPRECATED** (v0.8.0 移除) | v0.5.0 路径,新代码勿用 |
+| `crdt` | 默认 off (opt-in) | Yrs sync (v0.6.0+ v0.7.0) |
+| `legacy-array` | 新增,v0.7.0 默认 off | v0.6.0 YArray-of-YMap fallback (v0.8.0 移除) |
+| `wasm-crdt` | 新增,v0.7.0 默认 off | v0.7.0 WASM `WasmCrdtDoc` wrapper (v0.7.0 JS host 驱动 Yrs) |
+| `wasm` | 旧 (v0.1.0+) | v0.5.0 `WasmCanvas` wrapping `Canvas`,独立 feature |
+| `bevy` | 旧 (v0.1.0+) | Bevy 0.14 plugin |
+| `bevy_egui` | 旧 (v0.1.0+) | egui inspector |
+
+**`WasmCrdtDoc` 用法** (v0.7.0 新增, `--features wasm-crdt`):
+
+```ts
+// pkg/ada_m12_canvas_editor.js (wasm-pack build)
+import init, { WasmCrdtDoc } from "pkg/ada_m12_canvas_editor";
+
+await init();
+const doc = new WasmCrdtDoc();           // random yrs client id
+doc.insertElementJson({
+  id, kind: "block", x, y, label, ports: [], alive: true,
+});
+const state = doc.encodeState();         // Uint8Array (yrs v1)
+const diff  = peer.applyUpdate(state, sv);  // Uint8Array
+const els   = doc.getElements();         // JsValue (JSON array)
+```
+
+跟 v0.1.0 的 `wasm` feature (wrap `Canvas` 表面) 是两条独立 feature,
+可同时启用 — 旧 client 走 `WasmCanvas`, 新 client 走 `WasmCrdtDoc`。
+
+**v0.7.0 测试覆盖** (总计 19 个, 17 unit + 2 integration):
+
+- element: `concurrent_insert_same_id_dedup` /
+  `concurrent_update_same_field_lww` /
+  `concurrent_update_different_fields_no_conflict` (seed-by-one) /
+  `concurrent_delete_same_id_converges_to_deleted` /
+  `tombstone_converges_with_concurrent_insert`
+- port: `port_concurrent_add_different_id_converges` /
+  `port_concurrent_remove_same_id_converges_to_removed` /
+  `port_concurrent_update_x_vs_y_no_conflict` (seed-by-one)
+- edge: `edge_concurrent_insert_same_key_dedup` /
+  `edge_concurrent_delete_same_key_converges` /
+  `edge_concurrent_update_label_no_conflict`
+- ClientId: `client_id_negotiation_persists_to_update_bytes`
+- 性能: `multi_client_merge_converges` (3 客户端) /
+  `large_doc_encodes_decodes_under_1s` (1k 元素)
+- 错误路径: `merge_crdt_update_rejects_malformed_bytes` /
+  `sync_roundtrip_preserves_elements`
+- integration: `three_clients_converge_to_same_state` /
+  `reconcile_with_server_canvas_preserves_client_additions`
+- legacy fallback (gated): `legacy_array_concurrent_inserts_converge`
+
+**v0.7.0 已知限制** (前端的注意点):
+
+1. **Nested YMap concurrent insert 丢数据**: 两个 client 都
+   `insert_element(same_uuid)` 时,各自 `MapPrelim::new()` 创建
+   独立 inner YMap reference,外层 YMap 2P-Set 只保留一个 inner
+   YMap reference,另一个的字段写丢失。**前端必须避免双 seed
+   同一 uuid**(用 server 分配 UUID 协议协调)。后续 v0.7.1+
+   计划改 flat `${uuid}::${field}` schema 彻底解决。
+2. **`ClientId` API 在 v0.7.0 已入**: 不按 parent brief 的 v0.7.1
+   推迟。前任 worker 已整合,revert 成本高于保留;commit msg 显式
+   标记为 deviation。
+3. **`legacy-array` 一年内移除** (v0.8.0): 删除 feature flag +
+   `crdt_legacy_array` 模块 + `reconcile_with_crdt_legacy` 函数。
+4. **`wasm-crdt` doctest 只在 `wasm-pack test` 跑**: 5 门 native CI
+   cfg-gated 跳过。Browser E2E 留 v0.7.1 / v0.8.0。
+
+详细设计依据、迁移路径、测试矩阵、参考见
+`crates/ada-m12-canvas-editor/CRDT.md` §8-§10。
+
 ## 4. 验收要点
 
 1. **画布性能**：单画布 1,000 节点 5,000 条连线规模下，前端交互（拖拽/缩放/连线）保持 ≥ 30fps（[architecture/03-cross-cutting-risks.md §4.4](../architecture/03-cross-cutting-risks.md)）。
@@ -401,9 +532,13 @@ let result = reconcile_with_crdt(&server_canvas, &client_update_bytes, client_ve
 | CodeMirror 6 | 支持 IME 的富文本编辑器 | §3.4 |
 | 协作者光标 | Awareness 渲染的远端光标 | §3.6 |
 | 服务端权威 | 服务端为最终状态源 | §3.6 |
-| CRDT | Conflict-free Replicated Data Type (Yjs-compatible) | §3.6.1 |
-| Yrs | Yjs 的 Rust 移植（m12 v0.6.0 CRDT 后端, MIT） | §3.6.1 |
+| CRDT | Conflict-free Replicated Data Type (Yjs-compatible) | §3.6.1, §3.6.2 |
+| Yrs | Yjs 的 Rust 移植（m12 v0.6.0+ CRDT 后端, MIT） | §3.6.1, §3.6.2 |
 | LWW (legacy) | v0.5.0 3-way merge: server-wins on conflict | §3.6.1 |
+| YMap keyed by uuid | v0.7.0 schema,外层 YMap 2P-Set 给并发 delete / dedup | §3.6.2 |
+| `ClientId` | v0.7.0 stable 客户端标识 (uuid + label) | §3.6.2 |
+| `WasmCrdtDoc` | v0.7.0 WASM wrapper, JS host 直接驱动 Yrs | §3.6.2 |
+| `legacy-array` feature | v0.6.0 YArray-of-YMap fallback,v0.8.0 移除 | §3.6.2 |
 | WASM 包体积 | 控制首屏加载时间 | §3.5 [NF-ENV]【必須】 |
 | 帧率 (FPS) | 30fps 验收硬指标 | §3.5 [NF-PER]【必須】 |
 
