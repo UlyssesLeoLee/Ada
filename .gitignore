@@ -88,3 +88,11 @@ fmt-old2.txt
 push-old.txt
 push-old2.txt
 push2-old.txt
+
+# WT-1 v2 + WT-2 merge 残留
+build.txt
+cv.txt
+commit-msg*.txt
+regen*.txt
+test*.txt
+fmt2*.txt
