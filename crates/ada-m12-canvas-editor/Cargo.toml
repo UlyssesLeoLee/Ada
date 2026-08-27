@@ -36,6 +36,18 @@ crate-type = ["cdylib", "rlib"]
 name = "integration"
 path = "tests/integration.rs"
 
+# B2 lesson (repeated for `crdt_sync`): explicit `[[test]]`
+# block so `cargo test --workspace` actually runs the
+# integration test under `tests/crdt_sync.rs` (Cargo 1.85+
+# silently drops tests/* when `[lib]` also has an explicit
+# `path = ...`). The test itself is feature-gated (only
+# meaningful with `--features crdt`); see the `#[cfg]`
+# at the top of `tests/crdt_sync.rs`.
+[[test]]
+name = "crdt_sync"
+path = "tests/crdt_sync.rs"
+required-features = ["crdt"]
+
 [dependencies]
 ada-core = { path = "../ada-core" }
 # `tokio` baseline 是 wasm-friendly 子集(`macros,sync,time`)—
