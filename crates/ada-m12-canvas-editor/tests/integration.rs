@@ -79,3 +79,123 @@ fn history_branching_resets_redo_stack() {
     h.push(EditOp::RemoveNode { id });
     assert_eq!(h.redo_len(), 0);
 }
+
+// ===================================================================
+// M-12 v0.5.0 server-side reconciliation integration tests.
+//
+// Gated by `--features server` so the default 5-gate CI build
+// (cargo check / test / clippy / fmt) does not need the optional
+// integration surface. The m13 smoke test (`tests/reconcile_smoke.rs`
+// in `ada-m13-api-gateway`) exercises the cross-crate protocol;
+// these tests focus on m12-internal reconcile semantics from an
+// end-to-end (not just unit) perspective.
+//
+// 覆盖:
+// - same version: 客户端 / 服务端各自加 node,merge 含两者
+// - conflict LWW: 同 NodeId 不同 content,server wins
+// - empty canvas: 双方都空,no panic
+// - clock skew: client_version > server_version,deterministic
+// ===================================================================
+
+#[cfg(feature = "server")]
+mod server_recon_integration {
+    use ada_m12_canvas_editor::server_recon::reconcile_canvas_state;
+    use ada_m12_canvas_editor::{Canvas, CanvasNode, NodeId, NodeKind, Position};
+
+    fn positioned(label: &str, x: i32, y: i32) -> CanvasNode {
+        CanvasNode::new(NodeKind::Block, Position::new(x, y), label)
+    }
+
+    fn node_with_id(id: NodeId, label: &str, x: i32, y: i32) -> CanvasNode {
+        let mut n = CanvasNode::new(NodeKind::Block, Position::new(x, y), label);
+        n.id = id;
+        n
+    }
+
+    #[test]
+    fn integration_same_version_merges_independent_nodes() {
+        let server = Canvas::new("integration-doc");
+        server.add_node(positioned("server-node", 10, 20));
+
+        let client = Canvas::new("integration-doc");
+        let cn = client.add_node(positioned("client-node", 30, 40));
+
+        let r = reconcile_canvas_state(&server, &client, 0);
+
+        assert_eq!(r.new_version, 2);
+        assert!(!r.had_conflict);
+        assert!(r.server_wins.is_empty());
+        assert_eq!(r.client_wins, vec![cn]);
+        assert_eq!(r.merged.nodes().len(), 2);
+        assert_eq!(r.merged.name(), "integration-doc");
+    }
+
+    #[test]
+    fn integration_conflict_last_write_wins_server() {
+        let shared_id = NodeId::new();
+
+        let server = Canvas::new("doc");
+        let sn = server.add_node(node_with_id(shared_id, "shared", 0, 0));
+
+        let client = Canvas::new("doc");
+        client.add_node(node_with_id(shared_id, "shared", 99, 99));
+
+        let r = reconcile_canvas_state(&server, &client, 0);
+
+        assert_eq!(r.new_version, 2);
+        assert!(r.had_conflict);
+        assert_eq!(r.server_wins, vec![sn]);
+        assert!(r.client_wins.is_empty());
+
+        let merged_node = r.merged.get_node(sn).expect("node in merged");
+        assert_eq!(merged_node.position, Position::new(0, 0));
+    }
+
+    #[test]
+    fn integration_empty_canvas_no_panic() {
+        let server = Canvas::new("empty-doc");
+        let client = Canvas::new("empty-doc");
+
+        let r = reconcile_canvas_state(&server, &client, 0);
+
+        assert_eq!(r.new_version, 1);
+        assert!(!r.had_conflict);
+        assert!(r.server_wins.is_empty());
+        assert!(r.client_wins.is_empty());
+        assert!(r.merged.nodes().is_empty());
+        assert!(r.merged.edges().is_empty());
+    }
+
+    #[test]
+    fn integration_client_version_ahead_clock_skew() {
+        let server = Canvas::new("doc");
+        server.add_node(positioned("a", 0, 0));
+
+        let client = Canvas::new("doc");
+        client.add_node(positioned("b", 0, 0));
+
+        let r = reconcile_canvas_state(&server, &client, 999);
+
+        assert_eq!(r.new_version, 1000);
+        assert_eq!(r.merged.nodes().len(), 2);
+        assert!(!r.had_conflict);
+    }
+
+    #[test]
+    fn integration_metadata_serializes_without_canvas_payload() {
+        // Verify the manual `Serialize` impl on `ReconcileResult`
+        // works: it carries the four scalar fields but omits
+        // `merged: Canvas` (which can't be serde-derived because
+        // of the Mutex<Inner> internals).
+        let server = Canvas::new("doc");
+        server.add_node(positioned("a", 0, 0));
+        let client = Canvas::new("doc");
+
+        let r = reconcile_canvas_state(&server, &client, 0);
+        let json = serde_json::to_value(&r).expect("serialize");
+        assert_eq!(json["new_version"], 2);
+        assert_eq!(json["had_conflict"], false);
+        assert!(json["server_wins"].is_array());
+        assert!(json["client_wins"].is_array());
+    }
+}

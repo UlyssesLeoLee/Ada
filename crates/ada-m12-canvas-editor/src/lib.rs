@@ -37,6 +37,9 @@
 //! - `full` — 同时启用 wasm + bevy,产出最大体积的 WASM。
 //! - `wasm-test` — 在 wasm feature 之上加 `wasm-bindgen-test`,
 //!   供 `wasm-pack test --headless --chrome` 跑浏览器内测试。
+//! - `server` (M-12 v0.5.0) — 启用 `pub mod server_recon` 提供
+//!   3-way merge (LWW, server-authoritative) 协议实现。`default
+//!   off`,只为 m13 ↔ m12 集成测试 + 远端 reconcile 场景使用。
 //!
 //! 设计依据: `docs/decisions/02-design-adrs.md` D-02 (sandbox
 //! WASM), D-04 (Bevy 0.14 stable), D-05 (WASM 8 MB / gzip 3 MB),
@@ -63,6 +66,15 @@ mod bevy_bridge;
 mod bevy_plugin;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
+/// M-12 v0.5.0 server-side reconciliation. Only compiled with
+/// `--features server` so the default 5-gate CI path doesn't
+/// pull the optional integration surface. See `src/server_recon.rs`
+/// for the algorithm. Made `pub mod` (not just `pub use`) so
+/// cross-crate integration tests (e.g. `m13/tests/reconcile_smoke.rs`)
+/// can address the types as
+/// `ada_m12_canvas_editor::server_recon::reconcile_canvas_state`.
+#[cfg(feature = "server")]
+pub mod server_recon;
 #[cfg(feature = "wasm")]
 mod wasm;
 
@@ -104,6 +116,15 @@ pub use egui_integration::{
     begin_drag, end_drag, node_inspector_system, sync_ecs_to_canvas_system, update_drag,
     CanvasInspectorPlugin, NodeDragState, NodeInspectorState,
 };
+
+/// M-12 v0.5.0 server-side reconciliation public surface.
+/// Only compiled with `--features server`.
+///
+/// 包含:
+/// - [`reconcile_canvas_state`] — 3-way merge (LWW, server wins)
+/// - [`ReconcileResult`] — 合并结果 (merged canvas + win lists)
+#[cfg(feature = "server")]
+pub use server_recon::{reconcile_canvas_state, ReconcileResult};
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace
 /// version per D-09).
