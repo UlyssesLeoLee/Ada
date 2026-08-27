@@ -80,14 +80,20 @@ test-old2.txt
 clippy-old.txt
 clippy-old2.txt
 clippy-old3.txt
-clippy-ws-old.txt
-clippy-ws-old3.txt
-clippy-ws-old4.txt
-fmt-old.txt
-fmt-old2.txt
-push-old.txt
-push-old2.txt
+clippy-ws-old*.txt
+fmt-old*.txt
+push-old*.txt
 push2-old.txt
+val-old.txt
+val.txt
+test.txt
+clippy.txt
+clippy-ws.txt
+fmt*.txt
+push.txt
+build.txt
+cv.txt
+_unused*.txt
 
 # WT-1 v2 + WT-2 merge 残留
 build.txt
