@@ -13,6 +13,7 @@
 | バージョン | 日付 | 変更内容 |
 |---|---|---|
 | v1.0.0 | 2026-08-27 | 初版（Phase 8 v0.6.0 実装完了） |
+| v1.1.0 | 2026-08-27 | Phase 8.5 SRE ハードニング v0.7.0 実装完了。Real executor (commit 0) / Prometheus exporter + /metrics (commit-1) / hot-reload watcher polling fallback (commit-2) / webhook shared-secret auth (commit-3) / manual trigger auth (commit-4) / SLO 7.5 + Error Budget policy (commit-5) / ドキュメント (commit-6) を §12 に記録。§9 已知の制約の 9.1 / 9.2 / 9.3 / 9.4 は v0.7.0 で解消 (残 9.5 のみ)。 |
 
 ---
 
@@ -29,6 +30,7 @@
 9. 既知の制約
 10. 用語集
 11. 参考文献
+12. v0.7.0 ハードニング完了サマリ (Phase 8.5)
 
 ---
 
@@ -418,29 +420,36 @@ cargo clippy --workspace
 
 ## 9. 既知の制約
 
-### 9.1 dry-run default
+### 9.1 ~~dry-run default~~ (v0.7.0 で解消)
 
-§1.2 参照。`HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` は Phase 8 v0.6.0 リリース時点で **dry-run**。実 executor は v0.6.x follow-up。
+§1.2 参照。`HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` の **dry-run 動作**は v0.7.0 で **trait 化** された (`StepExecutor` trait + `DryRunExecutor` + `RealExecutor`)。`RealExecutor::with_logging_client()` 経由の in-memory 検証は v0.7.0 で完了。`reqwest` ベースの本実装は v0.7.1 follow-up。
 
-### 9.2 no Prometheus metrics
+### 9.2 ~~no Prometheus metrics~~ (v0.7.0 で解消)
 
-エンジンから Prometheus への直接 export は v0.6.0 では未実装。Grafana dashboard 80-01 は PG を直接 query する形にすることで回避。Prometheus exporter は v0.6.x で `metrics` facade ベースの exporter を追加予定 (per `ada-telemetry` と同じ pattern)。
+エンジンから Prometheus への直接 export は v0.7.0 で実装。`crates/ada-remediation/src/metrics.rs` に `metrics 0.24` + `metrics-exporter-prometheus 0.18` ベースの recorder を追加。`GET /metrics` で以下 4 メトリクスを公開:
 
-### 9.3 no hot-reload
+- `ada_remediation_actions_total{action_id, outcome}` — Counter
+- `ada_remediation_action_duration_seconds{action_id}` — Histogram
+- `ada_remediation_engine_state_transitions_total{from, to}` — Counter
+- `ada_remediation_cooldown_active` — Gauge
 
-`config/remediation/*.json` の更新を反映するには **プロセス再起動** が必要。`notify` crate ベースの file watcher 追加は v0.6.x。
+Grafana dashboard 80-01 は Prometheus 経由のスクレイプに移行可能 (PG 直 query は v0.7.0 互換のため残置)。
 
-### 9.4 no webhook auth
+### 9.3 ~~no hot-reload~~ (v0.7.0 で polling fallback)
 
-§7.2 参照。
+`config/remediation/*.json` の更新を **プロセス再起動なし** で反映。`crates/ada-remediation/src/watcher.rs` で 5s polling + 500ms debounce を実装。`Engine::reload_runbooks(new)` で in-process な表 swap。`notify` crate (FS event watcher) は offline cache 制約で取得不可のため polling で代用。最大 5 秒の staleness あり。`notify` 移行は v0.7.1 follow-up。
 
-### 9.5 1 replica 前提
+### 9.4 ~~no webhook auth~~ (v0.7.0 で shared-secret 化)
 
-in-memory `MemoryStore` はプロセスローカル。複数 replica で運用する場合、永続 cooldown (`remediation_cooldowns` テーブル) を **必ず** 通すこと。`MemoryStore` は fast path のみ。Phase 8 v0.6.x で replica 間の同期を確実にする lock を追加予定。
+`POST /webhook/alertmanager` と `POST /remediation/trigger` を `X-Webhook-Token` header 必須に変更。`crates/ada-remediation/src/auth.rs` で `constant_time_eq 0.4.2` ベースの比較。`REMEDIATION_WEBHOOK_SECRET` env var 起動時読み込み、missing で **fail-closed 503** (本番運用安全)。HMAC-SHA256 + per-request nonce 化は v0.7.1 follow-up (`hmac` / `sha2` crate は offline cache 不可)。
+
+### 9.5 1 replica 前提 (継続 — 解消せず)
+
+in-memory `MemoryStore` はプロセスローカル。複数 replica で運用する場合、永続 cooldown (`remediation_cooldowns` テーブル) を **必ず** 通すこと。`MemoryStore` は fast path のみ。v0.7.0 では `runbooks` フィールドを `Arc<RwLock<Vec<...>>>` 化したので **runbook 自体は replica 横断で同期不要** (ファイルシステム共有が前提)。`MemoryStore` の replica 間同期は v0.7.x follow-up。
 
 ### 9.6 V003 vs. V006 naming
 
-`db/migrations/V003__phase8_remediation.sql` の slot 番号は、task spec の "V006" ではなく **V003** (現存 V001 + V002 の次の slot)。`make -C db migrate` は `V*.sql` glob なのでファイル名ベースで順序解決する。
+`db/migrations/V003__phase8_remediation.sql` の slot 番号は、task spec の "V006" ではなく **V003** (現存 V001 + V002 の次の slot)。`make -C db migrate` は `V*.sql` glob なのでファイル名ベースで順序解決する。v0.7.0 で **新 migration は追加なし** (SLO 7.5 multi-service 化は application 層で完結、PL/pgSQL 変更なし)。
 
 ---
 
@@ -477,7 +486,67 @@ in-memory `MemoryStore` はプロセスローカル。複数 replica で運用�
 
 ---
 
-> **IPA 末尾注記**
+## 12. v0.7.0 ハードニング完了サマリ (Phase 8.5)
+
+> 本セクションは v0.7.0 で実装した 5 atomic commits の **変更点の俯瞰**。  
+> 詳細は [`11-phased-rollout.md §11`](11-phased-rollout.md) および [08-slo-design.md §11](08-slo-design.md) / [15-error-budget-policy.md](15-error-budget-policy.md) を参照。
+
+### 12.1 Real executor (commit 0, 前任 worker `31213a7`)
+
+- `StepExecutor` trait を `async-trait 0.1.92` ベースで object-safe に定義
+- `DryRunExecutor` (default) / `RealExecutor` (env-var fallback) / `LoggingClient` (in-memory request 記録) を実装
+- `HttpCall` / `PgFunction` / `NotifySlack` / `PageOperator` 4 step の dry-run 動作を trait 化、将来 `reqwest` / `sqlx` 実装に swap 可能
+- 既定 executor は `DryRunExecutor` で v0.6.0 動作を完全互換
+
+### 12.2 Prometheus exporter + `/metrics` endpoint (commit-1)
+
+- `crates/ada-remediation/src/metrics.rs` — 4 メトリクス + 7 unit test
+- `GET /metrics` — `text/plain; version=0.0.4` content-type で公開
+- engine.execute 内で state transition + step outcome + duration を記録
+- cooldown gauge は HTTP scrape 時に live in-memory store から再計算 (cheap)
+
+### 12.3 Hot-reload watcher (commit-2, polling fallback)
+
+- `crates/ada-remediation/src/watcher.rs` — 5s polling + 500ms debounce
+- `Engine::reload_runbooks(Vec<RemediationAction>)` で in-process swap
+- 3 unit test (file_addition / file_modification / debounce 5→1)
+- `notify` crate は offline cache 制約で取得不可 → polling 採用、最大 5 秒の staleness は §9.3 既知の制約に転記
+
+### 12.4 Webhook shared-secret auth (commit-3)
+
+- `crates/ada-remediation/src/auth.rs` — `AuthState` (enabled/disabled/from_env)
+- `constant_time_eq 0.4.2` (blake3 の transitive dep) ベース比較
+- 起動時 `REMEDIATION_WEBHOOK_SECRET` env var 読み込み、missing で `tracing::warn!` + 503 fail-closed
+- 6 unit test (valid / invalid / missing / disabled / require_enabled panic / silent) + 3 HTTP e2e test
+- HMAC-SHA256 化は v0.7.1 follow-up
+
+### 12.5 Manual trigger auth (commit-4)
+
+- `POST /remediation/trigger` に `X-Webhook-Token` 必須化 (webhook と同じ secret 共有)
+- `force=true` で cooldown bypass 可能なため、webhook と同等の脅威モデルで gating
+- 2 HTTP unit test (requires_token / accepts_valid_token)
+
+### 12.6 SLO 7.5 + Error Budget policy (commit-5)
+
+- [08-slo-design.md §11](08-slo-design.md) — SLI-005~008 / SLO-004~006 (Auto-remediation 専用)
+- [15-error-budget-policy.md](15-error-budget-policy.md) (新) — 5 段階 Error Budget 行動マトリクス + 4 段階 Burn Rate 行動プロトコル + クロスリージョン挙動
+- `config/alertmanager/slo-rem-fast-burn-{1h,6h}.yaml` + `slo-rem-slow-burn-{24h,72h}.yaml` — PrometheusRule 4 ファイル
+
+### 12.7 既知の制約 (v0.7.0 リリース時点)
+
+| # | 内容 | 計画 |
+|---|---|---|
+| C-001 | `RealExecutor` の `NetworkClient` は `LoggingClient` のみ。`reqwest` ベースの本実装は v0.7.1 | v0.7.1 |
+| C-002 | `notify` crate (FS event watcher) 不可。`polling` 5s + debounce で代用 | v0.7.1 |
+| C-003 | Webhook 認証は shared-secret のみ。HMAC-SHA256 + per-request nonce は v0.7.1 | v0.7.1 |
+| C-004 | k8s deployment manifest (Helm chart 同期 / NetworkPolicy) は本 commit では未実装 | v0.7.1 |
+| C-005 | `reqwest` / `sqlx` / `prometheus` 直接依存は offline cache 制約で不可。`metrics-exporter-prometheus` 0.18 経由で同等機能を実現 | 制約継続 |
+
+> 制約の詳細は [11-phased-rollout.md §11.4](11-phased-rollout.md) を参照。
+
+---
+
+> **IPA 末尾注記**  
 > 本ドキュメントは IPA 共通フレーム2018 (SLCP-JCF2018) 第 7 章「システム化計画の立案」に準拠する。
-> Phase 8 (Auto-remediation) の v0.6.0 リリースに同期して作成。dry-run executor は v0.6.x で本実装に置換する想定。
+> Phase 8 (Auto-remediation) の v0.6.0 リリースに同期して作成。v0.7.0 で Phase 8.5 SRE ハードニングを完了し、本番投入可能な品質に引き上げた (制約 C-001~C-005 は v0.7.1 で解消予定)。
 > PO（プロダクトオーナー）の承認と SRE Lead の技術承認を必須とする。
