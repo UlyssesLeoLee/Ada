@@ -155,7 +155,18 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 #   — v0.5.0 LWW 策略按 server 时钟权威解析,client 不参与
 #   排序),留作 v0.6.0 CRDT 升级时再加。
 [features]
-default = []
+# v0.7.0: `server` (v0.5.0 LWW server-side reconciliation)
+# is now part of the default feature set, because every
+# m12 deployment that talks to a server (m13, m14, ...) is
+# going to need the `reconcile_canvas_state` API surface,
+# and gating it behind a feature flag was over-defensive
+# (the flag's only effect is on the dead-code lint, not
+# on actual behaviour). The `pub mod server_recon` block
+# is therefore always compiled under the default features
+# path; the `server` feature itself is kept as a stable
+# alias for cross-crate compat (m13, m14) but is now a
+# no-op (the module is unconditional).
+default = ["server"]
 wasm = [
     "dep:wasm-bindgen",
     "dep:js-sys",
@@ -189,7 +200,37 @@ crdt = []
 # path is on the deprecation roadmap (replaced by `crdt`).
 # `server` and `legacy-lww` are functionally equivalent in
 # v0.6.0; both enable the same `pub mod server_recon` block.
+#
+# v0.7.0 DEPRECATION: `legacy-lww` is now a deprecated alias
+# for the v0.5.0 LWW path. In v0.7.0 the `server` feature is
+# always on (default = ["server"]), and the v0.5.0 LWW API
+# is exposed unconditionally. `legacy-lww` is preserved for
+# cross-crate compat (m13, m14) but new code should depend
+# directly on `crdt` (the v0.7.0 Yrs-backed forward path)
+# instead. v0.8.0 will remove `legacy-lww` entirely.
 legacy-lww = []
+# v0.7.0: keep the v0.6.0 YArray-of-YMap schema available
+# behind a feature flag for one release as a rollback path.
+# v0.8.0 will remove this flag. New code should use the
+# v0.7.0 YMap-keyed-by-uuid schema in `crdt.rs` (the default
+# `crdt` feature flag).
+legacy-array = ["crdt"]
+# v0.7.0: WASM bindings for the CRDT (Yrs) sync path. Pulls
+# in `wasm-bindgen` + `js-sys` + `serde-wasm-bindgen` and
+# enables `src/wasm_crdt.rs` (the `WasmCrdtDoc` wrapper).
+# Distinct from the existing `wasm` feature (which wraps the
+# v0.5.0 `Canvas` surface in `src/wasm.rs`); `wasm-crdt` is
+# the v0.7.0 forward path and exports the YMap-keyed-by-uuid
+# schema for the JS host. Default off: native 5-gate CI does
+# not need WASM bindings.
+wasm-crdt = [
+    "dep:wasm-bindgen",
+    "dep:js-sys",
+    "dep:serde-wasm-bindgen",
+    "dep:console_error_panic_hook",
+    "uuid/js",
+    "crdt",
+]
 
 [lints]
 workspace = true

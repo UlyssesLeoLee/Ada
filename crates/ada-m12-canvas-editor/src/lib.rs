@@ -73,25 +73,36 @@ mod bevy_plugin;
 /// `ada_m12_canvas_editor::crdt::merge_crdt_update`.
 #[cfg(feature = "crdt")]
 pub mod crdt;
+/// M-12 v0.6.0 YArray-of-YMap CRDT legacy schema. Preserved
+/// behind `--features legacy-array` (default off) for one
+/// release as a rollback path. v0.8.0 will remove this.
+#[cfg(feature = "legacy-array")]
+pub mod crdt_legacy_array;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
-/// M-12 v0.5.0 server-side reconciliation. Only compiled with
-/// `--features server` so the default 5-gate CI path doesn't
-/// pull the optional integration surface. See `src/server_recon.rs`
-/// for the algorithm. Made `pub mod` (not just `pub use`) so
-/// cross-crate integration tests (e.g. `m13/tests/reconcile_smoke.rs`)
-/// can address the types as
+/// M-12 v0.5.0 server-side reconciliation. See
+/// `src/server_recon.rs` for the algorithm. Made `pub mod`
+/// (not just `pub use`) so cross-crate integration tests
+/// (e.g. `m13/tests/reconcile_smoke.rs`) can address the
+/// types as
 /// `ada_m12_canvas_editor::server_recon::reconcile_canvas_state`.
 ///
-/// In v0.6.0, the `server` feature is aliased / re-routed to
-/// `legacy-lww` — see the `[features]` table — and the new
-/// `crdt` feature (Yrs-backed, default off) provides the
-/// forward path. Both can be enabled simultaneously during the
-/// transition window for cross-validation.
-#[cfg(any(feature = "server", feature = "legacy-lww"))]
+/// v0.7.0: was gated by `feature = "server"` (or its
+/// v0.6.0 alias `legacy-lww`) so the default 5-gate CI
+/// path didn't pull the optional integration surface.
+/// The `server` feature is now part of the default
+/// features and the gate is removed; the module is
+/// always compiled.
 pub mod server_recon;
 #[cfg(feature = "wasm")]
 mod wasm;
+/// M-12 v0.7.0 WASM bindings for the CRDT (Yrs) sync path.
+/// Only compiled with `--features wasm-crdt` so the default
+/// 5-gate CI native path doesn't pull wasm-bindgen into the
+/// dep graph. See `src/wasm_crdt.rs` for the `WasmCrdtDoc`
+/// wrapper.
+#[cfg(feature = "wasm-crdt")]
+pub mod wasm_crdt;
 
 pub use canvas::{Canvas, Edge};
 pub use error::{CanvasError, Result};
@@ -133,28 +144,46 @@ pub use egui_integration::{
 };
 
 /// M-12 v0.5.0 server-side reconciliation public surface.
-/// Only compiled with `--features server` (or its v0.6.0 alias
-/// `legacy-lww`).
+/// Always compiled in v0.7.0 (`server` is in the default
+/// features).
 ///
 /// 包含:
 /// - [`reconcile_canvas_state`] — 3-way merge (LWW, server wins)
 /// - [`ReconcileResult`] — 合并结果 (merged canvas + win lists)
-#[cfg(any(feature = "server", feature = "legacy-lww"))]
 pub use server_recon::{reconcile_canvas_state, ReconcileResult};
 
-/// M-12 v0.6.0 CRDT (Yrs) sync public surface. Only compiled
+/// M-12 v0.7.0 CRDT (Yrs) sync public surface. Only compiled
 /// with `--features crdt`.
 ///
-/// 包含:
+/// 包含 (v0.7.0 schema — YMap keyed by uuid):
 /// - [`merge_crdt_update`] — apply remote update, return diff
 /// - [`encode_state_as_update`] — full state snapshot
 /// - [`reconcile_with_crdt`] — end-to-end reconcile (server
-///   canvas + client update → merged state + new version)
+///   canvas + client update + client_id → merged state + new
+///   version)
 /// - [`CrdtReconcileResult`] — 合并结果 (merged_state bytes +
 ///   new_version)
+/// - [`ClientId`] — v0.7.0 stable client identifier
+///   (uuid + label) for explicit client_id negotiation
+/// - [`insert_element`] / [`remove_element`] / [`update_element`]
+///   / [`get_element`] / [`iter_elements`] — element-level
+///   ergonomics
+/// - [`add_port`] / [`remove_port`] — port-level ergonomics
+///   (v0.7.0 lifts ports to a proper nested YArray)
+/// - [`insert_edge`] / [`remove_edge`] / [`update_edge`] /
+///   [`get_edge`] / [`iter_edge_keys`] — edge-level ergonomics
+///   (v0.7.0 keys edges by `${from}::${to}` for natural dedup)
+/// - [`read_canvas_from_doc`] / [`doc_from_canvas`] — read a
+///   YDoc back into a `Canvas` (or build a YDoc from one);
+///   pub in v0.7.0 for m13 cross-crate consumers
+/// - [`ElementSnapshot`] / [`ElementUpdate`] / [`PortSnapshot`]
+///   / [`EdgeSnapshot`] — value types for the above APIs
 #[cfg(feature = "crdt")]
 pub use crdt::{
-    encode_state_as_update, merge_crdt_update, reconcile_with_crdt, CrdtReconcileResult,
+    add_port, doc_from_canvas, encode_state_as_update, get_edge, get_element, insert_edge,
+    insert_element, iter_edge_keys, iter_elements, merge_crdt_update, read_canvas_from_doc,
+    reconcile_with_crdt, remove_edge, remove_element, remove_port, update_edge, update_element,
+    ClientId, CrdtReconcileResult, EdgeSnapshot, ElementSnapshot, ElementUpdate, PortSnapshot,
 };
 
 /// Crate version, taken from `CARGO_PKG_VERSION` (single workspace
