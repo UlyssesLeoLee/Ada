@@ -349,6 +349,86 @@ G7. 新 SLO 適用
 
 ---
 
+## 11. Auto-remediation SLO 7.5 (v0.7.0 拡張)
+
+> **対象範囲**: `ada-remediation` プロセス (Phase 8 Auto-remediation engine)。
+> 公開境界の M-13 API Gateway SLO とは別系統で、**「自動修復ループ自体の信頼性」** を計測する。
+> 根拠: [11-phased-rollout.md §11](11-phased-rollout.md) および [14-auto-remediation.md](14-auto-remediation.md)。
+
+### 11.1 SLI 定義 (Auto-remediation 専用)
+
+| ID | SLI 名 | 計算式 | 計測ソース | 計測ウィンドウ |
+|---|---|---|---|---|
+| **SLI-005** | `remediation.webhook.success_rate` | `2xx_responses / total_webhook_responses` | `ada_remediation_actions_total{outcome="success"} / ada_remediation_actions_total` | 28d |
+| **SLI-006** | `remediation.runbook.execution_success_rate` | `step_succeeded / step_total` | `ada_remediation_actions_total{outcome="success"}` (per step) | 28d |
+| **SLI-007** | `remediation.latency.alert_to_action_p95` | p95 of `t_action_complete - t_alert_received` | `ada_remediation_action_duration_seconds` histogram | 28d |
+| **SLI-008** | `remediation.cooldown.false_positive_rate` | `cooldown_bypasses / total_executions` | `force=true` triggers / total triggers (manual trigger endpoint) | 28d |
+
+#### SLI-005 PromQL
+
+```promql
+# 2xx = success (action_id dimension, sum across all actions)
+sum(rate(ada_remediation_actions_total{outcome="success"}[28d]))
+/
+sum(rate(ada_remediation_actions_total[28d]))
+```
+
+#### SLI-007 PromQL
+
+```promql
+# Per-action p95 latency; aggregate across runbooks
+histogram_quantile(0.95,
+  sum by (le) (rate(ada_remediation_action_duration_seconds_bucket[28d]))
+)
+```
+
+### 11.2 SLO 目標値
+
+| ID | 対象 | 目標 | 28日 Error Budget | 重大度 |
+|---|---|---|---|---|
+| **SLO-004** | SLI-005 (webhook success) | **99.5%** | 3 時間 21 分 | P0 |
+| **SLO-005** | SLI-006 (runbook execution) | **99.0%** | 6 時間 43 分 | P0 |
+| **SLO-006** | SLI-007 (alert→action p95) | **p95 < 30 秒** | n/a (latency) | P1 |
+| (no SLO) | SLI-008 (cooldown false-positive) | **< 1%** | n/a (rate) | P2 (監視のみ) |
+
+> **SLO-004 補足**: `503 Service Unavailable` (auth disabled) は **失敗** としてカウントする (fail-closed 設計)。  
+> **SLO-006 補足**: p99 ではなく p95 を採用。Auto-remediation は人間より遅くても許容するが、30 秒を超えると Alertmanager の resolve 通知の方が先になり UX が崩れるため p95 を品質基準とする。
+
+### 11.3 Burn Rate ルール (SLO-004 / SLO-005 共通)
+
+Google SRE Workbook 準拠のマルチウィンドウ。
+
+| アラート ID | 短窓 | 長窓 | Burn Rate | 重大度 | 通知経路 |
+|---|---|---|---|---|---|
+| **SLO-REM-FAST-BURN-1h** | 1h | 5h | 14.4x | **Sev2** | 即時 PagerDuty |
+| **SLO-REM-FAST-BURN-6h** | 6h | 30h | 6x | **Sev2** | 即時 PagerDuty |
+| **SLO-REM-SLOW-BURN-24h** | 24h | 120h | 3x | **Sev3** | Slack `#ada-ops` |
+| **SLO-REM-SLOW-BURN-72h** | 72h | 360h | 1x | **Sev4** | 翌営業日レビュー |
+
+> 各 Burn Rate のしきい値式 (SLO-004, 99.5% を例):  
+> `burn_rate_threshold = 14.4 * (1 - 0.995) = 0.072` (1h 窓で 7.2% のエラー率超過)  
+> アラート式と完全 PromQL は [15-error-budget-policy.md](15-error-budget-policy.md) §3 を参照。
+
+### 11.4 集約 SLO (User Journey: "Alert → Auto-remediate")
+
+| ユーザージャーニー | 関係コンポーネント | 集約 SLO |
+|---|---|---|
+| **Alert → Slack/PagerDuty 通知** | Alertmanager → ada-remediation → Slack | 99.0% (SLO-004 ∩ SLO-005) |
+| **Disk-full 自動 cleanup** | Alertmanager → ada-remediation → RunCommand | 99.0% |
+| **Service down 自動 restart** | Alertmanager → ada-remediation → K8s API | 99.0% |
+
+> 集約 SLO は SLO-004 × SLO-005 ≒ 99.0% (直列モデル)。  
+> 片方未達でも **Phase 8.5 SRE ハードニング** タスク (commit-7) で再評価する。
+
+### 11.5 改訂履歴
+
+| 項目 | 内容 |
+|---|---|
+| 追加 v0.7.0 | SLI-005~008 / SLO-004~006 を新設。Phase 8 Auto-remediation 専用の SLO 体系。 |
+| 関連 | [11-phased-rollout.md §11](11-phased-rollout.md), [14-auto-remediation.md](14-auto-remediation.md), [15-error-budget-policy.md](15-error-budget-policy.md) (v0.7.0 新規) |
+
+---
+
 > **IPA 末尾注記**  
 > 本ドキュメントは IPA 共通フレーム2018 (SLCP-JCF2018) および IPA 非機能要求グレード2018 に準拠する。  
 > 記載の SLO 目標は初期値であり、運用実績および事業要件に応じて [SLO 改訂プロセス] に従い四半期ごとに見直す。  

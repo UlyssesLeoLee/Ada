@@ -1,0 +1,55 @@
+# SLO-REM-FAST-BURN-1h
+# Auto-remediation SLO-004 (webhook success rate, 99.5%)
+# 1h short window × 5h long window, AND condition.
+# Burn Rate 14.4x → 28-day budget consumed in 2 days.
+#
+# Source of truth: docs/observability/15-error-budget-policy.md §3.1
+# Related SLO: docs/observability/08-slo-design.md §11.2 (SLO-004)
+# Severities mapping: docs/observability/07-alert-policy.md
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-remediation-fast-burn-1h
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/component: slo-alerts
+    app.kubernetes.io/part-of: ada-observability
+    slo: slo-004-remediation-webhook
+spec:
+  groups:
+    - name: slo.remediation.availability.fastBurn.1h
+      interval: 30s
+      rules:
+        - alert: SLO_Remediation_Availability_FastBurn_1h
+          expr: |
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[1h]))
+              /
+              sum(rate(ada_remediation_actions_total[1h]))
+            ) > (14.4 * 0.005)
+            and
+            (
+              sum(rate(ada_remediation_actions_total{outcome="failure"}[5h]))
+              /
+              sum(rate(ada_remediation_actions_total[5h]))
+            ) > (14.4 * 0.005)
+          for: 2m
+          labels:
+            severity: sev2
+            slo: slo-004-remediation-webhook
+            team: sre
+            service: ada-remediation
+            burn_rate: "14.4x"
+            window: "1h/5h"
+          annotations:
+            summary: "Auto-remediation SLO-004 高速消費 (1h 窓で 14.4x Burn)"
+            description: |
+              Auto-remediation webhook success rate has been burning the
+              28-day error budget at 14.4x for at least 2 minutes. If
+              sustained, the budget will be exhausted in 2 days.
+              Target: 99.5% (SLO-004).
+            runbook_url: https://wiki/runbooks/slo-rem-fast-burn-1h
+            error_budget_policy: docs/observability/15-error-budget-policy.md
+            slo_source: docs/observability/08-slo-design.md
+            action: "PagerDuty 即時通知 / SRE Lead が [15-error-budget-policy.md §4.1] に従い 15 分以内に対応"
