@@ -225,7 +225,11 @@ fn hydrate_doc_from_canvas(doc: &Doc, canvas: &Canvas) {
     // 2. Open a single write txn to populate.
     let mut txn = doc.transact_mut();
     meta.insert(&mut txn, F_NAME, canvas.name());
-    meta.insert(&mut txn, F_VERSION, canvas.version() as i64);
+    meta.insert(
+        &mut txn,
+        F_VERSION,
+        i64::try_from(canvas.version()).unwrap_or(i64::MAX),
+    );
     for node in canvas.nodes() {
         let m: MapRef = elements.push_back(&mut txn, MapPrelim::<Any>::new());
         write_node_fields(&m, &mut txn, &node);
@@ -306,20 +310,17 @@ pub(crate) fn read_canvas_from_doc(doc: &Doc, name: &str) -> Result<Canvas, Canv
                 continue;
             }
             let id = parse_node_id(&id_str)?;
-            let kind = kind_parse(
-                &string_field(&map, &txn, F_KIND).unwrap_or_else(|| "block".into()),
-            );
+            let kind =
+                kind_parse(&string_field(&map, &txn, F_KIND).unwrap_or_else(|| "block".into()));
             let x = int_field(&map, &txn, F_X).unwrap_or(0);
             let y = int_field(&map, &txn, F_Y).unwrap_or(0);
             let label = string_field(&map, &txn, F_LABEL).unwrap_or_default();
-            let ports_json =
-                string_field(&map, &txn, F_PORTS).unwrap_or_else(|| "[]".into());
-            let ports: Vec<crate::node::Port> =
-                serde_json::from_str::<Vec<String>>(&ports_json)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(crate::node::Port::new)
-                    .collect();
+            let ports_json = string_field(&map, &txn, F_PORTS).unwrap_or_else(|| "[]".into());
+            let ports: Vec<crate::node::Port> = serde_json::from_str::<Vec<String>>(&ports_json)
+                .unwrap_or_default()
+                .into_iter()
+                .map(crate::node::Port::new)
+                .collect();
             let mut n = CanvasNode::new(kind, Position::new(x, y), label);
             n.id = id;
             n.ports = ports;
@@ -390,8 +391,15 @@ fn string_field(map: &MapRef, txn: &impl ReadTxn, key: &str) -> Option<String> {
 
 fn int_field(map: &MapRef, txn: &impl ReadTxn, key: &str) -> Option<i32> {
     match map.get(txn, key) {
-        Some(yrs::types::Value::Any(yrs::any::Any::Number(n))) => Some(n as i32),
-        Some(yrs::types::Value::Any(yrs::any::Any::BigInt(n))) => Some(n as i32),
+        Some(yrs::types::Value::Any(yrs::any::Any::Number(n))) => {
+            // f64 -> i64 -> i32 with bounds check. Yrs stores
+            // integers as f64 when they fit in safe-int range;
+            // outside that range, fall back to BigInt.
+            #[allow(clippy::cast_possible_truncation)]
+            let as_i64 = n as i64;
+            i32::try_from(as_i64).ok()
+        }
+        Some(yrs::types::Value::Any(yrs::any::Any::BigInt(n))) => i32::try_from(n).ok(),
         _ => None,
     }
 }
@@ -449,10 +457,7 @@ mod tests {
             let remote = peer.transact();
             let local_els = local.get_array(ELEMENTS_KEY).expect("elements");
             let remote_els = remote.get_array(ELEMENTS_KEY).expect("elements");
-            (
-                local_els.len(&local),
-                remote_els.len(&remote),
-            )
+            (local_els.len(&local), remote_els.len(&remote))
         };
         assert_eq!(local_count, 2);
         assert_eq!(remote_count, 2);
@@ -588,14 +593,10 @@ mod tests {
         let (ax, ay, bx, by) = {
             let txn_a = doc_a.transact();
             let txn_b = doc_b.transact();
-            let yrs::types::Value::YMap(map_a) =
-                els_a.get(&txn_a, 0).expect("a[0]")
-            else {
+            let yrs::types::Value::YMap(map_a) = els_a.get(&txn_a, 0).expect("a[0]") else {
                 panic!()
             };
-            let yrs::types::Value::YMap(map_b) =
-                els_b.get(&txn_b, 0).expect("b[0]")
-            else {
+            let yrs::types::Value::YMap(map_b) = els_b.get(&txn_b, 0).expect("b[0]") else {
                 panic!()
             };
             let ax = int_field(&map_a, &txn_a, F_X).expect("ax");
@@ -640,8 +641,7 @@ mod tests {
         // doc_b receives the initial state (2 elements).
         {
             let mut txn = doc_b.transact_mut();
-            let update = yrs::Update::decode_v1(&encode_state_as_update(&doc_a))
-                .expect("decode");
+            let update = yrs::Update::decode_v1(&encode_state_as_update(&doc_a)).expect("decode");
             txn.apply_update(update);
         }
         // doc_a removes index 0.
@@ -663,7 +663,10 @@ mod tests {
             let txn = doc_b.transact();
             txn.get_array(ELEMENTS_KEY).expect("b").len(&txn)
         };
-        assert_eq!(len, 1, "doc_b should see 1 element after delete propagation");
+        assert_eq!(
+            len, 1,
+            "doc_b should see 1 element after delete propagation"
+        );
     }
 
     /// Multi-client merge: 3 replicas, each adds 10 elements,
@@ -766,8 +769,7 @@ mod tests {
     fn reconcile_with_crdt_merges_client_edit() {
         let server = Canvas::new("c1");
         let server_node_id = uuid::Uuid::new_v4();
-        let mut server_node =
-            CanvasNode::new(NodeKind::Block, Position::new(0, 0), "server-only");
+        let mut server_node = CanvasNode::new(NodeKind::Block, Position::new(0, 0), "server-only");
         server_node.id = NodeId(server_node_id);
         server.add_node(server_node);
         // Client doc: fresh, only has one client-only element.
@@ -798,7 +800,10 @@ mod tests {
             let txn = merged_doc.transact();
             txn.get_array(ELEMENTS_KEY).expect("els").len(&txn)
         };
-        assert_eq!(len, 2, "merged state should have 2 elements (1 server + 1 client)");
+        assert_eq!(
+            len, 2,
+            "merged state should have 2 elements (1 server + 1 client)"
+        );
     }
 
     /// Sanity: malformed update bytes produce a `BackendError`

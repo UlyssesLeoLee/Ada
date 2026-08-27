@@ -22,14 +22,14 @@ use ada_m12_canvas_editor::{
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Any, Array, ArrayRef, Doc, Map, MapPrelim, MapRef};
-use yrs::{ReadTxn, Transact, WriteTxn};
+use yrs::{ReadTxn, Transact};
 
-/// Push a node into a YDoc at the elements array, returning the
+/// Push a node into a `YDoc` at the elements array, returning the
 /// doc's state vector. Convenience helper for the cross-client
 /// sync tests below.
 fn push_node(doc: &Doc, els: &ArrayRef, id: &str, label: &str) {
     let mut txn = doc.transact_mut();
-    let m: MapRef = els.push_back(&mut txn, MapPrelim::<yrs::Any>::new());
+    let m: MapRef = els.push_back(&mut txn, MapPrelim::<Any>::new());
     m.insert(&mut txn, "id", id);
     m.insert(&mut txn, "kind", "block");
     m.insert(&mut txn, "x", 0i64);
@@ -67,7 +67,12 @@ fn three_clients_converge_to_same_state() {
             _ => 4,
         };
         for j in 0..n {
-            push_node(doc, el, &format!("c{i}-n{j}"), &format!("client-{i}-node-{j}"));
+            push_node(
+                doc,
+                el,
+                &format!("c{i}-n{j}"),
+                &format!("client-{i}-node-{j}"),
+            );
         }
     }
 
@@ -141,5 +146,8 @@ fn reconcile_with_server_canvas_preserves_client_additions() {
         let txn = merged_doc.transact();
         txn.get_array("elements").expect("elements").len(&txn)
     };
-    assert_eq!(len, 2, "merged state should have 2 elements (1 server + 1 client)");
+    assert_eq!(
+        len, 2,
+        "merged state should have 2 elements (1 server + 1 client)"
+    );
 }

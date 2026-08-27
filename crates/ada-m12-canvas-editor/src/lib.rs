@@ -64,6 +64,15 @@ mod node;
 mod bevy_bridge;
 #[cfg(feature = "bevy")]
 mod bevy_plugin;
+/// M-12 v0.6.0 CRDT (Yrs) sync. Only compiled with
+/// `--features crdt` so the default 5-gate CI path doesn't
+/// pull yrs into the dep graph. See `src/crdt.rs` for the
+/// sync protocol. Made `pub mod` (not just `pub use`) so
+/// cross-crate integration tests (e.g. `m13/tests/crdt_smoke.rs`)
+/// can address the types as
+/// `ada_m12_canvas_editor::crdt::merge_crdt_update`.
+#[cfg(feature = "crdt")]
+pub mod crdt;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
 /// M-12 v0.5.0 server-side reconciliation. Only compiled with
@@ -81,15 +90,6 @@ mod egui_integration;
 /// transition window for cross-validation.
 #[cfg(any(feature = "server", feature = "legacy-lww"))]
 pub mod server_recon;
-/// M-12 v0.6.0 CRDT (Yrs) sync. Only compiled with
-/// `--features crdt` so the default 5-gate CI path doesn't
-/// pull yrs into the dep graph. See `src/crdt.rs` for the
-/// sync protocol. Made `pub mod` (not just `pub use`) so
-/// cross-crate integration tests (e.g. `m13/tests/crdt_smoke.rs`)
-/// can address the types as
-/// `ada_m12_canvas_editor::crdt::merge_crdt_update`.
-#[cfg(feature = "crdt")]
-pub mod crdt;
 #[cfg(feature = "wasm")]
 mod wasm;
 
