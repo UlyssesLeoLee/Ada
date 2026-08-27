@@ -68,6 +68,41 @@ processors:
       - key: service.name
         action: normalize
 
+  # Tail sampling (Phase 4). Three policies run in order
+  # and combine to decide which traces get archived:
+  #   1. errors — keep every trace that contains at least
+  #      one ERROR-level span (status_code = ERROR).
+  #   2. slow-traces — keep traces where any span's
+  #      duration exceeds 1s (Phase 4 threshold; future
+  #      phases will lower it as the SLO work in Phase 7
+  #      tightens p99 targets).
+  #   3. probabilistic — keep 10% of the remaining
+  #      traces as a representative sample. The
+  #      head/tail split is the Google SRE standard (see
+  #      05-tracing-design.md §4.2).
+  #
+  # `decision_wait: 10s` is the time the collector holds a
+  # trace before deciding — sized so the slowest expected
+  # request in the 18-crate fleet (~5s) plus headroom fits
+  # comfortably.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow-traces
+        type: latency
+        latency:
+          threshold_ms: 1000
+      - name: probabilistic
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
 exporters:
   # Metrics -> Prometheus. The remote_write protocol is
   # the production target; the local Prometheus pulls
@@ -101,12 +136,36 @@ exporters:
       # required by the multi-tenant gateway.
       X-Scope-OrgID: "ada-dev"
 
-  # Traces -> Jaeger. Matches jaeger-config.yaml's
-  # service.jaeger_thrift_grpc port.
+  # Traces -> Jaeger. Phase 0-1 baseline; the Jaeger
+  # UI remains the per-developer trace drill-down.
+  # Matches jaeger-config.yaml's service.jaeger_thrift_grpc
+  # port.
   jaeger:
     endpoint: jaeger:14250
     tls:
       insecure: true
+
+  # Traces -> Tempo. Phase 4 long-term trace store.
+  # Tail-sampled traces (errors / slow traces / 10% random)
+  # get fanned out to Tempo via OTLP gRPC. Grafana's Tempo
+  # data source (see provisioning/datasources/datasources.yml)
+  # reads from this exporter's destination.
+  #
+  # The `sending_queue` is sized for the Phase 4 burst
+  # pattern (per 05-tracing-design.md ��4.1: 18 crates
+  # x ~10 spans/request x ~50 RPS = ~9000 spans/s peak).
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
 
 extensions:
   health_check:
@@ -132,8 +191,18 @@ service:
 
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource/env, attributes/normalize, batch]
-      exporters: [jaeger]
+      # tail_sampling is placed *before* batch because it
+      # needs to inspect every span before they're grouped
+      # into batches (per the OTel Collector's data-flow
+      # rule: tail-based samplers must see the full trace).
+      processors: [memory_limiter, resource/env, attributes/normalize, tail_sampling, batch]
+      # Both Jaeger (per-developer drill-down, Phase 0-1
+      # baseline) and Tempo (long-term archive, Phase 4)
+      # receive the same sampled trace stream. This is a
+      # deliberate duplication: keeping Jaeger in the
+      # pipeline is the lowest-risk way to ship Phase 4
+      # without changing the dev workflow.
+      exporters: [jaeger, otlp/tempo]
 
   telemetry:
     metrics:

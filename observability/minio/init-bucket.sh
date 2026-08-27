@@ -33,6 +33,13 @@ set -euo pipefail
 : "${MINIO_ENDPOINT:=http://minio:9000}"
 : "${MINIO_BUCKET:=prometheus-tsdb}"
 : "${MINIO_RETENTION_DAYS:=90}"
+# Additional buckets owned by other backends. Phase 4
+# (T002) added `tempo-blocks` for the Tempo trace store;
+# the script creates both buckets and applies the same
+# retention policy to each. The `init_minio_extra_buckets`
+# env var is the documented extension point for future
+# buckets (e.g. WAL, loki-chunks if we ever offload them).
+: "${MINIO_EXTRA_BUCKETS:=tempo-blocks}"
 
 # mc uses its own env-var convention; mirror ours.
 : "${MC_HOST_minio:=${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@${MINIO_ENDPOINT#http://}}"
@@ -98,6 +105,23 @@ EOF
 
 echo "    setting ${MINIO_RETENTION_DAYS}-day lifecycle on ada/${MINIO_BUCKET}"
 mc ilm import "ada/${MINIO_BUCKET}" <"${LIFECYCLE_FILE}"
+
+# ---------------------------------------------------------------------
+# 4b. additional buckets (Phase 4 adds tempo-blocks; future
+# phases can extend by appending to MINIO_EXTRA_BUCKETS).
+# Same lifecycle policy applies to all of them so the
+# observability stack has a single 90-day retention floor.
+# ---------------------------------------------------------------------
+for bucket in ${MINIO_EXTRA_BUCKETS}; do
+    if mc --quiet ls "ada/${bucket}" >/dev/null 2>&1; then
+        echo "    bucket ada/${bucket} already exists (skip create)"
+    else
+        echo "    creating bucket ada/${bucket}"
+        mc mb "ada/${bucket}"
+    fi
+    echo "    setting ${MINIO_RETENTION_DAYS}-day lifecycle on ada/${bucket}"
+    mc ilm import "ada/${bucket}" <"${LIFECYCLE_FILE}"
+done
 
 # ---------------------------------------------------------------------
 # 5. summary
