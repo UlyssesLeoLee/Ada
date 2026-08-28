@@ -67,7 +67,7 @@ pub enum WatcherEvent {
 
 /// How often the watcher polls the runbook directory.
 /// v0.7.1: tightened from 5s to 1s. The `notify` crate
-/// is unavailable in D:/Ada's offline cache, so this
+/// is unavailable in `<D:/Ada>`'s offline cache, so this
 /// loop is the production hot-reload mechanism. 1s
 /// keeps reload latency near-real-time while keeping
 /// CPU on `read_dir` + `metadata` negligible (a few
