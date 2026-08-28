@@ -1,0 +1,215 @@
+---
+# k8s deployment manifest for ada-remediation (v0.7.1)
+#
+# Apply: kubectl apply -f deploy/k8s/ada-remediation.yaml
+#
+# SECRET PLACEHOLDERS: replace `stringData` values below with
+# real secrets managed by sealed-secrets, external-secrets,
+# or your secret store of choice. The placeholders here are
+# intentionally non-functional strings so an accidental
+# `kubectl apply` against a real cluster cannot leak a
+# real credential.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ada-remediation-config
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/version: v0.7.1
+data:
+  # runbook directory mounted from a ConfigMap or a CSI volume
+  # (mounting from ConfigMap keeps runbooks read-only and
+  # versioned; for hot-reload, use a CSI-backed volume)
+  REMEDIATION_RUNBOOK_DIR: "/etc/ada-remediation/runbooks"
+  # bind to all interfaces inside the pod (k8s networking
+  # routes via the Service to the pod IP)
+  REMEDIATION_BIND_ADDR: "0.0.0.0:9100"
+  # log level: trace | debug | info | warn | error
+  RUST_LOG: "info,ada_remediation=debug"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ada-remediation-secrets
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/version: v0.7.1
+type: Opaque
+stringData:
+  # PLACEHOLDER: replace with `kubectl create secret
+  # generic ada-remediation-secrets --from-literal=...`
+  # or via sealed-secrets/external-secrets
+  REMEDIATION_WEBHOOK_SECRET: "PLACEHOLDER_WEBHOOK_SECRET_REPLACE_ME"
+  REMEDIATION_TRIGGER_SECRET: "PLACEHOLDER_TRIGGER_SECRET_REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ada-remediation
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/version: v0.7.1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ada-remediation
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ada-remediation
+        app.kubernetes.io/version: v0.7.1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ada-remediation
+          image: ghcr.io/ulysse/ada-remediation:v0.7.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9100
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ada-remediation-config
+            - secretRef:
+                name: ada-remediation-secrets
+          env:
+            # honour the Pod's downward API for a sane
+            # log prefix in aggregated logs
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: runbooks
+              mountPath: /etc/ada-remediation/runbooks
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: runbooks
+          # Mount the runbook ConfigMap read-only. For
+          # hot-reload to pick up live edits, swap this
+          # for a CSI-backed RWX volume.
+          configMap:
+            name: ada-remediation-runbooks
+            optional: true
+        - name: tmp
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ada-remediation
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/version: v0.7.1
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ada-remediation
+  ports:
+    - name: http
+      port: 9100
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ada-remediation
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/version: v0.7.1
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ada-remediation
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Alertmanager webhook + Prometheus scraper
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9100
+          protocol: TCP
+  egress:
+    # Slack / PagerDuty / PG-function HTTP egress
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
