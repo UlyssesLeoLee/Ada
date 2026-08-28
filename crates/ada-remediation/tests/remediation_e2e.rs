@@ -30,6 +30,24 @@ use axum::http::Request;
 use std::sync::Arc;
 use tower::ServiceExt;
 
+/// v0.7.1 E2E helper. Builds a webhook request
+/// whose body is signed with [`E2E_WEBHOOK_SECRET`]
+/// and which carries a fresh `X-Webhook-Timestamp`.
+/// Mirrors the production wire format (raw body
+/// bytes, `X-Webhook-Signature`, `X-Webhook-Timestamp`).
+fn signed_webhook(method: &str, uri: &str, body: Vec<u8>) -> Request<Body> {
+    let sig = ada_remediation::auth::sign(E2E_WEBHOOK_SECRET.as_bytes(), &body);
+    let ts = ada_remediation::auth::now_unix_secs().to_string();
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("x-webhook-signature", sig)
+        .header("x-webhook-timestamp", ts)
+        .body(Body::from(body))
+        .unwrap()
+}
+
 /// Locate the workspace's `config/remediation/` directory
 /// regardless of where `cargo test` is invoked from.
 fn runbooks_dir() -> std::path::PathBuf {
@@ -176,9 +194,11 @@ fn app_with_state() -> (axum::Router, Arc<RemediationEngine>, MemoryStore) {
     let state = AppState {
         engine: engine.clone(),
         store: store.clone(),
-        // E2E tests use the same shared-secret
-        // scheme as production. Each test sends
-        // `x-webhook-token: E2E_SECRET` to authenticate.
+        // E2E tests use the same HMAC scheme as
+        // production. Each test calls
+        // [`signed_webhook`] to build a request whose
+        // body is signed with `E2E_SECRET` and which
+        // carries a fresh `X-Webhook-Timestamp`.
         auth: ada_remediation::auth::AuthState::enabled(E2E_WEBHOOK_SECRET),
     };
     (router(state), engine, store)
@@ -205,15 +225,11 @@ fn disk_alert_webhook_body() -> Vec<u8> {
 async fn webhook_executes_and_records_history() {
     let (app, _engine, store) = app_with_state();
     let r = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/webhook/alertmanager")
-                .header("content-type", "application/json")
-                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
-                .body(Body::from(disk_alert_webhook_body()))
-                .unwrap(),
-        )
+        .oneshot(signed_webhook(
+            "POST",
+            "/webhook/alertmanager",
+            disk_alert_webhook_body(),
+        ))
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
@@ -232,15 +248,11 @@ async fn second_webhook_is_skipped_by_cooldown() {
     // First delivery: executes.
     let _ = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/webhook/alertmanager")
-                .header("content-type", "application/json")
-                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
-                .body(Body::from(disk_alert_webhook_body()))
-                .unwrap(),
-        )
+        .oneshot(signed_webhook(
+            "POST",
+            "/webhook/alertmanager",
+            disk_alert_webhook_body(),
+        ))
         .await
         .unwrap();
     assert_eq!(store.history_len(), 1);
@@ -248,15 +260,11 @@ async fn second_webhook_is_skipped_by_cooldown() {
     // Second delivery (same fingerprint payload, same alert_name):
     // engine hits cooldown; `executed=0`, `skipped=1`.
     let r = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/webhook/alertmanager")
-                .header("content-type", "application/json")
-                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
-                .body(Body::from(disk_alert_webhook_body()))
-                .unwrap(),
-        )
+        .oneshot(signed_webhook(
+            "POST",
+            "/webhook/alertmanager",
+            disk_alert_webhook_body(),
+        ))
         .await
         .unwrap();
     let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
@@ -276,38 +284,25 @@ async fn manual_trigger_with_force_bypasses_cooldown() {
     // Warm the cooldown.
     let _ = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/webhook/alertmanager")
-                .header("content-type", "application/json")
-                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
-                .body(Body::from(disk_alert_webhook_body()))
-                .unwrap(),
-        )
+        .oneshot(signed_webhook(
+            "POST",
+            "/webhook/alertmanager",
+            disk_alert_webhook_body(),
+        ))
         .await
         .unwrap();
     assert_eq!(store.history_len(), 1);
 
     // Manual trigger with force=true bypasses cooldown.
+    let body = serde_json::to_vec(&serde_json::json!({
+        "alert_name": "DiskSpaceFillingFast",
+        "labels": { "instance": "host-42" },
+        "severity": "P2",
+        "force": true
+    }))
+    .unwrap();
     let r = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/remediation/trigger")
-                .header("content-type", "application/json")
-                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
-                .body(Body::from(
-                    serde_json::to_vec(&serde_json::json!({
-                        "alert_name": "DiskSpaceFillingFast",
-                        "labels": { "instance": "host-42" },
-                        "severity": "P2",
-                        "force": true
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
+        .oneshot(signed_webhook("POST", "/remediation/trigger", body))
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
@@ -324,15 +319,11 @@ async fn cooldowns_endpoint_reflects_live_state() {
     // Warm the cooldown.
     let _ = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/webhook/alertmanager")
-                .header("content-type", "application/json")
-                .header("x-webhook-token", E2E_WEBHOOK_SECRET)
-                .body(Body::from(disk_alert_webhook_body()))
-                .unwrap(),
-        )
+        .oneshot(signed_webhook(
+            "POST",
+            "/webhook/alertmanager",
+            disk_alert_webhook_body(),
+        ))
         .await
         .unwrap();
 

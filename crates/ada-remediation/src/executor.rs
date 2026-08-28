@@ -163,6 +163,21 @@ impl LoggingClient {
     pub fn recorded(&self) -> Vec<RecordedRequest> {
         self.requests.lock().clone()
     }
+
+    /// Compute the v0.7.1 HMAC signature for an
+    /// outgoing request. This is a thin wrapper
+    /// around [`crate::auth::sign`] so the executor
+    /// surface has a `LoggingClient`-namespaced
+    /// signing helper (the operator reading the
+    /// `LoggingClient` docs does not have to cross
+    /// over to the `auth` module to find the right
+    /// function). The output is the same hex
+    /// signature the server's [`crate::auth::verify`]
+    /// expects.
+    #[must_use]
+    pub fn sign_request(secret: &[u8], payload: &[u8]) -> String {
+        crate::auth::sign(secret, payload)
+    }
 }
 
 #[async_trait::async_trait]
@@ -678,6 +693,23 @@ mod tests {
     fn http_method_label_does_not_panic() {
         // Compile-time check that the helper is wired.
         assert_eq!(http_method_label(HttpMethod::Post), "POST");
+    }
+
+    #[test]
+    fn logging_client_sign_request_matches_auth_sign() {
+        // v0.7.1: the client-side helper exposed on
+        // `LoggingClient` is a thin alias for
+        // `auth::sign`. Pin the equivalence so a
+        // future refactor that breaks the alias is
+        // caught here.
+        let secret = b"super-secret";
+        let payload = b"{\"alerts\":[]}";
+        let a = LoggingClient::sign_request(secret, payload);
+        let b = crate::auth::sign(secret, payload);
+        assert_eq!(a, b);
+        // And the signature must verify back through
+        // the server-side `auth::verify`.
+        assert!(crate::auth::verify(secret, payload, &a));
     }
 
     #[allow(dead_code)]
