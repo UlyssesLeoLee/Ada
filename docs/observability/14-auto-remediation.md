@@ -550,3 +550,73 @@ in-memory `MemoryStore` はプロセスローカル。複数 replica で運用�
 > 本ドキュメントは IPA 共通フレーム2018 (SLCP-JCF2018) 第 7 章「システム化計画の立案」に準拠する。
 > Phase 8 (Auto-remediation) の v0.6.0 リリースに同期して作成。v0.7.0 で Phase 8.5 SRE ハードニングを完了し、本番投入可能な品質に引き上げた (制約 C-001~C-005 は v0.7.1 で解消予定)。
 > PO（プロダクトオーナー）の承認と SRE Lead の技術承認を必須とする。
+---
+
+## 13. v0.7.1 ハードニング完了サマリ (Phase 8.5 production-ready)
+
+v0.7.0 で残った既知制約（§9.7 参照）のうち、主要 4 件を v0.7.1 で解消。残 1 件（`notify` crate / IETF HMAC-SHA256）は v0.7.2 / v0.8.0 へ送る。
+
+### 13.1 HMAC-SHA256 webhook auth (commit-1, `a386006`)
+
+v0.7.0 の shared-secret header 認証を HMAC-SHA256 + replay protection に格上げ:
+
+- `crates/ada-remediation/src/auth.rs` (+510 行)
+  - `sign(secret, payload) -> hex` (blake3 keyed_hash + 手書き hex encode)
+  - `verify(secret, payload, sig_hex) -> bool` (constant_time_eq)
+  - `now_unix_secs() -> i64`
+  - `verify_request(headers, secret, payload) -> Result<(), AuthError>`
+  - `AuthError` バリアント追加: `MissingSignature` / `InvalidSignature` / `MissingTimestamp` / `Expired`
+  - 5 unit tests: deterministic / valid / tampered / wrong secret / replay rejected
+- `crates/ada-remediation/src/http.rs` (+460 行)
+  - `handle_alertmanager_webhook` を **生 body バイト** + signature 検証に書き換え
+  - manual trigger エンドポイントも同様に
+  - 4 webhook E2E tests を新スキームに更新
+- `crates/ada-remediation/src/executor.rs` (+32 行)
+  - `LoggingClient::sign_request(secret, payload) -> String` (client 側 helper)
+- root hotfix: `is_multiple_of` 1.98 対応 + `now_unix_secs` を `map_or` に + cargo fmt
+- 既知ギャップ: `blake3 keyed_hash` は HMAC 標準ではない。strict compliance 監査では v0.7.2 で `hmac` + `sha2` crate ship 後に IETF HMAC-SHA256 へ切替予定。
+
+### 13.2 Hot-reload polling 1s 強化 (commit-2, `338bb7b`)
+
+v0.7.0 の polling 5s → 1s に短縮:
+
+- `crates/ada-remediation/src/watcher.rs`
+  - `DEFAULT_INTERVAL: 5s -> 1s`
+  - doc comment で「`notify` crate は offline cache に未収録」の事実と CPU コスト見積を明記
+- 既存 3 unit tests (file_addition / file_modification / debounce) は interval 短縮でより高速に通過
+- 既知ギャップ: 真の `notify` crate 採用は v0.7.2 へ送る
+
+### 13.3 k8s deployment manifest (commit-3, `b6411f5`)
+
+`deploy/k8s/` 配下に 3 ファイル新規:
+
+- `ada-remediation.yaml` (5999 bytes)
+  - **ConfigMap**: 環境変数 (REMEDIATION_RUNBOOK_DIR / REMEDIATION_BIND_ADDR / RUST_LOG)
+  - **Secret**: webhook + trigger secret (stringData **PLACEHOLDER** 値)
+  - **Deployment**: 2 replicas / rolling update / securityContext (runAsNonRoot=65532, seccomp=RuntimeDefault, readOnlyRootFilesystem, drop ALL caps) / resources (100m/128Mi req, 500m/512Mi limit) / liveness + readiness probe / terminationGracePeriodSeconds=30
+  - **Service**: ClusterIP 9100
+  - **NetworkPolicy**: ingress from observability ns + prometheus pod / egress all ns 80/443 + kube-system DNS
+- `kustomization.yaml` (1083 bytes): namespace=observability, kustomize 共通 label 付与
+- `README.md` (5190 bytes): prerequisites / secret bootstrap 3 選択肢 / apply 手順 / HMAC curl 検証例
+
+yaml 静的検証: python `yaml.safe_load_all` で 5 kinds パース成功。`kubectl --dry-run=client` は D:/Ada に cluster がないため CI へ送る。
+
+### 13.4 Production wiring (commit-4, `e98975f`)
+
+`crates/ada-remediation/src/main.rs` 新規 (362 行):
+
+- **tokio::main** バイナリ入口（`#[cfg(feature = "bin")]` gate）
+- 環境変数: REMEDIATION_BIND_ADDR (default 0.0.0.0:9100) / REMEDIATION_RUNBOOK_DIR (default ./config/remediation) / REMEDIATION_WEBHOOK_SECRET (required) / REMEDIATION_TRIGGER_SECRET (required) / RUST_LOG
+- 起動シーケンス: tracing → metrics::install → AuthState/Engine/Store → disk load → Watcher spawn → 1s polling 経由で reload_runbooks → axum serve + with_graceful_shutdown
+- **Graceful shutdown**: SIGINT + SIGTERM (k8s preStop) → 25s drain
+- 5 unit tests (workspace -F unsafe-code 制約下の静的アサート方式)
+
+### 13.5 既知の制約 (v0.7.1 リリース時点)
+
+| 制約 | 解消計画 |
+|---|---|
+| blake3 keyed_hash は HMAC 標準ではない | v0.7.2 で `hmac` + `sha2` ship 後に IETF HMAC-SHA256 切替 |
+| `notify` crate offline cache 不在 | v0.7.2 で `cargo ship` または CI 経由で採用 |
+| Runbook ConfigMap 読み取り専用 | k8s では CSI-backed RWX volume または Reloader sidecar で代替 |
+| kubectl dry-run 未実施 | CI で k8s 接続時に実施 |
+| TRIGGER_SECRET と WEBHOOK_SECRET が現状同じ AuthState を共有 | v0.7.2 で AuthState を 2 secret 受け取りに拡張 |
