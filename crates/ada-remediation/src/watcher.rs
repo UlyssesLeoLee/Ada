@@ -66,7 +66,13 @@ pub enum WatcherEvent {
 }
 
 /// How often the watcher polls the runbook directory.
-pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(5);
+/// v0.7.1: tightened from 5s to 1s. The `notify` crate
+/// is unavailable in D:/Ada's offline cache, so this
+/// loop is the production hot-reload mechanism. 1s
+/// keeps reload latency near-real-time while keeping
+/// CPU on `read_dir` + `metadata` negligible (a few
+/// hundred µs per scan on a 5-file runbook dir).
+pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(1);
 /// Debounce window: changes within this window collapse
 /// to a single `Reloaded` event.
 pub const DEBOUNCE: Duration = Duration::from_millis(500);
