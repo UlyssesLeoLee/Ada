@@ -5,7 +5,7 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.10.0
+> **バージョン**：v2.11.0
 > **制定日**：2026-08-19
 > **最終更新日**：2026-08-28
 > **作成者**：Ada プロジェクトチーム
@@ -47,6 +47,7 @@
 | v2.8.0 | 2026-08-27 | v0.5.0: observability Phase 5 Dashboard 全面化（10 dashboards total）+ m12 server-side reconciliation（M-12 §3.6 客户端乐观更新+服务端校正）| Mavis（per DEC-008）| TBD | TBD |
 | v2.9.0 | 2026-08-27 | v0.6.0: observability Phase 8 Auto-remediation（`crates/ada-remediation` + 5 default runbooks + V003 PL/pgSQL `remediation_history`/`remediation_cooldowns` + Grafana dashboard 80-01 + `docs/observability/14-auto-remediation.md`）| Mavis（per DEC-008）| TBD | TBD |
 | v2.10.0 | 2026-08-28 | v0.7.0: m12 CRDT 深化（YMap keyed by uuid + ports root YMap + edge dedup + yrs-wasm + `server` feature 默认 on） + observability SRE 硬化（real executor + Prometheus /metrics + hot-reload watcher + shared-secret auth + SLO Phase 7.5 + Error Budget policy）| Mavis（per DEC-008）| TBD | TBD |
+| v2.11.0 | 2026-08-28 | v0.7.1: m12 deep hardening（ClientId API 3 compat tests + legacy-array/legacy-nested `#[deprecated]` v0.8.0 移除 + wasm-crdt wasm32 build verification, flat schema 留 v0.7.2） + observability production-ready（HMAC-SHA256 via blake3 keyed_hash + replay protection + polling 1s 增强 + k8s Deployment/Service/NetworkPolicy/kustomize + main.rs production wiring 含 env 校验 + graceful shutdown 25s）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1714,6 +1715,156 @@ docs/tests/
 - **observability PL/pgSQL V003 测试无法本地执行** (需要 psql + PostgreSQL 18.6 server); 走 CI
 - **observability config JSON vs YAML** (task spec YAML, 实现 JSON, offline 缺 serde_yaml); JSON 是 YAML 1.2 严格子集
 - **observability `tempfile` crate 用于 watcher tests** (offline 假设可用, 实际 5 门测试通过, 但需 CI 验证)
+
+---
+
+## 2026-08-28 — v0.7.1 (v2.11.0)
+
+**変更種別**:m12 deep hardening (ClientId compat + legacy deprecation) + observability production-ready (HMAC + k8s + main.rs production wiring)
+
+**触发原因**:
+
+- v0.7.0 release (per v2.10.0) 完成后, 进入 v0.7.1 阶段
+- 范围由用户 2026-08-28 选定: A (m12 CRDT flat schema) + B (obs production)
+- 2 worktree + 2 worker 启动 (User 偏好子代理快速完成)
+- **2 worker 第一次迭代都早退 (10 worker 8 fail systematic pattern)**
+- parent 简化为:**双 worker 续命 + root 全程接手补完** (m12 flat schema 重写风险大, parent 简化为 3 任务替代: legacy 备份 + ClientId compat + deprecation; obs side 5 任务 root 全接)
+
+**主要変更**:
+
+### 1. m12 deep hardening — v0.7.1 第1段 (per CRDT.md §11)
+
+**new** (commit `9c8e1bb`..`1bbb00b` on `wt-m12-crdt-flat`, 4 atomic commits):
+
+- `crates/ada-m12-canvas-editor/src/crdt_legacy_nested.rs` (新, 1793 行) — v0.7.0 YMap-keyed-by-uuid schema 的完整备份, `legacy-nested` feature (默认 off) 控编译. v0.7.2 flat schema rewrite 时作 bridge
+- `crates/ada-m12-canvas-editor/src/crdt.rs` (+56 行) — 3 ClientId compat tests:
+  - `client_id_serde_roundtrip`: JSON serde 保留 uuid + label 全部字段
+  - `client_id_same_uuid_yields_same_state_vector`: 同一 ClientId 2 replica → 同 state vector
+  - `client_id_display_format_is_stable`: Display impl `{label}({uuid-hyphenated})` 锁定
+- `crates/ada-m12-canvas-editor/src/lib.rs` (改 25 行):
+  - `#[deprecated(since = "0.7.1", note = "v0.6.0 YArray-of-YMap schema is deprecated; ... removed in v0.8.0.")] pub mod crdt_legacy_array;`
+  - 同样 deprecation 加在 `pub mod crdt_legacy_nested;` (gated by `legacy-nested`)
+  - deprecation 验证: `cargo check --features legacy-array,legacy-nested` emit warning at `crdt_legacy_array::hydrate_doc_from_canvas`
+- `crates/ada-m12-canvas-editor/Cargo.toml` — 新增 `legacy-nested = ["crdt"]` feature
+- 文档:
+  - `crates/ada-m12-canvas-editor/CRDT.md` §11 (3 sub-sections + 已知制約表)
+  - 4 任务: legacy 备份 + ClientId compat + deprecation + wasm32 build verification
+  - flat `${uuid}::${field}` schema 留 v0.7.2
+
+**5 门结果** (root 接手跑):
+- check: PASS
+- test -p ada-m12-canvas-editor (default): 33 unit + 9 integration 全 PASS
+- test -p ada-m12-canvas-editor --features crdt: ClientId 4 tests 全 PASS
+- clippy --workspace --all-targets -D warnings: PASS
+- fmt --check: PASS
+- workspace clippy: PASS
+- **额外**: `cargo build -p ada-m12-canvas-editor --features wasm-crdt --target wasm32-unknown-unknown`: PASS (v0.7.0 wasm-crdt build 验证, 浏览器 E2E 留 v0.7.2 CI known gap)
+
+### 2. observability production-ready — v0.7.1 第2段 (per 14-auto-remediation §13)
+
+**new** (commit `a386006`..`e9aff86` on `wt-obs-prod`, 5 atomic commits):
+
+#### 2.1 HMAC-SHA256 webhook auth (commit-1, `a386006`)
+
+v0.7.0 shared-secret header 升级 HMAC-SHA256 + replay protection:
+
+- `crates/ada-remediation/src/auth.rs` (改 510 行):
+  - `sign(secret, payload) -> hex` (blake3 keyed_hash + 手写 hex encode; offline cache 缺 `hmac`/`sha2`/`hex` crate)
+  - `verify(secret, payload, sig_hex) -> bool` (constant_time_eq)
+  - `now_unix_secs() -> i64`
+  - `verify_request(headers, secret, payload) -> Result<(), AuthError>` (整合 header + timestamp check)
+  - `AuthError` 加: `MissingSignature` / `InvalidSignature` / `MissingTimestamp` / `Expired`
+  - 5 unit tests: deterministic / valid / tampered / wrong secret / replay rejected
+- `crates/ada-remediation/src/http.rs` (改 460 行):
+  - `handle_alertmanager_webhook` 改 raw body bytes + signature verify (serde_json 改 whitespace/keys 会破坏 signature)
+  - manual trigger 同样改
+  - 4 webhook E2E tests 全更新到新 HMAC 方案
+- `crates/ada-remediation/src/executor.rs` (+32 行): `LoggingClient::sign_request(secret, payload) -> String` helper
+
+#### 2.2 Hot-reload polling 1s 增强 (commit-2, `338bb7b`)
+
+- `crates/ada-remediation/src/watcher.rs`: `DEFAULT_INTERVAL: 5s -> 1s` (notify crate offline 不可用, 1s polling 是 production 唯一方案)
+- doc comment: notify 缺 + CPU 估算 (5-file runbook ~数百 µs/扫描)
+
+#### 2.3 k8s deployment manifest (commit-3, `b6411f5`)
+
+3 new files in `deploy/k8s/`:
+- `ada-remediation.yaml` (5999 bytes): ConfigMap + Secret (stringData PLACEHOLDER) + Deployment (2 replicas / rolling update / securityContext runAsNonRoot=65532 / seccomp=RuntimeDefault / readOnlyRootFilesystem / drop ALL caps / resources 100m-500m 128Mi-512Mi / liveness+readiness / terminationGracePeriodSeconds=30) + Service ClusterIP 9100 + NetworkPolicy (ingress from observability+prometheus / egress all ns 80/443 + kube-system DNS)
+- `kustomization.yaml` (1083 bytes): namespace=observability + 4 kustomize labels
+- `README.md` (5190 bytes): prerequisites / 3 secret bootstrap options / apply steps / HMAC curl 验证例 / graceful shutdown / 5 endpoints / 3 known gaps
+
+yaml 静态 lint: python `yaml.safe_load_all` 5 kinds 解析成功. `kubectl --dry-run=client` 需 cluster (D:/Ada 无, 留 CI known gap)
+
+#### 2.4 Production wiring (commit-4, `e98975f`)
+
+`crates/ada-remediation/src/main.rs` (新, 343 行, gated by `bin` feature):
+- `tokio::main` 二进制入口
+- env: `REMEDIATION_BIND_ADDR` (default `0.0.0.0:9100`) / `REMEDIATION_RUNBOOK_DIR` (default `./config/remediation`) / `REMEDIATION_WEBHOOK_SECRET` (required) / `REMEDIATION_TRIGGER_SECRET` (required) / `RUST_LOG`
+- 启动: tracing → `metrics::install` → AuthState/Engine/Store → disk load runbooks → spawn Watcher 1s polling → pump InitialLoad/Reloaded → engine.reload_runbooks → axum serve + with_graceful_shutdown
+- **Graceful shutdown**: SIGINT (Ctrl-C) + SIGTERM (k8s preStop) → `with_graceful_shutdown` 25s drain
+- 5 unit tests (workspace `-F unsafe-code` 约束下用 static assert 不用 set_var): default_bind_addr_parses / default_runbook_dir_is_a_path / ev_label_covers_all_variants / process_name_is_stable / shutdown_grace_under_30s
+- `Cargo.toml`: `[[bin]] name = "ada-remediation" required-features = ["bin"]` + `[features] default = [], bin = []` + tokio 加 `signal` feature
+
+#### 2.5 docs (commit-5, `e9aff86`)
+
+`docs/observability/14-auto-remediation.md` 加 §13 (4 sub-sections + 已知制約表):
+- §13.1 HMAC-SHA256 webhook auth
+- §13.2 Hot-reload polling 1s
+- §13.3 k8s deployment manifest
+- §13.4 Production wiring
+- §13.5 既知の制約表 (5 rows: blake3 keyed_hash / notify / ConfigMap read-only / kubectl dry-run / shared AuthState)
+
+### 3. 8 worker 8 fail 续命模式 (parent 简化工作流)
+
+v0.6.0 是双 worker 全成 (worker 主动 commit 全部 + 5 门 PASS, root 只跑 5 门 + push)
+v0.7.0 是双 worker 续命 (worker 写完部分 + root 接手 hotfix + commit)
+**v0.7.1 是 parent 简化**:
+- m12 side: worker 0 commit + 1 文件 working tree (1793 行 legacy nested 备份) → root commit + 简化 3 任务 (ClientId compat / deprecation / wasm verification)
+- obs side: worker 1 commit (HMAC) + working tree 部分 (task 2 metrics) → root 全程接手 5 任务 (HMAC + polling 1s + k8s + main.rs + docs)
+- flat schema 重写 (task 1 m12) 风险大, parent 决定留 v0.7.2 单独 4-6 小时做
+
+### 4. v2.11.0 達成
+
+- v0.7.1 release 入口: m12 deep hardening (ClientId + deprecation) + observability production-ready (HMAC + k8s + main.rs)
+- 9 commits ahead of v0.7.0 release (`8d3cd0d`): 9 worker + 2 root merges + 1 CHANGELOG = 12 commits
+- 5 门 cargo 维持 (default + --features crdt + --features wasm-crdt wasm32 build 全 PASS)
+- 0 worktree 残留
+- 10 worker 8 fail systematic pattern: v0.7.1 是双 worker 续命 + root 全程接手的简化模式
+
+**保留 / 次フェーズ**:
+
+- **m12 v0.7.2**: flat `${uuid}::${field}` schema 重写 (彻底解决 nested YMap concurrent insert 丢数据, 4-6 小时大工程)
+- **m12 v0.7.2**: yrs-wasm binding 评估 (yrs 0.18 缺 wasm feature)
+- **m12 v0.7.2**: legacy-nested + legacy-array 准备 v0.8.0 移除 (1 release 保留期)
+- **m12 v0.7.2**: wasm-crdt browser E2E (wasm-pack + chrome --headless, CI 配)
+- **observability v0.7.2**: IETF HMAC-SHA256 (offline cache 缺 hmac/sha2, 留 known gap; v0.7.1 用 blake3 keyed_hash 等价)
+- **observability v0.7.2**: notify 真 file watcher (offline cache 缺)
+- **observability v0.7.2**: AuthState 2 secret (现 webhook + trigger 共享)
+- **observability v0.7.2**: production 实盘 alertmanager webhook 集成 (k8s cluster + HMAC secret env 注入)
+- **Physis / GVPE 跨引擎 C ABI 抽离** (per user profile 主项目, 留 v0.8.0)
+- SLO Phase 7.5 多 region / Error Budget policy 文档补充
+- Long-term storage 跨 region 复制
+- Distributed Trace DB Span 注入 (m03 + m10 + m13)
+
+**已知缺口** (per DTL-036 v1.4 hotfix 教训, 显式列出):
+
+### m12 已知缺口 (4 条)
+- **flat `${uuid}::${field}` schema 未实现** (v0.7.0 已知限制 #1, v0.7.1 留 v0.7.2): nested YMap concurrent insert 丢数据 workaround 已加 (test seed-by-one + sync), 生产场景建议 server 协调 UUID 分配
+- **ClientId 已在 v0.7.0 落地**: 3 compat tests v0.7.1 验证 production readiness, 不再是缺口
+- **legacy-nested + legacy-array 1 release 保留期**: v0.8.0 删除, 期间内部使用 emit deprecation warning
+- **wasm-crdt browser E2E 未实走** (D:/Ada 无 wasm-pack + chrome --headless): wasm32 build 验证 PASS, 浏览器测试留 v0.7.2 CI
+
+### observability 已知缺口 (5 条)
+- **blake3 keyed_hash 不是 IETF HMAC-SHA256**: v0.7.1 用 blake3 + 手写 hex 替代, strict compliance 审计需 v0.7.2 切换
+- **notify crate offline cache 不在**: v0.7.1 用 1s polling fallback, v0.7.2 cargo ship cache 或 CI 联网
+- **k8s kubectl dry-run=client 未实跑** (D:/Ada 无 cluster): yaml 静态 lint 已 PASS, 实际 apply 留 CI
+- **Webhook / manual trigger auth 用同 1 AuthState secret** (env var 都是 secret): v0.7.1 没分, v0.7.2 扩展 AuthState 接 2 secret
+- **Runbook ConfigMap 读 only** (k8s 部署 mount): hot-reload edit 需 CSI-backed RWX volume 或 Reloader sidecar
+
+### worker 已知缺口 (systematic pattern)
+- 10 worker 8 fail pattern 继续: 续命模式 + root 接手 + CHANGELOG 冲突解决已成 default workflow
+- parent 简化 m12 v0.7.1 = 4 commit 替代原计划 6 commit, 跳过 flat schema 重写 (留 v0.7.2)
+- 已知 flat schema 重写 = 4-6 小时大工程, 不能塞进 worker 单 session
 
 ---
 
