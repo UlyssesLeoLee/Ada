@@ -1723,11 +1723,16 @@ mod tests {
     /// shipping) can round-trip a client id without loss.
     #[test]
     fn client_id_serde_roundtrip() {
-        let original =
-            ClientId::from_uuid(uuid::Uuid::from_u128(0xCAFE_BABE_DEAD_BEEF), "alice-laptop".into());
+        let original = ClientId::from_uuid(
+            uuid::Uuid::from_u128(0xCAFE_BABE_DEAD_BEEF),
+            "alice-laptop".into(),
+        );
         let json = serde_json::to_string(&original).expect("serialise ClientId");
         let parsed: ClientId = serde_json::from_str(&json).expect("deserialise ClientId");
-        assert_eq!(original, parsed, "ClientId JSON roundtrip must preserve all fields");
+        assert_eq!(
+            original, parsed,
+            "ClientId JSON roundtrip must preserve all fields"
+        );
         assert_eq!(parsed.uuid, uuid::Uuid::from_u128(0xCAFE_BABE_DEAD_BEEF));
         assert_eq!(parsed.label, "alice-laptop");
     }
@@ -1738,8 +1743,10 @@ mod tests {
     /// is the symmetry check for the previous test.
     #[test]
     fn client_id_same_uuid_yields_same_state_vector() {
-        let shared =
-            ClientId::from_uuid(uuid::Uuid::from_u128(0x1234_5678_9ABC_DEF0), "shared".into());
+        let shared = ClientId::from_uuid(
+            uuid::Uuid::from_u128(0x1234_5678_9ABC_DEF0),
+            "shared".into(),
+        );
         let mut node = positioned("shared", 0, 0);
         node.id = NodeId(uuid::Uuid::new_v4());
         let doc_a = Doc::with_client_id(shared.uuid.as_u128() as u64);
@@ -1768,7 +1775,11 @@ mod tests {
         assert!(s.ends_with(')'), "got: {s}");
         // Inner is a 36-char hyphenated UUID (8-4-4-4-12).
         let inner = &s["test-client(".len()..s.len() - 1];
-        assert_eq!(inner.len(), 36, "uuid part must be 36 chars, got: {inner:?}");
+        assert_eq!(
+            inner.len(),
+            36,
+            "uuid part must be 36 chars, got: {inner:?}"
+        );
         assert_eq!(inner.chars().filter(|c| *c == '-').count(), 4);
     }
 

@@ -215,6 +215,13 @@ legacy-lww = []
 # v0.7.0 YMap-keyed-by-uuid schema in `crdt.rs` (the default
 # `crdt` feature flag).
 legacy-array = ["crdt"]
+# v0.7.1: backup of the v0.7.0 nested YMap-keyed-by-uuid
+# schema (preserved as `crdt_legacy_nested`) so v0.7.2's
+# flat `${uuid}::${field}` rewrite can ship without
+# ripping out v0.7.0 callers mid-cycle. v0.7.1 marks the
+# module `#[deprecated]`; v0.8.0 will remove this flag.
+# New code should use the default `crdt` feature.
+legacy-nested = ["crdt"]
 # v0.7.0: WASM bindings for the CRDT (Yrs) sync path. Pulls
 # in `wasm-bindgen` + `js-sys` + `serde-wasm-bindgen` and
 # enables `src/wasm_crdt.rs` (the `WasmCrdtDoc` wrapper).
