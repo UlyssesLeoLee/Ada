@@ -377,3 +377,54 @@ wasm     = [...]              # v0.1.0 WasmCanvas wrapping Canvas
 
 *代签: 架构师（Mavis 接手 agent per DEC-008）*
 *对应 commits: c6d19cf, 5587f7a, 92277db + docs commit*
+
+
+## 11. v0.7.1 升 deep hardening (生产検証 + 兼容性)
+
+v0.7.0 で残った 4 件の既知制約のうち、3 件を v0.7.1 で解消。残り 1 件 (flat schema) は v0.7.2 へ送る。
+
+### 11.1 ClientId API 3 compat tests (commit `3bcb6d9`)
+
+v0.7.0 追加された `ClientId` API (per D-01 explicit negotiation) の production-readiness を 3 tests で検証:
+
+- `client_id_serde_roundtrip`: JSON serde が uuid + label 両方をロスレスで往復できることを確認
+  - persistence layer (k8s sidecar / postgres / log shipping) での round-trip 想定
+  - 固定 UUID `0xCAFE_BABE_DEAD_BEEF` で deterministic
+- `client_id_same_uuid_yields_same_state_vector`: 同一 ClientId で 2 replica 起動 → 同じ state vector bytes
+  - `client_id_negotiation_persists_to_update_bytes` (v0.7.0 既存) の対称検査
+  - yrs 内部の varint header ロジックを cross-check
+- `client_id_display_format_is_stable`: Display impl が `{label}({uuid-hyphenated})` 形式であることを固定
+  - inner は 36 文字・ハイフン 4 つの canonical UUID 形式
+  - log-spam / error context が format 変更で崩れない保証
+
+3 tests 全 PASS (含 v0.7.0 既存 `client_id_negotiation_persists_to_update_bytes`)。
+
+### 11.2 Legacy schemas `#[deprecated]` (commit `59e89d3`)
+
+v0.7.1 release で 2 つの legacy module を deprecated とし、v0.8.0 で削除予定:
+
+- `legacy-array` feature / `crdt_legacy_array` module (v0.6.0 YArray-of-YMap)
+  - v0.6.0 → v0.7.0 移行期の fallback path
+  - v0.7.1 deprecation notice 検証: `cargo check --features legacy-array` で v0.7.0 internal 呼び出し側 (`crdt_legacy_array::hydrate_doc_from_canvas`) に warning が出る
+- `legacy-nested` feature / `crdt_legacy_nested` module (v0.7.0 YMap-keyed-by-uuid)
+  - v0.7.1 で新規追加 (commit `9c8e1bb` で `crdt_legacy_nested.rs` を v0.7.0 実装の完全バックアップとして commit)
+  - v0.7.2 flat schema rewrite への bridge として 1 release 保持
+
+Deprecation 形式: `#[deprecated(since = "0.7.1", note = "v0.6.0/v0.7.0 ... schema is deprecated; ... will be removed in v0.8.0.")]`
+
+### 11.3 wasm-crdt browser E2E (commit `5f5b8e3` / D:/Ada offline 制約)
+
+D:/Ada には `wasm-pack` / Chrome `--headless` が不在のため、v0.7.1 release では **wasm32 build verification のみ**実施:
+
+- `cargo build -p ada-m12-canvas-editor --features wasm-crdt --target wasm32-unknown-unknown` → **PASS** (v0.7.0 commit-3 + v0.7.1 root 検証)
+- ブラウザ E2E (`wasm-pack test --headless --chrome`) は known gap として v0.7.2 CI へ送る
+- 既存の wasm-only test (`src/wasm_crdt.rs` line 239, `#[cfg(all(test, target_arch = "wasm32"))]`) は v0.7.0 commit-3 で配置済
+
+### 11.4 既知の制約 (v0.7.1 リリース時点)
+
+| 制約 | 解消計画 |
+|---|---|
+| flat `${uuid}::${field}` schema 未実装 (v0.7.0 nested の 2P-Set で concurrent insert 問題) | **v0.7.2** で `crdt.rs` 全面 rewrite + legacy-nested 削除準備 |
+| yrs 0.18 に `wasm` feature なし | v0.7.2 で `yrs-wasm` binding 評価 |
+| `read_canvas_from_doc` / `doc_from_canvas` 部分的 pub re-export | v0.7.2 で m13 cross-crate user 向けの helper 拡張 |
+| wasm-crdt browser E2E 未実走 | v0.7.2 CI に `wasm-pack + chrome --headless` 環境追加 |

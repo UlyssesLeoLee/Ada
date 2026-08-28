@@ -75,9 +75,32 @@ mod bevy_plugin;
 pub mod crdt;
 /// M-12 v0.6.0 YArray-of-YMap CRDT legacy schema. Preserved
 /// behind `--features legacy-array` (default off) for one
-/// release as a rollback path. v0.8.0 will remove this.
+/// release as a rollback path. **v0.7.1 deprecation
+/// notice**: this module is `#[deprecated]` and will be
+/// removed in **v0.8.0**. Switch to the default `crdt`
+/// feature (YMap keyed by uuid).
 #[cfg(feature = "legacy-array")]
+#[deprecated(
+    since = "0.7.1",
+    note = "v0.6.0 YArray-of-YMap schema is deprecated; use the default `crdt` feature (YMap keyed by uuid) and remove the `legacy-array` feature flag. The `legacy-array` module will be removed in v0.8.0."
+)]
 pub mod crdt_legacy_array;
+
+/// M-12 v0.7.0 YMap-keyed-by-uuid CRDT schema, preserved as a
+/// transition backup. v0.7.0 lifted the schema from
+/// "YArray of YMap" to "YMap<NodeId, YMap>" to give true
+/// 2P-Set concurrent-delete convergence. v0.7.1 backs this
+/// up behind `--features legacy-nested` (default off) so
+/// v0.7.2's flat `${uuid}::${field}` rewrite can ship
+/// without ripping out v0.7.0 callers mid-cycle.
+/// **v0.7.1 deprecation notice**: this module is
+/// `#[deprecated]` and will be removed in **v0.8.0**.
+#[cfg(feature = "legacy-nested")]
+#[deprecated(
+    since = "0.7.1",
+    note = "v0.7.0 YMap-keyed-by-uuid schema is preserved as a transition backup; the v0.7.2 flat `${uuid}::${field}` schema supersedes it. The `legacy-nested` module will be removed in v0.8.0."
+)]
+pub mod crdt_legacy_nested;
 #[cfg(feature = "bevy_egui")]
 mod egui_integration;
 /// M-12 v0.5.0 server-side reconciliation. See
