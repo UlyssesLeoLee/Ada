@@ -1,0 +1,32 @@
+---
+# kustomize entry point for ada-remediation v0.7.1
+#
+# Apply: kubectl apply -k deploy/k8s/
+#
+# SECRET HANDLING: the Secret in ada-remediation.yaml uses
+# stringData placeholders. Before `kubectl apply -k`,
+# populate the real secret via one of:
+#   1. sealed-secrets (recommended for gitops)
+#   2. external-secrets-operator backed by AWS/GCP/Vault
+#   3. `kubectl create secret generic ada-remediation-secrets \
+#        --from-literal=REMEDIATION_WEBHOOK_SECRET=$(openssl rand -hex 32) \
+#        --from-literal=REMEDIATION_TRIGGER_SECRET=$(openssl rand -hex 32) \
+#        --namespace=observability`
+#      then `kubectl apply -k deploy/k8s/` will skip the
+#      placeholder Secret if the real one already exists.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: observability
+
+resources:
+  - ada-remediation.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: ada-remediation
+      app.kubernetes.io/version: v0.7.1
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: ada-observability

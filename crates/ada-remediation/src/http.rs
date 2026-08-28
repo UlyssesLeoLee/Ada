@@ -15,10 +15,11 @@
 
 use crate::action::ActionOutcome;
 use crate::alert::{AlertEvent, AlertStatus};
-use crate::auth::{AuthError, AuthState, HEADER_NAME};
+use crate::auth::{now_unix_secs, AuthError, AuthState, SIGNATURE_HEADER, TIMESTAMP_HEADER};
 use crate::engine::RemediationEngine;
 use crate::error::RemediationError;
 use crate::history::{HistoryQuery, MemoryStore};
+use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
@@ -32,10 +33,16 @@ use std::sync::Arc;
 pub struct AppState {
     pub engine: Arc<RemediationEngine>,
     pub store: MemoryStore,
-    /// Webhook + manual-trigger shared-secret auth. The
-    /// v0.6.0 handlers accepted every request; v0.7.0
-    /// requires a matching `X-Webhook-Token` header on
-    /// every state-changing endpoint.
+    /// Webhook + manual-trigger auth. The v0.6.0
+    /// handlers accepted every request; v0.7.0
+    /// required a shared-secret token; **v0.7.1**
+    /// upgrades to **HMAC over the raw body**
+    /// (`X-Webhook-Signature`) + replay protection
+    /// (`X-Webhook-Timestamp`). See
+    /// [`crate::auth`] for the full scheme and the
+    /// rationale for the blake3-keyed choice (the
+    /// `hmac` / `sha2` crates are not in the offline
+    /// `Cargo.lock`).
     pub auth: AuthState,
 }
 
@@ -166,17 +173,43 @@ pub struct WebhookResponse {
 async fn handle_alertmanager_webhook(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    Json(payload): Json<AlertmanagerPayload>,
+    body: Bytes,
 ) -> Result<Json<WebhookResponse>, HttpError> {
-    // Webhook auth. `check_token` returns
-    //   Ok(())                     - header matched
-    //   Err(AuthError::Disabled)   - no env var, fail-closed 503
-    //   Err(AuthError::MissingToken)  - 401
-    //   Err(AuthError::InvalidToken)  - 403
-    let provided = headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
-    if let Err(e) = state.auth.check_token(provided) {
+    // v0.7.1 webhook auth: HMAC over the raw body +
+    // replay-protection timestamp. The body must be
+    // read as raw bytes (NOT deserialised first)
+    // because the signature is computed over the
+    // exact bytes the client sent — any whitespace
+    // or key reordering by `serde_json` would
+    // invalidate the signature.
+    //
+    // `verify_request` returns
+    //   Ok(())                          - signature matched, timestamp fresh
+    //   Err(AuthError::Disabled)        - no env var, fail-closed 503
+    //   Err(AuthError::MissingSignature)  - 401
+    //   Err(AuthError::MissingTimestamp)  - 401
+    //   Err(AuthError::Expired)         - 401
+    //   Err(AuthError::InvalidSignature)  - 403
+    let signature_header = headers.get(SIGNATURE_HEADER).and_then(|v| v.to_str().ok());
+    let timestamp_header = headers.get(TIMESTAMP_HEADER).and_then(|v| v.to_str().ok());
+    if let Err(e) =
+        state
+            .auth
+            .verify_request(signature_header, timestamp_header, &body, now_unix_secs())
+    {
         return Err(map_auth_error(&e));
     }
+    // Body verified. Now deserialise. We do not
+    // stream the body into the engine: the
+    // Alertmanager payload is small (< 64 KB even
+    // for batch alerts) and we need the full
+    // `Vec<AlertmanagerAlert>` in memory to walk it.
+    let payload: AlertmanagerPayload = serde_json::from_slice(&body).map_err(|e| {
+        HttpError(
+            StatusCode::BAD_REQUEST,
+            format!("alertmanager payload parse error: {e}"),
+        )
+    })?;
     let received = payload.alerts.len();
     let mut outcomes = Vec::new();
     let mut matched = 0;
@@ -300,21 +333,32 @@ pub struct ManualTriggerResponse {
 async fn handle_manual_trigger(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    Json(req): Json<ManualTriggerRequest>,
+    body: Bytes,
 ) -> Result<Json<ManualTriggerResponse>, HttpError> {
-    // Manual-trigger auth. Same scheme as the
-    // Alertmanager webhook — see
-    // [`crate::auth`] for the credential model and
-    // [`map_auth_error`] for the HTTP status mapping.
+    // v0.7.1 manual-trigger auth: same HMAC +
+    // timestamp scheme as the Alertmanager webhook.
     // The trigger endpoint can run runbooks with
     // `force=true` to bypass cooldowns, so it is
-    // explicitly gated even though the
-    // `Alertmanager` webhook is the primary attack
-    // surface.
-    let provided = headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
-    if let Err(e) = state.auth.check_token(provided) {
+    // explicitly gated even though the Alertmanager
+    // webhook is the primary attack surface. See
+    // [`crate::auth`] for the credential model and
+    // [`map_auth_error`] for the HTTP status
+    // mapping.
+    let signature_header = headers.get(SIGNATURE_HEADER).and_then(|v| v.to_str().ok());
+    let timestamp_header = headers.get(TIMESTAMP_HEADER).and_then(|v| v.to_str().ok());
+    if let Err(e) =
+        state
+            .auth
+            .verify_request(signature_header, timestamp_header, &body, now_unix_secs())
+    {
         return Err(map_auth_error(&e));
     }
+    let req: ManualTriggerRequest = serde_json::from_slice(&body).map_err(|e| {
+        HttpError(
+            StatusCode::BAD_REQUEST,
+            format!("manual trigger payload parse error: {e}"),
+        )
+    })?;
     let mut event = AlertEvent::builder(req.alert_name.clone())
         .with_status(AlertStatus::Firing)
         .build();
@@ -390,12 +434,20 @@ fn map_auth_error(e: &AuthError) -> HttpError {
             StatusCode::SERVICE_UNAVAILABLE,
             "webhook auth is disabled (REMEDIATION_WEBHOOK_SECRET unset)".into(),
         ),
-        AuthError::MissingToken => HttpError(
+        AuthError::MissingSignature => HttpError(
             StatusCode::UNAUTHORIZED,
-            "missing X-Webhook-Token header".into(),
+            "missing X-Webhook-Signature header".into(),
         ),
-        AuthError::InvalidToken => {
-            HttpError(StatusCode::FORBIDDEN, "invalid X-Webhook-Token".into())
+        AuthError::MissingTimestamp => HttpError(
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid X-Webhook-Timestamp header".into(),
+        ),
+        AuthError::Expired => HttpError(
+            StatusCode::UNAUTHORIZED,
+            "request timestamp outside replay window (5 minutes)".into(),
+        ),
+        AuthError::InvalidSignature => {
+            HttpError(StatusCode::FORBIDDEN, "invalid X-Webhook-Signature".into())
         }
     }
 }
@@ -404,11 +456,14 @@ fn map_auth_error(e: &AuthError) -> HttpError {
 mod tests {
     use super::*;
     use crate::action::{ActionStep, RemediationAction, Trigger};
+    use crate::auth::sign;
     use axum::body::Body;
     use axum::http::{Request, StatusCode as AxStatus};
     use std::collections::BTreeMap;
     use std::time::Duration;
     use tower::ServiceExt;
+
+    const TEST_SECRET: &[u8] = b"TEST_SECRET";
 
     fn sample_action() -> RemediationAction {
         RemediationAction {
@@ -439,17 +494,37 @@ mod tests {
         router(state)
     }
 
-    /// App with webhook auth enabled. The shared
-    /// secret is `TEST_SECRET`. Tests that exercise
-    /// the webhook / trigger paths send the matching
-    /// `X-Webhook-Token: TEST_SECRET` header.
+    /// App with webhook auth enabled. The secret is
+    /// `TEST_SECRET`. Tests that exercise the
+    /// webhook / trigger paths sign the body with
+    /// this secret and send `X-Webhook-Signature` +
+    /// `X-Webhook-Timestamp`. See [`signed_request`]
+    /// for the wire-format helper.
     fn authed_app() -> Router {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
-            auth: crate::auth::AuthState::enabled("TEST_SECRET"),
+            auth: crate::auth::AuthState::enabled(TEST_SECRET),
         };
         router(state)
+    }
+
+    /// Build a `Request` for the webhook / trigger
+    /// paths with a valid HMAC signature over
+    /// `body`. Tests that need a *bad* signature
+    /// (rejection path) call `Request::builder()`
+    /// themselves and bypass this helper.
+    fn signed_request(method: &str, uri: &str, body: Vec<u8>) -> Request<Body> {
+        let sig = sign(TEST_SECRET, &body);
+        let ts = crate::auth::now_unix_secs().to_string();
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("x-webhook-signature", sig)
+            .header("x-webhook-timestamp", ts)
+            .body(Body::from(body))
+            .unwrap()
     }
 
     #[tokio::test]
@@ -468,31 +543,22 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_dispatches_matching_action() {
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![AlertmanagerAlert {
+                status: "firing".into(),
+                labels: serde_json::Map::from_iter([(
+                    "alertname".into(),
+                    serde_json::Value::String("DiskSpaceFillingFast".into()),
+                )]),
+                annotations: serde_json::Map::new(),
+                fingerprint: Some("abc".into()),
+            }],
+        })
+        .unwrap();
         let r = authed_app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/webhook/alertmanager")
-                    .header("content-type", "application/json")
-                    .header("x-webhook-token", "TEST_SECRET")
-                    .body(Body::from(
-                        serde_json::to_vec(&AlertmanagerPayload {
-                            version: Some("4".into()),
-                            status: Some("firing".into()),
-                            alerts: vec![AlertmanagerAlert {
-                                status: "firing".into(),
-                                labels: serde_json::Map::from_iter([(
-                                    "alertname".into(),
-                                    serde_json::Value::String("DiskSpaceFillingFast".into()),
-                                )]),
-                                annotations: serde_json::Map::new(),
-                                fingerprint: Some("abc".into()),
-                            }],
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(signed_request("POST", "/webhook/alertmanager", body))
             .await
             .unwrap();
         assert_eq!(r.status(), AxStatus::OK);
@@ -505,31 +571,22 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_with_unknown_alert_is_noop() {
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![AlertmanagerAlert {
+                status: "firing".into(),
+                labels: serde_json::Map::from_iter([(
+                    "alertname".into(),
+                    serde_json::Value::String("SomeOtherAlert".into()),
+                )]),
+                annotations: serde_json::Map::new(),
+                fingerprint: None,
+            }],
+        })
+        .unwrap();
         let r = authed_app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/webhook/alertmanager")
-                    .header("content-type", "application/json")
-                    .header("x-webhook-token", "TEST_SECRET")
-                    .body(Body::from(
-                        serde_json::to_vec(&AlertmanagerPayload {
-                            version: Some("4".into()),
-                            status: Some("firing".into()),
-                            alerts: vec![AlertmanagerAlert {
-                                status: "firing".into(),
-                                labels: serde_json::Map::from_iter([(
-                                    "alertname".into(),
-                                    serde_json::Value::String("SomeOtherAlert".into()),
-                                )]),
-                                annotations: serde_json::Map::new(),
-                                fingerprint: None,
-                            }],
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(signed_request("POST", "/webhook/alertmanager", body))
             .await
             .unwrap();
         let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
@@ -545,35 +602,26 @@ mod tests {
         let state = AppState {
             engine: Arc::new(RemediationEngine::with_runbooks(vec![sample_action()])),
             store: MemoryStore::new(),
-            auth: crate::auth::AuthState::enabled("TEST_SECRET"),
+            auth: crate::auth::AuthState::enabled(TEST_SECRET),
         };
         let app = router(state);
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![AlertmanagerAlert {
+                status: "firing".into(),
+                labels: serde_json::Map::from_iter([(
+                    "alertname".into(),
+                    serde_json::Value::String("DiskSpaceFillingFast".into()),
+                )]),
+                annotations: serde_json::Map::new(),
+                fingerprint: Some("h1".into()),
+            }],
+        })
+        .unwrap();
         let r = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/webhook/alertmanager")
-                    .header("content-type", "application/json")
-                    .header("x-webhook-token", "TEST_SECRET")
-                    .body(Body::from(
-                        serde_json::to_vec(&AlertmanagerPayload {
-                            version: Some("4".into()),
-                            status: Some("firing".into()),
-                            alerts: vec![AlertmanagerAlert {
-                                status: "firing".into(),
-                                labels: serde_json::Map::from_iter([(
-                                    "alertname".into(),
-                                    serde_json::Value::String("DiskSpaceFillingFast".into()),
-                                )]),
-                                annotations: serde_json::Map::new(),
-                                fingerprint: Some("h1".into()),
-                            }],
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(signed_request("POST", "/webhook/alertmanager", body))
             .await
             .unwrap();
         assert_eq!(r.status(), AxStatus::OK);
@@ -613,17 +661,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), AxStatus::OK);
-        // Content-Type is the Prometheus text exposition
-        // format. `render()` may still be empty if no
-        // metric has been recorded yet, but the body must
-        // be ASCII text either way.
         let body_bytes = axum::body::to_bytes(r.into_body(), 65536).await.unwrap();
         let body = std::str::from_utf8(&body_bytes).expect("prometheus text is utf-8");
         if !body.is_empty() {
-            // Every non-comment line must be a
-            // `name{labels} value` triple. Skip blank
-            // lines (Prometheus text ends with a trailing
-            // newline).
             for line in body.lines() {
                 if line.starts_with('#') || line.trim().is_empty() {
                     continue;
@@ -637,55 +677,49 @@ mod tests {
     }
 
     // ----------------------------------------------------------------------
-    // Webhook shared-secret auth (v0.7.0 hardening)
+    // Webhook HMAC auth (v0.7.1 hardening)
     // ----------------------------------------------------------------------
 
-    /// The unit-level "valid token" path is already
-    /// covered by [`crate::auth::tests::valid_token_returns_ok`].
+    /// The unit-level "valid signature" path is covered
+    /// by [`crate::auth::tests::hmac_verify_accepts_valid_signature`].
     /// The end-to-end HTTP test below exercises the
-    /// header -> handler -> engine path.
+    /// header -> handler -> engine path with a real
+    /// axum `oneshot`.
     #[tokio::test]
-    async fn webhook_accepts_valid_token() {
+    async fn webhook_accepts_valid_signature() {
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![],
+        })
+        .unwrap();
         let r = authed_app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/webhook/alertmanager")
-                    .header("content-type", "application/json")
-                    .header("x-webhook-token", "TEST_SECRET")
-                    .body(Body::from(
-                        serde_json::to_vec(&AlertmanagerPayload {
-                            version: Some("4".into()),
-                            status: Some("firing".into()),
-                            alerts: vec![],
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(signed_request("POST", "/webhook/alertmanager", body))
             .await
             .unwrap();
         assert_eq!(r.status(), AxStatus::OK);
     }
 
     #[tokio::test]
-    async fn webhook_rejects_missing_token() {
-        // Auth is enabled but the request omits the
-        // header. Expect 401 Unauthorized.
+    async fn webhook_rejects_missing_signature() {
+        // Auth is enabled but the request omits both
+        // the signature and the timestamp header.
+        // Expect 401 Unauthorized (MissingSignature
+        // wins because we check it before the
+        // timestamp).
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![],
+        })
+        .unwrap();
         let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&AlertmanagerPayload {
-                            version: Some("4".into()),
-                            status: Some("firing".into()),
-                            alerts: vec![],
-                        })
-                        .unwrap(),
-                    ))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
@@ -694,24 +728,85 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn webhook_rejects_invalid_token() {
-        // Auth is enabled and the header is present but
-        // wrong. Expect 403 Forbidden.
+    async fn webhook_rejects_missing_timestamp() {
+        // Auth is enabled, signature is present, but
+        // the timestamp header is absent. Expect 401.
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![],
+        })
+        .unwrap();
+        let sig = sign(TEST_SECRET, &body);
         let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/webhook/alertmanager")
                     .header("content-type", "application/json")
-                    .header("x-webhook-token", "WRONG-SECRET")
-                    .body(Body::from(
-                        serde_json::to_vec(&AlertmanagerPayload {
-                            version: Some("4".into()),
-                            status: Some("firing".into()),
-                            alerts: vec![],
-                        })
-                        .unwrap(),
-                    ))
+                    .header("x-webhook-signature", sig)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_expired_timestamp() {
+        // Timestamp 10 minutes in the past. Even with
+        // a valid signature, the replay window
+        // rejects it.
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![],
+        })
+        .unwrap();
+        let sig = sign(TEST_SECRET, &body);
+        let stale_ts = (crate::auth::now_unix_secs() - 600).to_string();
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-signature", sig)
+                    .header("x-webhook-timestamp", stale_ts)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), AxStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_tampered_signature() {
+        // Body is one alert; we sign a *different*
+        // body. The signature will not match — the
+        // constant-time compare returns false.
+        let body = serde_json::to_vec(&AlertmanagerPayload {
+            version: Some("4".into()),
+            status: Some("firing".into()),
+            alerts: vec![],
+        })
+        .unwrap();
+        let different_body = b"{\"alerts\":[]}".to_vec();
+        let sig = sign(TEST_SECRET, &different_body);
+        let r = authed_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/alertmanager")
+                    .header("content-type", "application/json")
+                    .header("x-webhook-signature", sig)
+                    .header(
+                        "x-webhook-timestamp",
+                        crate::auth::now_unix_secs().to_string(),
+                    )
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
@@ -720,28 +815,27 @@ mod tests {
     }
 
     // ----------------------------------------------------------------------
-    // Manual-trigger auth (v0.7.0 hardening, task 5)
+    // Manual-trigger auth (v0.7.1 hardening)
     // ----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn manual_trigger_requires_token() {
+    async fn manual_trigger_requires_signature() {
         // Auth is enabled but the request omits the
-        // header. Expect 401 Unauthorized.
+        // signature header. Expect 401 Unauthorized.
+        let body = serde_json::to_vec(&ManualTriggerRequest {
+            alert_name: "DiskSpaceFillingFast".into(),
+            labels: BTreeMap::new(),
+            severity: Some("P2".into()),
+            force: false,
+        })
+        .unwrap();
         let r = authed_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/remediation/trigger")
                     .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&ManualTriggerRequest {
-                            alert_name: "DiskSpaceFillingFast".into(),
-                            labels: BTreeMap::new(),
-                            severity: Some("P2".into()),
-                            force: false,
-                        })
-                        .unwrap(),
-                    ))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
@@ -750,27 +844,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_trigger_accepts_valid_token() {
-        // Auth is enabled and the header is present
-        // and matches. Expect 200 OK.
+    async fn manual_trigger_accepts_valid_signature() {
+        // Auth is enabled and the signed body is
+        // accepted. Expect 200 OK.
+        let body = serde_json::to_vec(&ManualTriggerRequest {
+            alert_name: "DiskSpaceFillingFast".into(),
+            labels: BTreeMap::new(),
+            severity: Some("P2".into()),
+            force: true,
+        })
+        .unwrap();
         let r = authed_app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/remediation/trigger")
-                    .header("content-type", "application/json")
-                    .header("x-webhook-token", "TEST_SECRET")
-                    .body(Body::from(
-                        serde_json::to_vec(&ManualTriggerRequest {
-                            alert_name: "DiskSpaceFillingFast".into(),
-                            labels: std::collections::BTreeMap::new(),
-                            severity: Some("P2".into()),
-                            force: true,
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(signed_request("POST", "/remediation/trigger", body))
             .await
             .unwrap();
         assert_eq!(r.status(), AxStatus::OK);

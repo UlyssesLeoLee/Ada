@@ -17,6 +17,25 @@ publish = false
 name = "ada_remediation"
 path = "src/lib.rs"
 
+# v0.7.1: production binary entry. Gated by the `bin`
+# feature so the lib + tests build without the binary's
+# env + signal machinery. `cargo build --features bin`
+# produces the standalone `ada-remediation` executable
+# consumed by `deploy/k8s/ada-remediation.yaml`.
+[[bin]]
+name = "ada-remediation"
+path = "src/main.rs"
+required-features = ["bin"]
+
+[features]
+# Default: lib only (no binary). Enable `bin` to build
+# the production executable. The `tests/remediation_e2e.rs`
+# file builds against the lib without the binary so the
+# CI fast path stays `cargo test --workspace` without
+# any feature flags.
+default = []
+bin = []
+
 # B2 lesson (mirrored from ada-telemetry): explicit [[test]] so
 # cargo test --workspace picks up tests/integration.rs even though
 # the [lib] block pins src/lib.rs.
@@ -35,7 +54,7 @@ tracing = "0.1"
 # HTTP server: axum 0.7 (same version as used by ada-telemetry trace
 # HTTP endpoint and ada-m13-api-gateway; we keep the dep graph homogeneous).
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process", "signal"] }
 
 # Time / id
 chrono = { version = "0.4", features = ["serde", "clock"] }
