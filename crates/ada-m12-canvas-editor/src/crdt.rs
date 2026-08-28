@@ -1716,6 +1716,62 @@ mod tests {
         assert!(!sv_b.is_empty());
     }
 
+    /// v0.7.1 compat: serde roundtrip. `ClientId` derives
+    /// `Serialize` + `Deserialize`; the JSON form must
+    /// preserve both `uuid` and `label` exactly so a
+    /// persistence layer (k8s sidecar, postgres, log
+    /// shipping) can round-trip a client id without loss.
+    #[test]
+    fn client_id_serde_roundtrip() {
+        let original =
+            ClientId::from_uuid(uuid::Uuid::from_u128(0xCAFE_BABE_DEAD_BEEF), "alice-laptop".into());
+        let json = serde_json::to_string(&original).expect("serialise ClientId");
+        let parsed: ClientId = serde_json::from_str(&json).expect("deserialise ClientId");
+        assert_eq!(original, parsed, "ClientId JSON roundtrip must preserve all fields");
+        assert_eq!(parsed.uuid, uuid::Uuid::from_u128(0xCAFE_BABE_DEAD_BEEF));
+        assert_eq!(parsed.label, "alice-laptop");
+    }
+
+    /// v0.7.1 compat: two replicas with the **same** explicit
+    /// `ClientId` must produce identical state-vector bytes
+    /// (yrs embeds the client id in the varint header). This
+    /// is the symmetry check for the previous test.
+    #[test]
+    fn client_id_same_uuid_yields_same_state_vector() {
+        let shared =
+            ClientId::from_uuid(uuid::Uuid::from_u128(0x1234_5678_9ABC_DEF0), "shared".into());
+        let mut node = positioned("shared", 0, 0);
+        node.id = NodeId(uuid::Uuid::new_v4());
+        let doc_a = Doc::with_client_id(shared.uuid.as_u128() as u64);
+        let doc_b = Doc::with_client_id(shared.uuid.as_u128() as u64);
+        insert_element(&doc_a, &node).expect("a insert");
+        insert_element(&doc_b, &node).expect("b insert");
+        let sv_a = encode_state_vector(&doc_a);
+        let sv_b = encode_state_vector(&doc_b);
+        assert_eq!(
+            sv_a, sv_b,
+            "same ClientId must produce identical state vectors"
+        );
+    }
+
+    /// v0.7.1 compat: ClientId `Display` impl is stable
+    /// (used in log lines / error contexts). Locking down
+    /// the format prevents log-spam from changing
+    /// accidentally.
+    #[test]
+    fn client_id_display_format_is_stable() {
+        let id = ClientId::new("test-client");
+        let s = format!("{id}");
+        // Format is `{label}({uuid})` where uuid is
+        // hyphenated lowercase hex.
+        assert!(s.starts_with("test-client("), "got: {s}");
+        assert!(s.ends_with(')'), "got: {s}");
+        // Inner is a 36-char hyphenated UUID (8-4-4-4-12).
+        let inner = &s["test-client(".len()..s.len() - 1];
+        assert_eq!(inner.len(), 36, "uuid part must be 36 chars, got: {inner:?}");
+        assert_eq!(inner.chars().filter(|c| *c == '-').count(), 4);
+    }
+
     /// Sanity: malformed update bytes produce a `BackendError`
     /// rather than a panic.
     #[test]
