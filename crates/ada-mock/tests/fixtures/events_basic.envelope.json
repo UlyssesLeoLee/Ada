@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "events_basic",
+  "events": [
+    {
+      "id": "ada.module.registered:1",
+      "topic": "ada.module.registered",
+      "payload": { "module": "ada-m01", "version": "0.1.0" },
+      "trace_id": null
+    },
+    {
+      "id": "ada.module.heartbeat:1",
+      "topic": "ada.module.heartbeat",
+      "payload": { "module": "ada-m01", "state": "healthy" },
+      "trace_id": "trace-abc"
+    },
+    {
+      "id": "ada.module.deregistered:1",
+      "topic": "ada.module.deregistered",
+      "payload": { "module": "ada-m01" },
+      "trace_id": null
+    }
+  ]
+}

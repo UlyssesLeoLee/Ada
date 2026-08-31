@@ -25,6 +25,10 @@ members = [
     "crates/ada-m14-module-registry",
     "crates/ada-m15-central-event-bus",
     "crates/ada-m16-cluster-coordinator",
+
+    # 独立测试脚手架 (m99 占位, 框架/示例性质, 不接入其他 crate 的 dev-dep).
+    # 命名取 m99 = 测试工具, 与 m01-m16 业务模块隔离.
+    "crates/ada-mock",
 ]
 
 # 単一 workspace version (D-09 採用)

@@ -346,6 +346,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ada-mock"
+version = "0.1.0"
+dependencies = [
+ "ada-core",
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "ada-remediation"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,58 @@
+[package]
+name = "ada-mock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Independent test scaffolding crate: in-memory mocks, golden fixtures, HTTP/OTLP capture, TDS templates. NOT wired into production crates — sample/standalone only."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_mock"
+path = "src/lib.rs"
+
+# Cargo 1.85+ lesson (mirrors ada-telemetry): explicit [[test]] so
+# `cargo test --workspace` discovers the integration target even when
+# [lib] has an explicit `path = ...`.
+[[test]]
+name = "sample_mock_usage"
+path = "tests/sample_mock_usage.rs"
+
+[features]
+default = []
+# `server` pulls in the TcpListener-based FakeOtlpServer module
+# and the `time` dep. Off by default so `cargo build` stays cheap
+# for consumers that only need pure-data helpers (mocks,
+# fixtures, builders).
+server = ["dep:time"]
+
+[dependencies]
+# In-memory primitives only — no tokio, no async runtime, no HTTP
+# client. Keeps the crate cheap to compile and forces sample
+# consumers to keep their mocks deterministic.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+parking_lot = "0.12"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+# `time` is only used by the `server` feature (FakeOtlpServer
+# payload builder stamps RFC3339 timestamps). Marked optional so
+# the default build path stays small. Cargo 1.85+ requires this
+# pattern instead of `[target.'cfg(feature=...)'.dependencies]`.
+time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+
+[dev-dependencies]
+# Only the workspace's `ada-core` types — the rest of the workspace
+# is intentionally NOT pulled in. This crate is a standalone
+# reference, not a dev-dep target.
+ada-core = { path = "../ada-core" }
+
+[lints]
+workspace = true
