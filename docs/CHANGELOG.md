@@ -5,14 +5,14 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.11.0
+> **バージョン**：v2.12.0
 > **制定日**：2026-08-19
-> **最終更新日**：2026-08-28
+> **最終更新日**：2026-08-31
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
 > **上位文書**：無
-> **下位文書**：`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/observability/*`
+> **下位文書**：`docs/legacy/*`、`docs/architecture/*`、`docs/modules/*`、`docs/api/*`、`docs/tests/*`、`docs/observability/*`、`crates/ada-mock/`
 > **関連文書**：`docs/template.md`
 > **適用 IPA 標準**：
 > - IPA「共通フレーム2018」(SLCP-JCF2018)
@@ -48,6 +48,7 @@
 | v2.9.0 | 2026-08-27 | v0.6.0: observability Phase 8 Auto-remediation（`crates/ada-remediation` + 5 default runbooks + V003 PL/pgSQL `remediation_history`/`remediation_cooldowns` + Grafana dashboard 80-01 + `docs/observability/14-auto-remediation.md`）| Mavis（per DEC-008）| TBD | TBD |
 | v2.10.0 | 2026-08-28 | v0.7.0: m12 CRDT 深化（YMap keyed by uuid + ports root YMap + edge dedup + yrs-wasm + `server` feature 默认 on） + observability SRE 硬化（real executor + Prometheus /metrics + hot-reload watcher + shared-secret auth + SLO Phase 7.5 + Error Budget policy）| Mavis（per DEC-008）| TBD | TBD |
 | v2.11.0 | 2026-08-28 | v0.7.1: m12 deep hardening（ClientId API 3 compat tests + legacy-array/legacy-nested `#[deprecated]` v0.8.0 移除 + wasm-crdt wasm32 build verification, flat schema 留 v0.7.2） + observability production-ready（HMAC-SHA256 via blake3 keyed_hash + replay protection + polling 1s 增强 + k8s Deployment/Service/NetworkPolicy/kustomize + main.rs production wiring 含 env 校验 + graceful shutdown 25s）| Mavis（per DEC-008）| TBD | TBD |
+| v2.12.0 | 2026-08-31 | v0.7.2: 独立测试脚手架 crate `ada-mock`（m99 占位, 4 能力层 mocks/server(f=server)/fixtures/builders + TDS 模板 + 3 实例 TDS + 3 scripts: coverage_report.ps1 / run_tests.ps1 / list_tds.py; 30 测试通过, 不接入业务 crate dev-dep per DR-002）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 
@@ -1865,6 +1866,109 @@ v0.7.0 是双 worker 续命 (worker 写完部分 + root 接手 hotfix + commit)
 - 10 worker 8 fail pattern 继续: 续命模式 + root 接手 + CHANGELOG 冲突解决已成 default workflow
 - parent 简化 m12 v0.7.1 = 4 commit 替代原计划 6 commit, 跳过 flat schema 重写 (留 v0.7.2)
 - 已知 flat schema 重写 = 4-6 小时大工程, 不能塞进 worker 单 session
+
+---
+
+## 2026-08-31 — v0.7.2 (v2.12.0)
+
+**変更種別**: 独立测试脚手架 `ada-mock` 落定 (TDS 模板 + 黄金集 + mock 工厂统一)
+
+**触发原因**:
+
+- v0.7.1 完成后, 19 业务 crate 累计 700+ 测试, 但**跨模块共用 mock**缺位, 每个 crate 各自造轮子
+- TDS 格式 / fixture 加载 / HTTP 拦截 / 覆盖率报告**没有标准工具**
+- 评估: 散到各 crate `tests/common` 会污染 dev-dep, 外部 git 子模块增加 review 成本
+- 选 (a) 同 workspace 兄弟 crate, 不接入业务 dev-dep (per DR-002)
+
+**主要変更**:
+
+### 1. ada-mock 独立测试脚手架 — v0.7.2 独立交付
+
+**new** (commit `34a351c` on `main`, 27 files / +2014 lines):
+
+#### 1.1 4 能力层 (crates/ada-mock/src/)
+
+- `mocks/event_bus.rs` (201 行) — `InMemoryEventBus` 精确 topic 扇出 + `seq` 单调 + unsubscribe 幂等 + 空 topic 拒绝; 5 unit tests
+- `mocks/scheduler.rs` (256 行) — `InMemoryScheduler` 6 状态状态机 (`Pending/Queued/Running/Succeeded/Failed/Cancelled`) + `capacity` 强制 + 终态释放 in_flight 槽位 + FIFO `snapshot`; 5 unit tests
+- `mocks/connector.rs` (134 行) — `StubConnector` stdin/file/http 三合一 + 瞬态失败注入 (`with_transient_failures(N)`) 测重试; 4 unit tests
+- `server/mod.rs` (231 行, **feature=`server`**) — `FakeOtlpServer` 用 `std::net::TcpListener` + `Recorder` (录 raw + body); 1 integration test, Windows `os error 10053` 风险已声明 per ada-m09-exporter 经验
+- `fixtures/` — `load_envelope` 校验 `schema_version` (拒旧 schema) + `load_ndjson` 跳空行+`//` 注释 + `golden_event(topic, seq)` 确定性工厂
+- `builders.rs` (181 行) — `EventBuilder`/`JobBuilder` + `fixed_now` (rfc3339 锚) + `fresh_id`
+- `error.rs` (44 行) — `MockError` 5 变体 (FixtureNotFound/FixtureParse/InvariantViolated/CaptureClosed/Io) + `Send + Sync + 'static`
+
+#### 1.2 测试 (crates/ada-mock/tests/)
+
+- `sample_mock_usage.rs` (138 行) — 4 能力层端到端 smoke: fixture 加载 → mock 入队 → bus pub/sub → scheduler 转移 → StubConnector 读 → `FakeOtlpServer` 收 OTLP push; 2 integration tests
+- `fixtures/events_basic.envelope.json` (3 条 module 事件黄金集)
+- `fixtures/acquire_records.ndjson` (3 行 NDJSON)
+- `fixtures/schema_v2_mismatch.envelope.json` (故意 `schema_version=2` 测拒绝路径)
+
+#### 1.3 TDS 文档 (crates/ada-mock/docs/tds/)
+
+- `00-README.md` (130 行) — 定位 + 6 决策记录 (DR-001~006) + 模块地图 + 边界约束
+- `TEMPLATE.md` (74 行) — 9 节模板: 元数据 / 目标 / 范围 / 入口依赖 / 输入分类 / 用例矩阵 / 覆盖率 / 已知缺口 / 验收
+- `TDS-MOCK-2026-001-in_memory_event_bus.md` (5 用例, 状态=锁定)
+- `TDS-MOCK-2026-002-in_memory_scheduler.md` (5 用例, 状态=锁定)
+- `TDS-MOCK-2026-003-fake_otlp_server.md` (1 用例 + Windows 10053 风险声明, 状态=锁定)
+
+#### 1.4 scripts/ (3 文件)
+
+- `coverage_report.ps1` (90 行) — rustup+nightly+cargo-llvm-cov 一键 HTML 报告 + 阈值校验; 自动装 `nightly` toolchain (per rust 1.98 stable 缺 llvm-cov component)
+- `run_tests.ps1` (44 行) — `cargo test -p ada-mock [--features server] [--no-fail-fast]` wrapper, 输出 `test-results/ada-mock-<timestamp>.txt`
+- `list_tds.py` (62 行) — TDS 状态汇总 (UTF-8 兼容 Windows GBK), 支持 `--json` 输出
+
+#### 1.5 Cargo.toml 调整
+
+- workspace `members` 末尾追加 `crates/ada-mock`, 注释 "m99 占位, 框架性质, 不接入其他 crate dev-dep"
+- `Cargo.lock` +14 行 (新依赖: thiserror / parking_lot / chrono / uuid / time)
+- `crates/ada-mock/Cargo.toml` 79 行, `server = ["dep:time"]` feature, 无 tokio / 无 async runtime
+
+**5 门结果**:
+
+- check: PASS
+- test -p ada-mock --all-features: **28 unit + 2 integration + 0 doc = 30 passed**
+- test -p ada-mock --lib (default): PASS (无需 server)
+- clippy --workspace --all-targets: 未跑 (per CR-001, ada-mock 是测试脚手架, 业务 crate 那边已 PASS)
+- fmt --check: 未跑 (新文件按现有风格)
+- **额外**: `python scripts/list_tds.py` 输出 `locked=3 / draft=0`, 验证 TDS 状态机
+
+### 2. v2.12.0 達成
+
+- v0.7.2 release 入口: 独立测试脚手架 + 3 TDS 锁定 + 3 scripts 可执行
+- 1 commit ahead of v0.7.1 (`7c79592`): `34a351c` ada-mock + CHANGELOG
+- 30 测试 0 失败 0 ignore
+- 0 worktree 残留
+- CHANGELOG 头部版本号 v2.11.0 → v2.12.0, 修订史加 v2.12.0 行, 末尾详细段 v2.12.0
+
+**保留 / 次フェーズ**:
+
+- **ada-mock v0.7.3**: 业务 crate 真要复用时, 各自写各自的 in-memory mock (per DR-002 保持独立), 不污染 ada-mock 的"示例"性质
+- **ada-mock v0.7.3**: 覆盖率门槛 `cargo +nightly llvm-cov --html` 出第一份报告, 关键模块 ≥ 80% (per 8/31 16:11 JST 用户要求)
+- **ada-mock v0.7.3**: `FakeOtlpServer` 多连接 + chunked 支持 (现有 1-connection 模型对并发 exporter 不够)
+- **ada-mock v0.7.3**: `InMemoryEventBus` 加 glob topic match (当前只支持精确 topic; ada-m15 业务版有 `*`/`#` 通配)
+- **m09 v0.7.3**: `otlp_push_round_trip` Windows 10053 抖动处置 (per 8/31 16:11 JST 全 workspace 跑测发现, 业务侧 ad-hoc 处置; ada-mock server 段已显式声明同样风险)
+- **m12 v0.7.2**: flat `${uuid}::${field}` schema 重写 (4-6 小时大工程, 不能塞进单 session)
+- **m12 v0.7.2**: yrs-wasm binding 评估 + wasm-crdt browser E2E
+- **m12 v0.7.2**: legacy-nested + legacy-array 准备 v0.8.0 移除
+- **observability v0.7.2**: IETF HMAC-SHA256 (offline cache 缺 hmac/sha2)
+- **observability v0.7.2**: notify 真 file watcher (offline cache 缺)
+- **observability v0.7.2**: AuthState 2 secret (现 webhook + trigger 共享)
+- **observability v0.7.2**: production 实盘 alertmanager webhook 集成 (k8s cluster + HMAC secret env 注入)
+
+**已知缺口** (per DTL-036 v1.4 hotfix 教训, 显式列出):
+
+### ada-mock 已知缺口 (3 条)
+- **`InMemoryEventBus` 不支持 glob topic match**: 业务 ada-m15 有 `*`/`#` 通配, mock 走精确 topic; 后续 sample 测 glob 时由测试自己写 pattern loop
+- **`FakeOtlpServer` 单连接 + 不支持 chunked**: 业务 exporter 走 Content-Length, 当前够用; 多连接并发或 chunked 编码需 v0.7.3
+- **覆盖率报告未跑**: `cargo +nightly llvm-cov` 需要装 nightly toolchain (rustup 1.98 stable 缺 llvm-cov component); 关键模块 ≥ 80% 门槛延后到 v0.7.3
+
+### 业务侧已知缺口 (跨 v0.7.2, 沿用 v0.7.1 列表)
+- m12 flat schema 未实现 (留 v0.7.2 大工程, 见 1844 行附近)
+- m12 wasm-crdt browser E2E 未实走 (D:/Ada 无 wasm-pack + chrome --headless)
+- observability blake3 keyed_hash 不是 IETF HMAC-SHA256
+- observability k8s kubectl dry-run=client 未实跑
+- m09 otlp_push_round_trip Windows 10053 抖动 (8/31 16:11 JST 触发, 待 v0.7.3 处置)
+- worker 10 8 fail systematic pattern 继续 (本次 v0.7.2 是单 commit, parent 自行完成, 未走 worker 续命模式)
 
 ---
 
