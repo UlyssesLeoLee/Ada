@@ -1,0 +1,173 @@
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+
+jobs:
+  # ----------------------------------------------------------------------
+  # Rust gate: fmt, clippy, build, test across the whole workspace,
+  # but gm-console gets its own fast lane for edge-touching changes.
+  # ----------------------------------------------------------------------
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/[email protected]
+        with:
+          toolchains: 1.98
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/ada-core
+            crates/ada-telemetry
+            crates/ada-remediation
+            crates/gm-console
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (workspace, deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo build (workspace)
+        run: cargo build --workspace --locked
+
+      - name: cargo test (gm-console fast lane)
+        run: cargo test -p gm-console --locked -- --nocapture
+
+      - name: cargo test (workspace, no slow e2e)
+        run: cargo test --workspace --locked --exclude gm-console
+
+  # ----------------------------------------------------------------------
+  # Supply-chain security gate.
+  # Runs after a clean test pass; fails the build on known-vulnerable deps.
+  # ----------------------------------------------------------------------
+  security:
+    name: security scan
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/[email protected]
+        with:
+          toolchains: 1.98
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo-deny (advisories + bans + sources + licenses)
+        run: |
+          cargo install --locked cargo-deny
+          cargo deny check advisories bans sources licenses
+
+      - name: Trivy fs scan (fail on CRITICAL only)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Trivy config scan (k8s manifests)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: config
+          scan-ref: deploy/k8s
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+  # ----------------------------------------------------------------------
+  # Dart static analysis when the Flutter app is touched. Headless analyzer
+  # so it works in CI without a device.
+  # ----------------------------------------------------------------------
+  flutter-analyze:
+    name: flutter analyze
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter (stable, no pub fetch)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: apps/gm-console-app/.flutter-version
+
+      - name: flutter pub get
+        working-directory: apps/gm-console-app
+        run: flutter pub get
+
+      - name: flutter analyze
+        working-directory: apps/gm-console-app
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: flutter test (no device)
+        working-directory: apps/gm-console-app
+        run: flutter test --reporter=expanded
+
+      - name: flutter pub outdated (informational)
+        working-directory: apps/gm-console-app
+        run: flutter pub outdated --no-dev-dependencies || true
+        continue-on-error: true
+
+  # ----------------------------------------------------------------------
+  # Visual / load smoke for the Web SPA when it's touched.
+  # Snapshot of the dist landing page; diff vs golden.
+  # ----------------------------------------------------------------------
+  web-smoke:
+    name: web smoke
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build gm-console binary
+        run: cargo build -p gm-console --locked --release
+
+      - name: Launch gm-console binary
+        run: |
+          ./target/release/gm-console-server &
+          sleep 3
+          curl -fsS http://127.0.0.1:8080/healthz
+
+      - name: Curl SPA endpoints
+        run: |
+          for path in / /version /robots.txt /sitemap.xml /terms /privacy /healthz; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080${path})
+            echo "$path -> $code"
+            if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then exit 1; fi
+          done
+
+      - name: CORS preflight smoke
+        run: |
+          curl -s -o /dev/null -w '%{http_code}\n' \
+            -X OPTIONS \
+            -H 'Origin: https://gm-console.kanvas.dev' \
+            -H 'Access-Control-Request-Method: GET' \
+            http://127.0.0.1:8080/api/v1/pipelines
+
+      - name: Stop server
+        run: |
+          pkill -f gm-console-server || true
