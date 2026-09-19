@@ -111,8 +111,10 @@ impl HotReload {
             .name("ada-rbac-casbin::hot_reload".into())
             .spawn(move || {
                 while let Ok(res) = rx.recv() {
+                    eprintln!("[hot_reload] raw event: {res:?}");
                     match res {
                         Ok(ev) if is_policy_event(&ev, &policy_for_filter) => {
+                            eprintln!("[hot_reload] policy event matched; reloading");
                             // Debounce by sleeping briefly; editors that
                             // emit multiple events per save will
                             // collapse into a single reload.
@@ -124,29 +126,23 @@ impl HotReload {
                             };
                             match Enforcer::from_policy_set(&set) {
                                 Ok(next) => {
+                                    eprintln!("[hot_reload] reload_now ok");
                                     let mut w = cell.write();
                                     *w = next;
                                 }
                                 Err(e) => {
-                                    tracing::warn!(
-                                        "ada-rbac-casbin: reload_now failed: {e}"
-                                    );
+                                    eprintln!("[hot_reload] reload_now failed: {e}");
                                 }
                             }
                         }
                         Ok(ev) => {
-                            // Log non-policy events at debug level so the
-                            // CI logs can be inspected if a watcher stops
-                            // firing.
-                            tracing::debug!(
-                                "ada-rbac-casbin: ignored event: {:?} paths={:?}",
+                            eprintln!(
+                                "[hot_reload] ignored: {:?} paths={:?}",
                                 ev.kind, ev.paths
                             );
                         }
                         Err(e) => {
-                            tracing::warn!(
-                                "ada-rbac-casbin: watcher stream error: {e}"
-                            );
+                            eprintln!("[hot_reload] stream error: {e}");
                         }
                     }
                 }
