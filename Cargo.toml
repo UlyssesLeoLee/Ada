@@ -31,6 +31,11 @@ members = [
     # business module. Reverse-proxies all /api/* to ada-m13-api-gateway.
     "crates/gm-console",
 
+    # v0.4.0 商业化深层 (auth / billing / RBAC 包装)
+    "crates/ada-identity",
+    "crates/ada-billing",
+    "crates/ada-rbac-casbin",
+
     # 独立测试脚手架 (m99 占位, 框架/示例性质, 不接入其他 crate 的 dev-dep).
     # 命名取 m99 = 测试工具, 与 m01-m16 业务模块隔离.
     "crates/ada-mock",

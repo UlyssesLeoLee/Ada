@@ -1,0 +1,116 @@
+[package]
+name = "ada-billing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "ada-billing: Stripe Billing integration (customers, subscriptions, webhooks, portal, entitlement)."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_billing"
+path = "src/lib.rs"
+
+# Stripe webhook signature verification: pulls `hmac` + `sha2` from
+# `stripe-rust`'s `webhook-events` feature. The `webhooks` umbrella
+# feature also turns on `webhook-endpoints`, which we don't need at
+# the surface but is required transitively for event parsing.
+
+[[test]]
+name = "customer_smoke"
+path = "tests/customer_smoke.rs"
+
+[[test]]
+name = "subscription_smoke"
+path = "tests/subscription_smoke.rs"
+
+[[test]]
+name = "webhook_smoke"
+path = "tests/webhook_smoke.rs"
+
+[[test]]
+name = "portal_smoke"
+path = "tests/portal_smoke.rs"
+
+[[test]]
+name = "entitlement_smoke"
+path = "tests/entitlement_smoke.rs"
+
+[dependencies]
+ada-core = { path = "../ada-core" }
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab" }
+
+# Stripe webhook signature verification: in-house implementation
+# (see src/webhook.rs). We avoid pulling in `stripe-rust` 0.12.x
+# because its transitive dep `crypto-mac 0.6` is yanked at the
+# registry level. Production wiring can swap to `async-stripe`
+# 0.x once its dep tree stabilises.
+
+# HTTP client for outbound calls to the Stripe REST API
+# (customer.create, subscription.retrieve, billing_portal.sessions.create).
+# `rustls-tls` avoids pulling in OpenSSL.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Axum for the route handlers (POST /webhooks/stripe, GET /api/v1/billing/portal).
+axum = "0.7"
+
+# Async runtime / channels.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+# In-process registries + rate-limit / cache state.
+parking_lot = "0.12"
+
+# Serde + JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors.
+thiserror = "1"
+
+# Tracing — used by the webhook handler's diagnostic logs (no env or
+# secret values are ever logged).
+tracing = "0.1"
+
+# HMAC + hex helpers used for the Stripe-Signature parse in the
+# webhook handler. We implement the parser in-tree rather than
+# relying solely on `stripe-rust::Webhook::construct_event` so the
+# handler can record audit entries keyed by `event.id` before
+# attempting to parse the typed payload.
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+subtle = "2"
+
+# Time helpers for the 5-minute tolerance window in the
+# Stripe-Signature `t=` field.
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# Identifier types (UUID newtypes — ada-core already provides them).
+uuid = { version = "1", features = ["v4", "serde"] }
+
+async-trait = "0.1"
+
+# §"What ada-billing is NOT in the request path for unauthenticated
+# requests — it sits behind api-gateway" (auth-billing-arch.md §5).
+# We therefore do NOT depend on ada-m13-api-gateway; the gateway
+# calls into us.
+
+[dev-dependencies]
+# Mocked Stripe HTTP endpoint (used by all five smoke tests).
+wiremock = "0.6"
+
+# Workspace-wide test runtime extras.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tower = { version = "0.5", features = ["util"] }
+
+# Body extraction for the webhook integration test.
+http-body-util = "0.1"
+
+[lints]
+workspace = true

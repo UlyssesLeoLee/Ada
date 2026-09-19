@@ -1,0 +1,58 @@
+[package]
+name = "ada-rbac-casbin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "RBAC + ABAC wrapper around ada-m11-rbac-collab. v0.4.0 ships a hand-rolled enforcer; casbin 2.x wiring is v0.5.0 work (see README)."
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+publish = false
+
+[lib]
+name = "ada_rbac_casbin"
+path = "src/lib.rs"
+
+[[test]]
+name = "import_smoke"
+path = "tests/import_smoke.rs"
+
+[[test]]
+name = "enforce_smoke"
+path = "tests/enforce_smoke.rs"
+
+[[test]]
+name = "abac_smoke"
+path = "tests/abac_smoke.rs"
+
+[[test]]
+name = "hot_reload_smoke"
+path = "tests/hot_reload_smoke.rs"
+
+[dependencies]
+ada-core = { path = "../ada-core" }
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab" }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# casbin 2.x and notify 6.x are deferred to v0.5.0 (their API surface
+# for async + rhai default engine does not match the v0.4.0
+# skeleton contract). The v0.4.0 skeleton hand-rolls RBAC + ABAC
+# evaluation; v0.5.0 wires the real casbin Enforcer with the
+# adapter pattern.
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
