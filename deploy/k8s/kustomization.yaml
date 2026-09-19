@@ -22,11 +22,16 @@ namespace: observability
 
 resources:
   - ada-remediation.yaml
+  - gm-console.yaml
 
 labels:
   - includeSelectors: true
     pairs:
-      app.kubernetes.io/name: ada-remediation
-      app.kubernetes.io/version: v0.7.1
+      app.kubernetes.io/name: ada-platform
+      app.kubernetes.io/version: v0.1.0
       app.kubernetes.io/managed-by: kustomize
-      app.kubernetes.io/part-of: ada-observability
+      app.kubernetes.io/part-of: ada-platform
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/component: remediator
+      app.kubernetes.io/component: gm-console

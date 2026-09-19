@@ -1,0 +1,60 @@
+---
+# gm-console — commercial Web operations console
+# Reference deployment under deploy/k8s/. Worker-A owns final ingress tuning;
+# Mavis scaffold sticks to user's 2026-09-01 hard rule: nginx → envoy, envoy
+# *as a separate Deployment* (NOT istio sidecar).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gm-console
+  labels:
+    app: gm-console
+    tier: edge
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gm-console
+  template:
+    metadata:
+      labels:
+        app: gm-console
+    spec:
+      containers:
+        - name: gm-console
+          image: ghcr.io/ada-project/gm-console:0.1.0
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: GM_CONSOLE_BIND
+              value: "0.0.0.0:8080"
+            - name: GM_CONSOLE_UPSTREAM
+              value: "http://ada-api-gateway:8080"
+            - name: RUST_LOG
+              value: "info"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gm-console
+spec:
+  type: ClusterIP
+  selector:
+    app: gm-console
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

@@ -26,6 +26,11 @@ members = [
     "crates/ada-m15-central-event-bus",
     "crates/ada-m16-cluster-coordinator",
 
+    # gm-console (commercial Web operations console) — placed at top level
+    # outside m01-m16 numbering, since it is a user-facing surface, not a backend
+    # business module. Reverse-proxies all /api/* to ada-m13-api-gateway.
+    "crates/gm-console",
+
     # 独立测试脚手架 (m99 占位, 框架/示例性质, 不接入其他 crate 的 dev-dep).
     # 命名取 m99 = 测试工具, 与 m01-m16 业务模块隔离.
     "crates/ada-mock",
