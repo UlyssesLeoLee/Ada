@@ -26,6 +26,38 @@ desktop.ini
 **/*.key
 **/id_rsa*
 
+# Mobile signing material (NEVER commit; CI uses GitHub Actions secrets + OIDC)
+*.p12
+*.cer
+*.mobileprovision
+*.jks
+*.keystore
+**/key.properties
+**/key.json
+**/GoogleService-Info.plist
+**/google-services.json
+**/upload-key.jks
+**/upload-key.keystore
+
+# iOS / macOS build artifacts
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Runner.xcworkspace/xcuserdata/
+.DS_Store
+*.ipa
+*.app.zip
+
+# Android build artifacts
+android/.gradle/
+android/local.properties
+android/app/.cxx/
+android/build/
+android/.idea/
+*.apk
+*.aab
+*.ap_
+
 # ビルド成果物
 /dist/
 /build/

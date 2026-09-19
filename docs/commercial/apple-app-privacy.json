@@ -1,0 +1,52 @@
+{
+  "$schema": "https://developer.apple.com/app-store/app-privacy-details/",
+  "version_policy": "v0.3.0 — gm-console Mobile (Flutter) iOS bundle dev.kanvas.gmconsole",
+  "privacy_choices": [
+    {
+      "data_type": "Email Address",
+      "used_to_track": false,
+      "linked_to_user": true,
+      "purposes": ["App Functionality"],
+      "collection_purposes": [
+        {
+          "purpose": "App Functionality",
+          "type": "Account creation / sign-in"
+        }
+      ]
+    },
+    {
+      "data_type": "Display Name",
+      "used_to_track": false,
+      "linked_to_user": true,
+      "purposes": ["App Functionality"]
+    },
+    {
+      "data_type": "Product Interaction",
+      "used_to_track": false,
+      "linked_to_user": true,
+      "purposes": ["App Functionality", "Analytics"],
+      "notes": "Audit events for pipeline start/retry/acknowledge are recorded and surfaced under /audit. Analytics is opt-out."
+    },
+    {
+      "data_type": "Crash Data",
+      "used_to_track": false,
+      "linked_to_user": false,
+      "purposes": ["Analytics"],
+      "notes": "Opt-out available in self-hosted deployments. Managed tier uses a SOC2-Type-II sub-processor."
+    },
+    {
+      "data_type": "Performance Diagnostics",
+      "used_to_track": false,
+      "linked_to_user": false,
+      "purposes": ["Analytics"]
+    },
+    {
+      "data_type": "Other Diagnostic Data",
+      "used_to_track": false,
+      "linked_to_user": false,
+      "purposes": ["Analytics"]
+    }
+  ],
+  "developer_policy_url": "https://ada.kanvas.dev/privacy",
+  "last_reviewed": "2026-09-19"
+}

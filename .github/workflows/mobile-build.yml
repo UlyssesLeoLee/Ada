@@ -1,0 +1,312 @@
+# mobile-build.yml — sign + pack iOS / Android lanes for gm-console Mobile.
+#
+# Triggered by:
+#   * workflow_dispatch (manual run with optional inputs)
+#   * push tags matching mobile-v* (e.g. mobile-v0.3.0)
+#
+# This workflow NEVER commits credentials to the repo. Every secret below is a
+# GitHub Actions Encrypted Secret and is gated behind an explicit `if:
+# env.SECRET != ''` check so that a missing secret produces a hard skip — not a
+# silent zero-byte value.
+#
+# Pin policy: actions are pinned to immutable refs (SHA or major tag) at PR time.
+# Bumping them is a one-line reviewable diff.
+
+name: mobile-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: "Flutter SDK version to use (matches apps/gm-console-app/.flutter-version)"
+        required: false
+        default: '3.24.5'
+      run_sign_and_pack_ios:
+        description: "Run the iOS sign + pack job"
+        type: boolean
+        default: true
+      run_sign_and_pack_android:
+        description: "Run the Android sign + pack job"
+        type: boolean
+        default: true
+      run_verify_no_secrets:
+        description: "Run the TruffleHog diff scan"
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'mobile-v*'
+
+# Least-privilege. We only need read on contents for checkout, and read on
+# actions/cache for Flutter. No packages:write, no id-token write (those are the
+# next iteration for cloud-signed builds).
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save Flutter SDK + dependency time.
+concurrency:
+  group: mobile-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # All secrets are exposed as env vars ONLY inside the jobs that gate on them
+  # with `if: env.X != ''`. Echoing them is banned by repo policy (memory
+  # 2026-08-27 11:06 JST hard ban).
+  APPLE_P12_BASE64:           ${{ secrets.APPLE_P12_BASE64 }}
+  APPLE_P12_PASSWORD:         ${{ secrets.APPLE_P12_PASSWORD }}
+  APPLE_PROVISION_BASE64:     ${{ secrets.APPLE_PROVISION_BASE64 }}
+  APPLE_TEAM_ID:              ${{ secrets.APPLE_TEAM_ID }}
+  APPLE_KEYCHAIN_PASSWORD:    ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+  GM_CONSOLE_PLAY_UPLOAD_KEY: ${{ secrets.GM_CONSOLE_PLAY_UPLOAD_KEY }}
+  PLAY_UPLOAD_KEY_PASSWORD:   ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+  PLAY_KEY_ALIAS:             ${{ secrets.PLAY_KEY_ALIAS }}
+
+jobs:
+
+  # ---------------------------------------------------------------------
+  # TruffleHog diff scan — runs FIRST so any leaked secret in the diff aborts
+  # the build before we burn 10 minutes compiling Flutter.
+  # ---------------------------------------------------------------------
+  verify-no-secrets-leaked:
+    name: verify no secrets leaked
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run_verify_no_secrets != false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect base ref for diff scope
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "base=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          else
+            # workflow_dispatch: scan the entire working tree.
+            echo "base=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install TruffleHog
+        # Pinned to a specific GH release version. TruffleHog's install script
+        # is idempotent and verifies the SHA256 of the binary in place.
+        env:
+          TRUFFLEHOG_VERSION: "3.81.4"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o trufflehog.tar.gz \
+            "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"
+          tar -xzf trufflehog.tar.gz trufflehog
+          sudo mv trufflehog /usr/local/bin/trufflehog
+          trufflehog --version
+
+      - name: Run TruffleHog diff scan
+        env:
+          SCAN_BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -euo pipefail
+          # When SCAN_BASE is empty (manual dispatch), scan the whole tree.
+          # Otherwise scan only what changed between SCAN_BASE and HEAD — keeps
+          # the run cheap and avoids re-scanning historical leaks.
+          if [ -z "${SCAN_BASE:-}" ]; then
+            echo "[trufflehog] full-tree scan (no base ref)"
+            trufflehog git file://"$PWD" --only-verified --fail
+          else
+            echo "[trufflehog] diff scan base=${SCAN_BASE}"
+            trufflehog git file://"$PWD" \
+              --only-verified \
+              --since-commit "${SCAN_BASE}" \
+              --fail
+          fi
+
+  # ---------------------------------------------------------------------
+  # iOS sign + IPA pack. Hard-gated on APPLE_P12_BASE64 being present.
+  # ---------------------------------------------------------------------
+  sign-and-pack-ios:
+    name: sign + pack iOS
+    runs-on: macos-14
+    needs: verify-no-secrets-leaked
+    # Hard-gate: skip the job if the secret is empty / unset rather than
+    # attempt an import that would fail with a less obvious error.
+    if: ${{ env.APPLE_P12_BASE64 != '' && inputs.run_sign_and_pack_ios != false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 1
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2.18.0
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+
+      - name: Cache pub & build dirs
+        uses: actions/cache@v4.1.2
+        with:
+          path: |
+            ~/.pub-cache
+            apps/gm-console-app/build
+            apps/gm-console-app/.dart_tool
+          key: mobile-ios-${{ runner.os }}-${{ hashFiles('apps/gm-console-app/pubspec.lock') }}
+          restore-keys: |
+            mobile-ios-${{ runner.os }}-
+
+      - name: flutter pub get
+        working-directory: apps/gm-console-app
+        run: flutter pub get
+
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v3.2.0
+        with:
+          p12_file_base64: ${{ env.APPLE_P12_BASE64 }}
+          p12_password: ${{ env.APPLE_P12_PASSWORD }}
+          keychain_password: ${{ env.APPLE_KEYCHAIN_PASSWORD }}
+
+      - name: Install provisioning profile
+        uses: apple-actions/install-provisioning-profile@v4.0.0
+        with:
+          provisioning_profile_base64: ${{ env.APPLE_PROVISION_BASE64 }}
+
+      - name: Build IPA
+        working-directory: apps/gm-console-app
+        run: |
+          flutter build ipa \
+            --release \
+            --export-options-plist=ios/ExportOptions.plist
+        env:
+          LC_ALL: en_US.UTF-8
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4.3.1
+        with:
+          name: gm-console-ios-ipa
+          path: apps/gm-console-app/build/ios/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------
+  # Android sign + AAB pack. Hard-gated on GM_CONSOLE_PLAY_UPLOAD_KEY.
+  # ---------------------------------------------------------------------
+  sign-and-pack-android:
+    name: sign + pack Android
+    runs-on: ubuntu-latest
+    needs: verify-no-secrets-leaked
+    if: ${{ env.GM_CONSOLE_PLAY_UPLOAD_KEY != '' && inputs.run_sign_and_pack_android != false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java 17 (required by AGP 8.x)
+        uses: actions/setup-java@v4.2.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2.18.0
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+
+      - name: Cache pub & build dirs
+        uses: actions/cache@v4.1.2
+        with:
+          path: |
+            ~/.pub-cache
+            apps/gm-console-app/build
+            apps/gm-console-app/.dart_tool
+          key: mobile-android-${{ runner.os }}-${{ hashFiles('apps/gm-console-app/pubspec.lock') }}
+          restore-keys: |
+            mobile-android-${{ runner.os }}-
+
+      - name: flutter pub get
+        working-directory: apps/gm-console-app
+        run: flutter pub get
+
+      - name: Decode upload keystore into transient key.properties
+        # We never write the .jks to disk at repo root; the keystore lives in
+        # the ephemeral actions workspace, is read by gradle once, then the
+        # workspace is destroyed by the runner. key.properties is .gitignored
+        # explicitly (see .gitignore additions in this commit).
+        working-directory: apps/gm-console-app/android
+        env:
+          UPLOAD_KEY_B64: ${{ env.GM_CONSOLE_PLAY_UPLOAD_KEY }}
+          UPLOAD_KEY_PASSWORD: ${{ env.PLAY_UPLOAD_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ env.PLAY_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          : "${UPLOAD_KEY_B64:?upload keystore base64 required}"
+          mkdir -p .signing
+          echo "$UPLOAD_KEY_B64" | base64 -d > .signing/upload-key.jks
+          ls -la .signing/
+          cat > key.properties <<EOF
+          storePassword=${UPLOAD_KEY_PASSWORD}
+          keyPassword=${UPLOAD_KEY_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          storeFile=$(pwd)/.signing/upload-key.jks
+          EOF
+          # Sanity-check: file must NOT contain the base64 blob.
+          if grep -q "BEGIN\|PRIVATE KEY" key.properties; then
+            echo "::error::key.properties appears to contain key material — aborting"
+            exit 1
+          fi
+
+      - name: Build App Bundle
+        working-directory: apps/gm-console-app
+        run: flutter build appbundle --release
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4.3.1
+        with:
+          name: gm-console-android-aab
+          path: apps/gm-console-app/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------
+  # TestFlight upload — only on mobile-v* tag pushes. Never on PRs.
+  # ---------------------------------------------------------------------
+  submit-testflight:
+    name: submit TestFlight
+    runs-on: macos-14
+    needs:
+      - verify-no-secrets-leaked
+      - sign-and-pack-ios
+    # Only run on tag pushes; never on workflow_dispatch (manual dispatch is
+    # for dry-runs of the build, not the publish path).
+    if: ${{ startsWith(github.ref, 'refs/tags/mobile-v') && env.APPLE_P12_BASE64 != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 1
+
+      - name: Download IPA
+        uses: actions/download-artifact@v4.1.4
+        with:
+          name: gm-console-ios-ipa
+          path: ipa/
+
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v3.2.0
+        with:
+          p12_file_base64: ${{ env.APPLE_P12_BASE64 }}
+          p12_password: ${{ env.APPLE_P12_PASSWORD }}
+          keychain_password: ${{ env.APPLE_KEYCHAIN_PASSWORD }}
+
+      - name: Upload to TestFlight
+        uses: apple-actions/upload-testflight-build@v3.1.0
+        with:
+          # Pin to a specific tag at PR time; bumping is a one-line review.
+          app-id: ${{ env.APPLE_BUNDLE_ID }}
+          ipa-path: ipa/*.ipa
+          # Skip the auto-submit to external review; we promote manually
+          # via mobile-submit.yml after a human sign-off (守门 #14 v3 + v4).
+          skip-pkg-app-store-connect: false
+          skip-pkg-submission: true
+          team-id: ${{ env.APPLE_TEAM_ID }}

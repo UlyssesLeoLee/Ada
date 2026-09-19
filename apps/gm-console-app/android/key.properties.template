@@ -1,0 +1,40 @@
+# key.properties.template — copy this file to `key.properties` and fill in the
+# values, BUT ONLY FOR LOCAL DEVELOPMENT. CI runners NEVER read this file;
+# they receive the same fields via GitHub Actions secrets and write them to a
+# transient `key.properties` inside the ephemeral workspace (see
+# .github/workflows/mobile-build.yml → sign-and-pack-android).
+#
+# This template is the one place where the field names are documented. The
+# production secret values live at:
+#   https://vault.kanvas.dev  (1Password — placeholder URL until the team
+#   onboards the real Kanvas vault; do NOT commit any non-placeholder URL).
+#
+# FILE LOCATION (after copying): apps/gm-console-app/android/key.properties
+#
+# SECURITY POSTURE:
+#   * key.properties IS .gitignored at the repository root via the entries
+#     added in this commit (see .gitignore delta). Even with this template,
+#     git status must NEVER show a real key.properties.
+#   * NEVER paste a real keystore password here. Use 1Password references:
+#     "1Password item: Ada Project / gm-console / Play Upload Keystore".
+#   * The .jks / .keystore itself goes under android/app/upload-key.jks (also
+#     .gitignored) and is excluded from Play App Signing upload — Play
+#     generates and holds the actual app signing key.
+
+# Password for the upload keystore. NOT the app signing key (Play manages
+# that one via Play App Signing).
+storePassword=<paste from 1Password here>
+
+# Password for the key alias below. Almost always the same as storePassword
+# in our setup, but the fields are separate so Google Play's tooling can
+# prompt for them independently.
+keyPassword=<paste from 1Password here>
+
+# Alias of the key inside the keystore. The default we use at v0.3.0 is
+# `upload`, but check the 1Password item — rotation produces new aliases.
+keyAlias=upload
+
+# Path to the keystore relative to the android/ directory. CI writes the
+# decoded .jks to .signing/upload-key.jks (see mobile-build.yml). For local
+# dev, the canonical path is android/app/upload-key.jks.
+storeFile=../app/upload-key.jks

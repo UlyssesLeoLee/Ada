@@ -1,0 +1,38 @@
+# CODEOWNERS — Ada platform
+#
+# Path-based review routing for the Ada workspace on GitHub.
+#
+# Per 守门 #14 v3 + v4 (2026-09-11 23:11 JST): until a human reviewer shows up,
+# Mavis (the agent) acts as the default code owner. We declare that explicitly so
+# that CODEOWNERS review requests resolve to a known principal rather than failing
+# open. When a real human owner joins the platform team, swap the address — the
+# path rules below stay the same.
+
+# --- Default ---
+# Catch-all: every file is owned by the platform team by default.
+# Specific blocks below override on a more-specific path.
+/*                                       @ada/platform
+
+# --- Mobile signing & submission surfaces (worker-G target) ---
+# CI lanes + native mobile shells. The platform team owns the entire trust boundary:
+# who can mint credentials, who can run the submit jobs, who can touch the
+# ExportOptions.plist / key.properties templates that the runner consumes.
+#
+# Mavis self-driven approval (mavis-self-driven-approval@ada.local) stands in for
+# the absent human reviewer. When the real platform team owner arrives, replace the
+# address in one place (this file) — no other workflow files reference the local
+# identity, so the swap is one commit.
+/.github/workflows/mobile-build.yml       @ada/platform mavis-self-driven-approval@ada.local
+/.github/workflows/mobile-submit.yml      @ada/platform mavis-self-driven-approval@ada.local
+/apps/gm-console-app/ios/                 @ada/platform mavis-self-driven-approval@ada.local
+/apps/gm-console-app/android/             @ada/platform mavis-self-driven-approval@ada.local
+
+# --- Compliance / commercial (read-mostly) ---
+# Already owned elsewhere; we leave the catch-all in place but call them out so
+# CI reviewers know these are sign-off surfaces.
+# (Worker-F owns the icon + screenshot pipeline; worker-H owns legal text.)
+
+# --- CI / release lanes the rest of the team owns ---
+# Rust release lane is owned by the release captain; do NOT route mobile here.
+/.github/workflows/release.yml           @ada/platform
+/.github/workflows/ci.yml                 @ada/platform

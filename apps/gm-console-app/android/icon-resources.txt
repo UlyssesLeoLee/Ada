@@ -1,0 +1,55 @@
+# Android adaptive icon resource definitions
+# -------------------------------------------
+# These resource XMLs land in apps/gm-console-app/android/app/src/main/res/.
+# After `flutter create --platforms=android` the directories exist; CI writes
+# these files into them and they get bundled.
+
+# 1. mipmap-anydpi-v26/ic_launcher.xml  (adaptive launcher entry)
+#    Path: app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>
+
+# 2. mipmap-anydpi-v26/ic_launcher_round.xml  (round variant)
+#    Path: app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>
+
+# 3. values/ic_launcher_background.xml (color resource so the system can
+#    render the adaptive background when no bitmap is supplied). The CI is
+#    allowed to overwrite with a bitmap; presence of the bitmap means the
+#    reference below resolves at runtime).
+#    Path: app/src/main/res/values/colors_launcher.xml
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#1E88E5</color>
+</resources>
+
+# 4. Manifest entry  (informational; current AndroidManifest.xml from
+#    `flutter create` already references @mipmap/ic_launcher and
+#    @mipmap/ic_launcher_round — no edit required.)
+#
+#    <application
+#        android:icon="@mipmap/ic_launcher"
+#        android:roundIcon="@mipmap/ic_launcher_round"
+#        ... >
+
+# 5. PNG density slots (per Android-Material spec)
+#
+#    Density     Bitmap size    Path
+#    mdpi        48x48          mipmap-mdpi/ic_launcher.png
+#    hdpi        72x72          mipmap-hdpi/ic_launcher.png
+#    xhdpi       96x96          mipmap-xhdpi/ic_launcher.png
+#    xxhdpi      144x144        mipmap-xxhdpi/ic_launcher.png
+#    xxxhdpi     192x192        mipmap-xxxhdpi/ic_launcher.png
+#
+#    Adaptive PNGs (used by mipmap-anydpi-v26 above):
+#      foreground: 108x108        mipmap-anydpi-v26/ic_launcher_foreground.png
+#      background: 432x432 solid  mipmap-anydpi-v26/ic_launcher_background.png
+#
+#    CI produces all these via apps/gm-console-app/brand/icon-gen.js

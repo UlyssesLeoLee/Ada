@@ -204,3 +204,56 @@ jobs:
           name: web-screenshots
           path: apps/gm-console-web/dist/screenshots
           retention-days: 14
+
+  # ----------------------------------------------------------------------
+  # Mobile assets: regenerate app icons from the SVG seed.
+  # Only runs when the SVG seed or pubspec changes; off-by-default otherwise.
+  # Real PNG binaries are CI artifacts — never committed.
+  # Owner: worker-F (Mavis 自驱接手 commit 落地).
+  # ----------------------------------------------------------------------
+  mobile-assets:
+    name: mobile assets (icons)
+    runs-on: ubuntu-latest
+    if: ${{ inputs.render == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install sharp (no-save)
+        run: npm install --no-save sharp
+
+      - name: Render icon set into $RUNNER_TEMP
+        run: |
+          node apps/gm-console-app/brand/icon-gen.js \
+            --svg apps/gm-console-app/brand/icon-source.svg \
+            --out-dir "$RUNNER_TEMP/gm-console-icons" \
+            --write-manifest
+
+      - name: Smoke-check the manifest
+        run: |
+          manifest="$RUNNER_TEMP/gm-console-icons/manifest.json"
+          test -f "$manifest"
+          count=$(node -e "const m=require('$manifest');console.log(m.artifacts.length)")
+          echo "rendered artifacts: $count"
+          if [ "$count" -lt 10 ]; then exit 1; fi
+
+      - name: Upload icon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gm-console-icons
+          path: ${{ runner.temp }}/gm-console-icons
+          retention-days: 14
+
+      - name: Validate Apple / Play JSON files
+        working-directory: ${{ github.workspace }}
+        run: |
+          for f in docs/commercial/apple-app-privacy.json \
+                   docs/commercial/google-play-data-safety.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f'))" && echo "ok: $f"
+          done

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ExportOptions.plist — template for `flutter build ipa`.
+
+  Consumed by mobile-build.yml (sign-and-pack-ios) and mobile-submit.yml.
+  The runner fills these values from secrets at build time; this file only
+  stores the *static, non-secret* configuration (which destinations are
+  valid, the signing style, the bundle id policy).
+
+  NEVER add credentials, cert references, or provisioning profile data here.
+  All signing material is imported by `apple-actions/import-codesign-certs`
+  from secrets.APPLE_P12_BASE64 + secrets.APPLE_PROVISION_BASE64.
+-->
+<plist version="1.0">
+<dict>
+    <!--
+      method: For App Store / TestFlight submissions this MUST be "app-store".
+      For local-only ad-hoc builds (never used by CI), use "ad-hoc" or
+      "development". We keep app-store as the only valid value here.
+    -->
+    <key>method</key>
+    <string>app-store</string>
+
+    <!--
+      uploadBitcode: Off. We do not produce bitcode; Flutter 3.x does not
+      ship bitcode for arm64 Apple Silicon.
+    -->
+    <key>uploadBitcode</key>
+    <false/>
+
+    <!--
+      uploadSymbols: On. Apple needs the dSYMs to symbolicate TestFlight
+      crash reports. They are uploaded as a separate artifact.
+    -->
+    <key>uploadSymbols</key>
+    <true/>
+
+    <!--
+      compileBitcode: Off. Same reasoning as uploadBitcode.
+    -->
+    <key>compileBitcode</key>
+    <false/>
+
+    <!--
+      destination: "export" produces the .ipa. "upload" would push directly
+      to App Store Connect — we deliberately keep that out of the build
+      step; mobile-submit.yml handles delivery separately so the gate is
+      explicit.
+    -->
+    <key>destination</key>
+    <string>export</string>
+
+    <!--
+      signingStyle: "manual". CI runs are not signed by Xcode automatic
+      signing — there is no Apple Developer account session on the runner.
+      The cert + provisioning profile are imported explicitly via
+      apple-actions/import-codesign-certs.
+    -->
+    <key>signingStyle</key>
+    <string>manual</string>
+
+    <!--
+      teamID: not set. The runner injects this via `xcodebuild -allowProvisioningUpdates`
+      or via the import-codesign-certs action when needed. Keeping the field
+      empty here means the runner's KEYCHAIN determines the team — and the
+      runner is seeded by secrets.APPLE_TEAM_ID.
+    -->
+    <!-- <key>teamID</key> -->
+    <!-- <string>SET_BY_RUNNER_FROM_SECRET</string> -->
+
+    <!--
+      provisioningProfiles: NOT populated. The runner reads the .mobileprovision
+      base64 secret and writes the profile to ~/Library/MobileDevice/Provisioning
+      Profiles/, where xcodebuild picks it up by name. Hard-coding a profile
+      UUID here would be fragile across rotations.
+    -->
+    <!-- <key>provisioningProfiles</key> -->
+    <!-- <dict>...</dict> -->
+
+    <!--
+      stripSwiftSymbols: On. Trim Swift runtime symbols from the embedded
+      dylibs — App Store review occasionally flags unstripped binaries.
+    -->
+    <key>stripSwiftSymbols</key>
+    <true/>
+
+    <!--
+      thinned: false. We ship a universal IPA (arm64 device slices). The
+      App Store will re-thin per-device at install time.
+    -->
+    <key>thinned</key>
+    <false/>
+</dict>
+</plist>

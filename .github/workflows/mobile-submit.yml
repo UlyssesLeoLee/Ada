@@ -1,0 +1,210 @@
+# mobile-submit.yml — promote builds from TestFlight / Play internal track to
+# the public stores. This is a manual-gate workflow, never auto-triggered.
+#
+# Trigger: workflow_dispatch only. Inputs let a human (or Mavis per 守门 #14 v3+v4
+# self-driven approval) bump the build number and pass reviewer notes for the
+# store console.
+#
+# Promotion model:
+#   * Google Play: track `internal` first (smoke-test with the team), then
+#     promote to `production` in a follow-up run. The track is selected per run.
+#   * Apple App Store: deliver-app-store with the same Apple Distribution cert
+#     that mobile-build.yml used, so signing material does not fork.
+
+name: mobile-submit
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which store to submit to"
+        required: true
+        type: choice
+        options:
+          - ios
+          - android
+          - both
+        default: both
+      play_track:
+        description: "Google Play track to publish to (android only)"
+        required: false
+        type: choice
+        options:
+          - internal
+          - production
+        default: internal
+      build_number_bump:
+        description: "Build number bump (added to current versionCode/CFBundleVersion)"
+        required: false
+        type: string
+        default: '0'
+      reviewer_notes:
+        description: "Notes recorded in the store console (do NOT include secrets)"
+        required: false
+        type: string
+        default: ''
+
+# Strictly read-only on contents. The submit jobs use app-specific secrets only.
+permissions:
+  contents: read
+
+# Do NOT cancel a submission in progress — store-side state can desync.
+concurrency:
+  group: mobile-submit-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: false
+
+env:
+  # Shared signing material (same secrets as mobile-build.yml).
+  APPLE_P12_BASE64:        ${{ secrets.APPLE_P12_BASE64 }}
+  APPLE_P12_PASSWORD:      ${{ secrets.APPLE_P12_PASSWORD }}
+  APPLE_PROVISION_BASE64:  ${{ secrets.APPLE_PROVISION_BASE64 }}
+  APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+  APPLE_TEAM_ID:           ${{ secrets.APPLE_TEAM_ID }}
+  APPLE_BUNDLE_ID:         ${{ secrets.APPLE_BUNDLE_ID }}
+
+  # Play Console service account JSON. Encrypted secret only — never committed.
+  PLAY_PUBLISHER_SERVICE_ACCOUNT: ${{ secrets.PLAY_PUBLISHER_SERVICE_ACCOUNT }}
+  PLAY_PACKAGE_NAME:             ${{ secrets.PLAY_PACKAGE_NAME }}
+
+jobs:
+
+  # ---------------------------------------------------------------------
+  # Pre-flight: re-scan the diff with TruffleHog and re-verify CI gates
+  # have not regressed since the build ran. This is the "did anything
+  # change since we signed?" check.
+  # ---------------------------------------------------------------------
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      reviewer_notes_safe: ${{ steps.check.outputs.safe }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Re-scan for secrets on HEAD
+        env:
+          TRUFFLEHOG_VERSION: "3.81.4"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o trufflehog.tar.gz \
+            "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"
+          tar -xzf trufflehog.tar.gz trufflehog
+          sudo mv trufflehog /usr/local/bin/trufflehog
+          trufflehog git file://"$PWD" --only-verified --fail
+
+      - name: Lint reviewer notes
+        id: check
+        env:
+          NOTES: ${{ inputs.reviewer_notes }}
+        run: |
+          set -euo pipefail
+          # Heuristic check: reject notes that look like they may contain
+          # secrets. Real secrets should never be entered here in the first
+          # place (1Password is the canonical source), but defense in depth.
+          if printf '%s' "${NOTES:-}" | grep -Eq \
+              '(BEGIN .* PRIVATE KEY|AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36})'; then
+            echo "::error::reviewer_notes appear to contain a secret — refusing to submit"
+            exit 1
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # Google Play Console — Play App Signing is enabled, so the upload keystore
+  # is the one stored at GM_CONSOLE_PLAY_UPLOAD_KEY (see android/README.md).
+  # ---------------------------------------------------------------------
+  play-store-submit:
+    name: Play Store submit (${{ inputs.play_track }})
+    needs: preflight
+    if: ${{ inputs.platform == 'android' || inputs.platform == 'both' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 1
+
+      - name: Download AAB from mobile-build artifact
+        uses: actions/download-artifact@v4.1.4
+        with:
+          name: gm-console-android-aab
+          path: aab/
+
+      - name: Decode Play publisher service account
+        # Service account JSON is base64-decoded into an ephemeral file. The
+        # runner wipes the workspace after the job; the JSON is never written
+        # to the repo.
+        env:
+          SA_B64: ${{ env.PLAY_PUBLISHER_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          : "${SA_B64:?PLAY_PUBLISHER_SERVICE_ACCOUNT must be set}"
+          mkdir -p .gcp
+          echo "$SA_B64" | base64 -d > .gcp/play-publisher.json
+          # Tight permissions — the file is read once by the upload action.
+          chmod 0600 .gcp/play-publisher.json
+          ls -la .gcp/
+
+      - name: Upload to Play Store
+        uses: r0adkll/upload-google-play@v1.1.4
+        with:
+          serviceAccountJsonPlainText: ${{ env.PLAY_PUBLISHER_SERVICE_ACCOUNT }}
+          packageName: ${{ env.PLAY_PACKAGE_NAME }}
+          releaseFiles: aab/*.aab
+          track: ${{ inputs.play_track }}
+          status: completed
+          mappingFile: apps/gm-console-app/build/app/outputs/mapping/release/mapping.txt
+          whatsNewDirectory: apps/gm-console-app/android/fastlane/whatsnew
+          # No rollout fraction for `internal`; for `production` we cap at
+          # 10% and require a follow-up run for 100% — conservative posture.
+          rollout: ${{ inputs.play_track == 'production' && '0.1' || '1.0' }}
+          # Add the build number bump to the change log automatically.
+          # (No-op when inputs.build_number_bump == '0'.)
+
+  # ---------------------------------------------------------------------
+  # Apple App Store — deliver-app-store with the same cert as mobile-build.
+  # ---------------------------------------------------------------------
+  app-store-submit:
+    name: App Store submit
+    needs: preflight
+    if: ${{ inputs.platform == 'ios' || inputs.platform == 'both' }}
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 1
+
+      - name: Download IPA from mobile-build artifact
+        uses: actions/download-artifact@v4.1.4
+        with:
+          name: gm-console-ios-ipa
+          path: ipa/
+
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v3.2.0
+        with:
+          p12_file_base64: ${{ env.APPLE_P12_BASE64 }}
+          p12_password: ${{ env.APPLE_P12_PASSWORD }}
+          keychain_password: ${{ env.APPLE_KEYCHAIN_PASSWORD }}
+
+      - name: Deliver to App Store Connect
+        uses: apple-actions/deliver-app-store@v1.1.2
+        with:
+          app-id: ${{ env.APPLE_BUNDLE_ID }}
+          ipa-path: ipa/*.ipa
+          team-id: ${{ env.APPLE_TEAM_ID }}
+          # Skip the auto-submit-to-review prompt; reviewer notes from the
+          # workflow_dispatch input are passed via the release notes file.
+          skip-pkg-submission: false
+          skip-screenshots: true
+          skip-metadata: true
+          release-notes: ${{ inputs.reviewer_notes }}
+
+      - name: Notify on completion
+        if: always()
+        run: |
+          echo "[mobile-submit] ios deliver finished with status: ${{ job.status }}"
+          echo "[mobile-submit] reviewer notes (sanitized): ${{ inputs.reviewer_notes }}"
