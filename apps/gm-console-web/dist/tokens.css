@@ -1,0 +1,100 @@
+/* gm-console brand tokens
+ * Single source of truth mirrored from docs/commercial/brand/TOKENS.md.
+ * Surfaces: web (CSS), Flutter (lib/theme/brand_theme.dart), future iOS.
+ * Rules:
+ *  - Light theme is the default on :root.
+ *  - Dark theme overrides fire under :root[data-theme="dark"] AND under
+ *    @media (prefers-color-scheme: dark) (auto-detection for first paint).
+ *  - prefers-reduced-motion: reduce zeros motion tokens per TOKENS.md §Motion.
+ *  - JS may flip :root[data-theme="dark"|"light"] at runtime; this file
+ *    intentionally stays CSS-only.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Color: light (default) ---- */
+  --brand-500:        #1E88E5;
+  --brand-600:        #1976D2;
+  --brand-100:        #E3F2FD;
+
+  --surface-bg:       #FAFCFF;
+  --surface-card:     #FFFFFF;
+  --surface-muted:    #EEF4FB;
+
+  --text-strong:      #1F2933;
+  --text-body:        #52606D;
+  --text-faint:       #7B8794;
+
+  --status-ok:        #2E7D32;
+  --status-warn:      #ED6C02;
+  --status-err:       #C62828;
+
+  /* ---- Typography ---- */
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto,
+               "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --type-display: clamp(32px, 5vw, 56px);
+  --type-h1:      clamp(24px, 3vw, 32px);
+  --type-h2:      clamp(20px, 2.5vw, 24px);
+  --type-body:    16px / 1.6;
+  --type-small:   13px / 1.5;
+
+  /* ---- Spacing (4px grid) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
+
+  /* ---- Radius ---- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* ---- Motion ---- */
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --dur-fast:      120ms;
+  --dur-base:      180ms;
+  --dur-slow:      240ms;
+
+  /* ---- Focus / a11y ---- */
+  --focus-ring: var(--brand-500);
+}
+
+/* Dark theme — explicit user override */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --brand-500:     #42A5F5;
+  --surface-bg:    #0E1217;
+  --surface-card:  #161B22;
+  --text-strong:   #F0F6FC;
+  --text-body:     #C9D1D9;
+}
+
+/* Dark theme — OS-level auto detection (covers first paint before JS hydration) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --brand-500:     #42A5F5;
+    --surface-bg:    #0E1217;
+    --surface-card:  #161B22;
+    --text-strong:   #F0F6FC;
+    --text-body:     #C9D1D9;
+  }
+}
+
+/* Respect reduced-motion preference per TOKENS.md §Motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ease-standard: linear;
+    --dur-fast:      0ms;
+    --dur-base:      0ms;
+    --dur-slow:      0ms;
+  }
+}

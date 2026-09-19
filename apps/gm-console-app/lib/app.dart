@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/auth/application/auth_providers.dart';
 import 'routing/app_router.dart';
 import 'state/locale_controller.dart';
+import 'theme.dart';
 
 class GmConsoleApp extends ConsumerStatefulWidget {
   const GmConsoleApp({super.key});
@@ -27,12 +28,15 @@ class _GmConsoleAppState extends ConsumerState<GmConsoleApp> {
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     final locale = ref.watch(localeControllerProvider);
+    // Brand-themed MaterialApp. light/dark chosen by platform brightness so
+    // the runtime honors `MediaQueryData.platformBrightness` (and indirectly
+    // iOS/Android dark-mode toggles). No inline `ColorScheme.fromSeed`
+    // remains — brand tokens live in `lib/theme/brand_theme.dart`.
     return MaterialApp.router(
       title: 'gm-console',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E88E5)),
-        useMaterial3: true,
-      ),
+      theme: BrandTheme.light(),
+      darkTheme: BrandTheme.dark(),
+      themeMode: ThemeMode.system,
       locale: locale,
       supportedLocales: kSupportedLocales,
       routerConfig: router,

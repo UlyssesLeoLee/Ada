@@ -71,163 +71,139 @@
   }
   </script>
 
+  <!-- Brand tokens (single source of truth, mirrored from
+       docs/commercial/brand/TOKENS.md). Loaded synchronously so first paint
+       sees the canonical color/typography/spacing/radius/motion variables.
+       Theme layer (light + dark + prefers-reduced-motion) is defined here,
+       not duplicated inline. -->
+  <link rel="stylesheet" href="./tokens.css">
+
   <!-- Critical CSS inlined to keep first-paint fast.
-       Total CSS budget: < 4KB gz; total inline shell < 12KB. -->
+       All visual values source from tokens.css via var(--brand-*),
+       var(--type-*), var(--surface-*), var(--text-*) etc. This block
+       contributes layout + structure only; tokens are the canonical layer. -->
   <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #fafcff;
-      --bg-elev: #ffffff;
-      --fg: #1f2933;
-      --fg-muted: #52606d;
-      --fg-faint: #7b8794;
-      --brand: #1E88E5;
-      --brand-fg: #ffffff;
-      --focus: #ffb300;
-      --border: #e3eaf2;
-      --danger: #c0392b;
-      --success: #2e7d32;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0b1220;
-        --bg-elev: #131c2e;
-        --fg: #e7eef7;
-        --fg-muted: #aab6c5;
-        --fg-faint: #7c8aa0;
-        --brand: #4dabf7;
-        --brand-fg: #0b1220;
-        --focus: #ffd54f;
-        --border: #233148;
-      }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.001ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.001ms !important;
-        scroll-behavior: auto !important;
-      }
-    }
     *, *::before, *::after { box-sizing: border-box; }
     html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
-                   Roboto, "Hiragino Sans", "Microsoft YaHei", sans-serif;
+      font-family: var(--font-sans);
       font-size: 16px;
-      line-height: 1.55;
-      color: var(--fg);
-      background: linear-gradient(180deg, var(--bg) 0%, var(--bg-elev) 100%);
+      line-height: 1.6;
+      color: var(--text-body);
+      background: linear-gradient(180deg, var(--surface-bg) 0%, var(--surface-card) 100%);
       display: flex;
       flex-direction: column;
     }
+    h1, h2, h3 { color: var(--text-strong); }
     /* Always-visible focus ring for keyboard users (WCAG 2.4.7) */
     :focus-visible {
-      outline: 3px solid var(--focus);
+      outline: 3px solid var(--focus-ring);
       outline-offset: 2px;
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
     }
-    a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+    a { color: var(--brand-500); text-decoration: underline; text-underline-offset: 2px; }
     a:hover { text-decoration-thickness: 2px; }
     .skip-link {
       position: absolute;
       left: -9999px;
       top: 0;
-      background: var(--brand);
-      color: var(--brand-fg);
-      padding: 8px 12px;
-      border-radius: 4px;
+      background: var(--brand-500);
+      color: var(--surface-card);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-sm);
       font-weight: 600;
       z-index: 1000;
     }
     .skip-link:focus { left: 12px; top: 12px; }
     header.site {
-      border-bottom: 1px solid var(--border);
-      padding: 14px 24px;
+      border-bottom: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
+      padding: var(--space-3) var(--space-5);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
+      gap: var(--space-4);
       flex-wrap: wrap;
     }
     header.site .brand-mark {
       font-weight: 700;
       font-size: 18px;
       letter-spacing: -0.01em;
-      color: var(--fg);
+      color: var(--text-strong);
       text-decoration: none;
     }
-    header.site .brand-mark .dot { color: var(--brand); }
+    header.site .brand-mark .dot { color: var(--brand-500); }
     nav.primary ul {
       list-style: none;
       margin: 0;
       padding: 0;
       display: flex;
-      gap: 18px;
+      gap: var(--space-5);
       flex-wrap: wrap;
     }
     nav.primary a {
-      color: var(--fg-muted);
+      color: var(--text-body);
       text-decoration: none;
       font-weight: 500;
-      padding: 6px 8px;
-      border-radius: 4px;
+      padding: var(--space-2);
+      border-radius: var(--radius-sm);
     }
     nav.primary a:hover, nav.primary a:focus-visible {
-      color: var(--fg);
-      background: color-mix(in srgb, var(--brand) 12%, transparent);
+      color: var(--text-strong);
+      background: color-mix(in srgb, var(--brand-500) 12%, transparent);
     }
     main {
       flex: 1;
       width: 100%;
       max-width: 880px;
-      padding: 48px 24px 32px;
+      padding: var(--space-8) var(--space-5) var(--space-6);
       margin: 0 auto;
     }
     h1 {
-      font-size: clamp(28px, 4.5vw, 44px);
+      font-size: var(--type-h1);
       line-height: 1.15;
-      margin: 0 0 12px;
+      margin: 0 0 var(--space-3);
       letter-spacing: -0.02em;
     }
-    .lede { font-size: clamp(16px, 2vw, 18px); color: var(--fg-muted); margin: 0 0 28px; }
+    .lede { font-size: clamp(16px, 2vw, 18px); color: var(--text-body); margin: 0 0 var(--space-5); }
     .card {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px;
-      background: var(--bg-elev);
-      margin-bottom: 16px;
+      border: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
+      border-radius: var(--radius-md);
+      padding: var(--space-5);
+      background: var(--surface-card);
+      margin-bottom: var(--space-4);
     }
-    .card h2 { margin: 0 0 8px; font-size: 18px; }
-    .card p { margin: 0; color: var(--fg-muted); font-size: 14px; }
-    .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+    .card h2 { margin: 0 0 var(--space-2); font-size: var(--type-h2); color: var(--text-strong); }
+    .card p { margin: 0; color: var(--text-body); font-size: var(--type-small); }
+    .cta-row { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-5); }
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 18px;
-      border-radius: 8px;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      border-radius: var(--radius-md);
       font-weight: 600;
       text-decoration: none;
       border: 1px solid transparent;
       cursor: pointer;
       font: inherit;
+      transition: filter var(--dur-fast) var(--ease-standard);
     }
-    .btn.primary { background: var(--brand); color: var(--brand-fg); }
-    .btn.primary:hover { filter: brightness(0.92); }
-    .btn.secondary { background: transparent; color: var(--fg); border-color: var(--border); }
-    .btn.secondary:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+    .btn.primary { background: var(--brand-500); color: var(--surface-card); }
+    .btn.primary:hover { background: var(--brand-600); }
+    .btn.secondary { background: transparent; color: var(--text-strong);
+                     border-color: color-mix(in srgb, var(--text-strong) 12%, transparent); }
+    .btn.secondary:hover { background: color-mix(in srgb, var(--brand-500) 10%, transparent); }
     footer.site {
-      border-top: 1px solid var(--border);
-      padding: 16px 24px;
-      font-size: 13px;
-      color: var(--fg-faint);
+      border-top: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
+      padding: var(--space-4) var(--space-5);
+      font-size: var(--type-small);
+      color: var(--text-faint);
       text-align: center;
     }
     footer.site a { color: inherit; }
-    footer.site .links { margin-bottom: 4px; }
+    footer.site .links { margin-bottom: var(--space-1); }
     /* SR-only utility for screen-reader labels */
     .sr-only {
       position: absolute;
@@ -239,6 +215,16 @@
       clip: rect(0,0,0,0);
       white-space: nowrap;
       border: 0;
+    }
+    /* Honor prefers-reduced-motion per TOKENS.md §Motion (tokens.css already
+       zeros the duration vars; this also kills per-element transitions.) */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
     }
   </style>
 </head>
