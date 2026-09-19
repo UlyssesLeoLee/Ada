@@ -2,6 +2,11 @@
 //! v0.4.0 skeleton reads `base_policy.csv` (the m11 role × permission
 //! matrix regenerated as Casbin-style rows). The on-disk layout is
 //! the same as Casbin's so the v0.5.0 swap-in is mechanical.
+//!
+//! v0.5.0 anchors the bundled path to `CARGO_MANIFEST_DIR` so tests
+//! (which run with cwd = `crates/ada-rbac-casbin/`) and the
+//! api-gateway binary (cwd = workspace root) both find the policy
+//! files without an env var.
 
 use std::path::{Path, PathBuf};
 
@@ -15,9 +20,11 @@ pub struct PolicySet {
 }
 
 impl PolicySet {
+    /// Bundled policy files relative to this crate's manifest dir.
+    /// The paths are absolute so they resolve regardless of cwd.
     #[must_use]
     pub fn bundled() -> Self {
-        let base = PathBuf::from("crates/ada-rbac-casbin/policies");
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("policies");
         Self {
             model_path: base.join("model.conf"),
             policy_path: base.join("base_policy.csv"),

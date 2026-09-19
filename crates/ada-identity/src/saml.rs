@@ -1,8 +1,10 @@
-//! SAML 2.0 SP. AuthnRequest generation + assertion parsing.
+//! SAML 2.0 SP. AuthnRequest generation + Response parsing.
 //!
-//! Real wire-format signing / verification goes through the
-//! `samael` crate (XML + xmlsec). The v0.4.0 skeleton wraps the
-//! high-level state machine without binding it to a specific IdP.
+//! v0.4.0 skeleton: state-machine + RFC shapes only. Real wire-format
+//! signing / verification via `samael = "0.0.22"` is deferred to
+//! v0.5.0 — see `v0.5.0-roadmap.md` §3. Samael pulls xmlsec (C lib)
+//! on Windows; CI's Linux runner is the right environment for the
+//! real swap-in.
 
 use serde::{Deserialize, Serialize};
 

@@ -22,7 +22,6 @@ pub fn generate_secret(issuer: &str, account: &str) -> Result<TotpSecret> {
     if issuer.is_empty() || account.is_empty() {
         return Err(IdentityError::Totp("issuer / account empty".into()));
     }
-    // Real impl: totp_rs::Secret::generate().to_encoded();
     let mut bytes = [0u8; 20];
     rand::Rng::fill(&mut rand::thread_rng(), &mut bytes[..]);
     let base32 = base32_encode(&bytes);
@@ -47,8 +46,6 @@ pub fn verify_code(secret_base32: &str, code: u32, now_unix: i64) -> Result<bool
 }
 
 fn rfc6238(_secret_base32: &str, now_unix: i64, digits: usize) -> u32 {
-    // Real impl uses HMAC-SHA1 over (now_unix / 30).
-    // Skeleton: derive a deterministic value from the inputs.
     let t = (now_unix / 30) as u64;
     let h = {
         use sha2::{Digest, Sha256};

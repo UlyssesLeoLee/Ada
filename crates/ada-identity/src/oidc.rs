@@ -1,9 +1,8 @@
 //! OpenID Connect RP. Authorization Code + PKCE flow.
 //!
-//! Real wire-format signing / verification goes through the
-//! `openidconnect` crate. The v0.4.0 skeleton wraps the high-level
-//! state machine (build auth request, exchange code, fetch
-//! userinfo) without binding it to a specific provider.
+//! v0.4.0 skeleton: state-machine + RFC shapes only. Real wire-format
+//! signing / verification via `openidconnect = "3"` is deferred to
+//! v0.5.0 — see `v0.5.0-roadmap.md` §3.
 
 use serde::{Deserialize, Serialize};
 
@@ -55,7 +54,6 @@ pub async fn complete_flow(
         return Err(IdentityError::Oidc("missing code or verifier".into()));
     }
     let _ = cfg;
-    // Real implementation calls CoreClient::exchange_code.
     Ok(OidcTokenSet {
         access_token: String::new(),
         id_token: String::new(),

@@ -4,6 +4,12 @@
 //! [`AdminApi::add_policy`] / [`remove_policy`]. The api-gateway
 //! is responsible for enforcing that the caller is `Role::Owner`
 //! AND has cleared step-up MFA *before* dispatching here.
+//!
+//! v0.5.0: per-tenant overrides are still held in memory but the
+//! `persist` flag (default `false`) lets the api-gateway opt into
+//! forwarding each mutation to a future Postgres sink without an
+//! API change. v0.6.0 wires the Postgres adapter; the flag is the
+//! seam. The mutable `bool` return shape is preserved from v0.4.0.
 
 use std::sync::Arc;
 
@@ -11,10 +17,21 @@ use crate::enforcer::Enforcer;
 use crate::error::Result;
 
 pub struct AdminApi {
+    /// The enforcer this admin API is bound to. Held by value so the
+    /// api-gateway keeps the same handle the watcher swaps behind;
+    /// v0.5.0 keeps the field for source compatibility with the
+    /// v0.4.0 surface even though the override list is the only
+    /// mutable state today.
+    #[allow(dead_code)]
     enforcer: Enforcer,
     /// Per-tenant overrides applied in addition to the static
-    /// base policy. v0.5.0 will back this with Postgres.
+    /// base policy. v0.6.0 will back this with Postgres via the
+    /// `persist` flag.
     overrides: Arc<parking_lot::RwLock<Vec<PolicyOverride>>>,
+    /// When `true`, every `add_policy` / `remove_policy` call would
+    /// forward the mutation to the durable sink. v0.5.0 keeps this
+    /// `false` (in-memory only) so the api-gateway can ship today.
+    persist: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -28,17 +45,40 @@ pub struct PolicyOverride {
 
 impl std::fmt::Debug for AdminApi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AdminApi").finish_non_exhaustive()
+        f.debug_struct("AdminApi")
+            .field("persist", &self.persist)
+            .finish_non_exhaustive()
     }
 }
 
 impl AdminApi {
+    /// Default constructor — `persist = false`, in-memory overrides
+    /// only. Behaviour is identical to v0.4.0.
     #[must_use]
     pub fn new(enforcer: Enforcer) -> Self {
         Self {
             enforcer,
             overrides: Arc::new(parking_lot::RwLock::new(Vec::new())),
+            persist: false,
         }
+    }
+
+    /// Constructor with the persist flag explicit. v0.6.0 will set
+    /// this to `true` once the Postgres adapter lands.
+    #[must_use]
+    pub fn with_persist(enforcer: Enforcer, persist: bool) -> Self {
+        Self {
+            enforcer,
+            overrides: Arc::new(parking_lot::RwLock::new(Vec::new())),
+            persist,
+        }
+    }
+
+    /// Current value of the persist flag. v0.5.0 callers can read
+    /// this to decide whether to forward the mutation elsewhere.
+    #[must_use]
+    pub fn persist(&self) -> bool {
+        self.persist
     }
 
     pub fn add_policy(

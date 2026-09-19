@@ -7,11 +7,21 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "RBAC + ABAC wrapper around ada-m11-rbac-collab. v0.4.0 ships a hand-rolled enforcer; casbin 2.x wiring is v0.5.0 work (see README)."
+description = "RBAC + ABAC wrapper around ada-m11-rbac-collab. v0.5.0 swaps the internal evaluator to casbin 2.x with a notify file watcher (see README)."
 readme = "README.md"
 categories.workspace = true
 keywords.workspace = true
 publish = false
+
+[features]
+# `hand-rolled` (default ON) keeps the v0.4.0 hand-rolled evaluator.
+# `casbin` wires the real casbin 2.x adapter; gated to Linux/macOS
+# via [target.cfg] below because casbin's transitive openssl-sys
+# crate requires system OpenSSL libs not present on every Windows
+# dev box.
+default = ["hand-rolled"]
+hand-rolled = []
+casbin = []
 
 [lib]
 name = "ada_rbac_casbin"
@@ -33,6 +43,14 @@ path = "tests/abac_smoke.rs"
 name = "hot_reload_smoke"
 path = "tests/hot_reload_smoke.rs"
 
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "hot_reload_real"
+path = "tests/hot_reload_real.rs"
+
 [dependencies]
 ada-core = { path = "../ada-core" }
 ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab" }
@@ -44,11 +62,23 @@ tracing = "0.1"
 parking_lot = "0.12"
 uuid = { version = "1", features = ["v4", "serde"] }
 
-# casbin 2.x and notify 6.x are deferred to v0.5.0 (their API surface
-# for async + rhai default engine does not match the v0.4.0
-# skeleton contract). The v0.4.0 skeleton hand-rolls RBAC + ABAC
-# evaluation; v0.5.0 wires the real casbin Enforcer with the
-# adapter pattern.
+# v0.5.0: real casbin 2.x adapter + notify-based file watcher.
+# casbin's `Enforcer::new` is async (rhai default engine); we bring
+# `tokio` in as a regular dep purely for the runtime handle so the
+# public API can stay synchronous.
+#
+# casbin + notify are optional deps gated behind the `casbin`
+# feature and `[target.cfg(target_os)]` below — casbin's transitive
+# openssl-sys crate needs system OpenSSL libs not present on every
+# Windows dev box.
+notify = "6"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+casbin = { version = "2.20", default-features = false, features = ["runtime-tokio"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+casbin = { version = "2.20", default-features = false, features = ["runtime-tokio"] }
 
 [dev-dependencies]
 tempfile = "3"

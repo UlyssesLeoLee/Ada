@@ -1,4 +1,13 @@
 //! WebAuthn RP (FIDO2). Registration + authentication ceremony.
+//!
+//! v0.4.0 skeleton: state-machine + RFC shapes only. Real wire-format
+//! signing / verification via `webauthn-rs = "0.5"` (the 0.6 line is
+//! not yet published on crates.io as of 2026-09) is deferred to
+//! v0.5.0 — see `v0.5.0-roadmap.md` §3.
+//!
+//! The skeleton returns a base64url-encoded 32-byte challenge that
+//! the api-gateway can persist in its session store; v0.5.0 swaps
+//! the implementation for the real `WebauthnBuilder` flow.
 
 use serde::{Deserialize, Serialize};
 

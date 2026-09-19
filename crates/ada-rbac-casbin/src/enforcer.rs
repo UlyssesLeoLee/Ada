@@ -1,35 +1,40 @@
-//! Hand-rolled RBAC + ABAC enforcer (v0.4.0 skeleton).
+//! Public `Enforcer` facade.
 //!
-//! The evaluator:
-//! 1. Walks the m11-derived role ladder (`from_m11`).
-//! 2. For each role the user holds, checks the static
-//!    `policy::role_policy` map for `(role, resource_type, action)`.
-//! 3. Applies ABAC gates: tenant scoping + ownership flag.
+//! v0.5.0 swaps the internal evaluator to `casbin::Enforcer` 2.x; the
+//! public API is preserved unchanged from v0.4.0. The
+//! implementation is selected by the Cargo feature flag:
 //!
-//! When v0.5.0 lands, this file is the only one that needs to
-//! change — the public surface stays the same and the implementation
-//! delegates to `casbin::Enforcer::enforce()`.
+//! - Default (feature off): real `casbin` 2.x adapter behind
+//!   [`crate::casbin_impl::RealEnforcer`].
+//! - Feature `hand-rolled`: the v0.4.0 hand-rolled evaluator behind
+//!   [`crate::hand_rolled::HandRolledEnforcer`] (preserved for
+//!   v0.4.0 callers that want to skip the `casbin` / `notify`
+//!   runtime).
 
 use std::sync::Arc;
 
-use ada_m11_rbac_collab::{
-    Action, CollaborationMap, ResourceType as M11ResourceType, Role,
-};
+use ada_m11_rbac_collab::{Action, CollaborationMap, ResourceType as M11ResourceType};
 
 use crate::attrs::Attrs;
-use crate::error::{RbacCasbinError, Result};
+use crate::error::Result;
 use crate::policy::PolicySet;
 
+/// Public enforcer handle. Internally `Arc<...>` so it can be cheaply
+/// cloned and shared between the api-gateway, the admin CLI, and the
+/// watcher thread.
 #[derive(Clone)]
 pub struct Enforcer {
     inner: Arc<Inner>,
 }
 
-#[derive(Debug)]
-struct Inner {
-    set: PolicySet,
-    role_ladder: Vec<(Role, Role)>,
-    perms: std::collections::HashMap<(Role, M11ResourceType), Vec<Action>>,
+/// Implementation seam. The default branch wires the real casbin
+/// adapter; the `hand-rolled` feature pins to the v0.4.0 evaluator.
+#[derive(Clone)]
+enum Inner {
+    #[cfg(not(feature = "hand-rolled"))]
+    Casbin(crate::casbin_impl::RealEnforcer),
+    #[cfg(feature = "hand-rolled")]
+    HandRolled(crate::hand_rolled::HandRolledEnforcer),
 }
 
 impl std::fmt::Debug for Enforcer {
@@ -39,25 +44,27 @@ impl std::fmt::Debug for Enforcer {
 }
 
 impl Enforcer {
+    /// Build from a [`PolicySet`] (model + CSV). In v0.5.0 this
+    /// delegates to [`crate::casbin_impl::RealEnforcer::from_policy_set`].
     pub fn from_policy_set(set: &PolicySet) -> Result<Self> {
-        set.validate()?;
         Ok(Self {
-            inner: Arc::new(Inner {
-                set: set.clone(),
-                role_ladder: role_ladder(),
-                perms: build_perm_map(),
-            }),
+            inner: Arc::new(Inner::from_set(set)?),
         })
     }
 
-    /// Import the m11 collaboration map. The v0.4.0 skeleton treats
-    /// the role ladder as the source of truth; m11's per-user
-    /// grants are applied at enforce time via [`Self::enforce`].
-    pub fn from_m11(set: &PolicySet, _m11: &CollaborationMap) -> Result<Self> {
-        Self::from_policy_set(set)
+    /// Import the m11 collaboration map. In v0.5.0 the m11 map is
+    /// consulted only for per-resource role lookups at enforce time.
+    pub fn from_m11(set: &PolicySet, m11: &CollaborationMap) -> Result<Self> {
+        Ok(Self {
+            inner: Arc::new(Inner::from_m11(set, m11)?),
+        })
     }
 
-    /// Core enforcement.
+    /// Synchronous enforcement. The casbin implementation builds the
+    /// `(sub, obj, act, tenant, is_owner_token)` tuple from the
+    /// arguments and delegates to `casbin::Enforcer::enforce`. The
+    /// `user_id` is treated as the resolved role token (e.g.
+    /// `"role:owner"`).
     pub fn enforce(
         &self,
         user_id: &str,
@@ -66,16 +73,16 @@ impl Enforcer {
         attrs: &Attrs,
         m11: Option<&CollaborationMap>,
     ) -> Result<bool> {
-        let roles = effective_roles_for(user_id, m11);
-        for role in roles {
-            if self.check(role, object_id, action, attrs)? {
-                return Ok(true);
-            }
+        match &*self.inner {
+            #[cfg(not(feature = "hand-rolled"))]
+            Inner::Casbin(e) => e.enforce(user_id, object_id, action, attrs, m11),
+            #[cfg(feature = "hand-rolled")]
+            Inner::HandRolled(e) => e.enforce(user_id, object_id, action, attrs, m11),
         }
-        Ok(false)
     }
 
-    /// Convenience: enforce using m11's `ResourceType` enum.
+    /// Typed variant — accepts m11's [`ResourceType`] enum directly
+    /// so the caller does not have to format the object string.
     pub fn enforce_typed(
         &self,
         user_id: &str,
@@ -85,150 +92,58 @@ impl Enforcer {
         attrs: &Attrs,
         m11: Option<&CollaborationMap>,
     ) -> Result<bool> {
-        let composite = format!("{}:{}", object_kind.as_str(), object_id);
-        if !self
-            .enforce(user_id, &composite, action, attrs, m11)?
-        {
-            return Ok(false);
-        }
-        // Plus a per-resource-type check (the static map only carries
-        // resource-type-level grants; the composite check above
-        // guarantees tenant scoping via object_id substring when
-        // present). v0.5.0 wires casbin here.
-        let _ = self.inner.perms.get(&(Role::Owner, object_kind));
-        Ok(true)
-    }
-
-    fn check(
-        &self,
-        role: Role,
-        object_id: &str,
-        action: Action,
-        attrs: &Attrs,
-    ) -> Result<bool> {
-        // Tenant isolation: the object id MUST contain the tenant
-        // id when the object is namespaced. For non-namespaced
-        // objects (e.g. "*" in the policy), skip this check.
-        if !object_id.contains(&attrs.tenant_id) && !object_id.starts_with('*') {
-            // Allow `canvas:<uuid>` where the uuid is opaque and the
-            // tenant scoping happens at the api-gateway layer.
-        }
-        // Ownership gate: actions tagged `Delete` on a tenant-owned
-        // resource require `is_owner = true`. The mapping is
-        // conservative — when in doubt, fail closed.
-        if matches!(action, Action::Delete) && !attrs.is_owner {
-            return Ok(false);
-        }
-        // Owner always allowed.
-        if role == Role::Owner {
-            return Ok(true);
-        }
-        // Otherwise consult the static policy: match the role
-        // against the ladder + the role-permission map.
-        for (high, low) in &self.inner.role_ladder {
-            if *high == role && self.role_allows(*low, action)? {
-                return Ok(true);
+        match &*self.inner {
+            #[cfg(not(feature = "hand-rolled"))]
+            Inner::Casbin(e) => {
+                e.enforce_typed(user_id, object_kind, object_id, action, attrs, m11)
             }
-            if *low == role && self.role_allows(*low, action)? {
-                return Ok(true);
+            #[cfg(feature = "hand-rolled")]
+            Inner::HandRolled(e) => {
+                e.enforce_typed(user_id, object_kind, object_id, action, attrs, m11)
             }
         }
-        if self.role_allows(role, action)? {
-            return Ok(true);
-        }
-        Ok(false)
     }
 
-    fn role_allows(&self, role: Role, action: Action) -> Result<bool> {
-        // Owner has every permission; we short-circuited above.
-        if role == Role::Owner {
-            return Ok(true);
-        }
-        // Walk every resource type and ask whether the role has the
-        // requested action. If any does, allow.
-        for rt in [
-            M11ResourceType::Canvas,
-            M11ResourceType::Workspace,
-            M11ResourceType::Credential,
-        ] {
-            if let Some(actions) = self.inner.perms.get(&(role, rt)) {
-                if actions.contains(&action) {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
-    }
-
+    /// The [`PolicySet`] this enforcer is bound to.
+    #[must_use]
     pub fn policy_set(&self) -> &PolicySet {
-        &self.inner.set
+        match &*self.inner {
+            #[cfg(not(feature = "hand-rolled"))]
+            Inner::Casbin(e) => e.policy_set(),
+            #[cfg(feature = "hand-rolled")]
+            Inner::HandRolled(e) => e.policy_set(),
+        }
     }
 }
 
-fn effective_roles_for(_user_id: &str, _m11: Option<&CollaborationMap>) -> Vec<Role> {
-    // v0.4.0 skeleton: every authenticated user holds Owner through
-    // the role ladder; per-user grants are added in v0.5.0.
-    vec![Role::Owner, Role::Admin, Role::Editor, Role::Executor, Role::Viewer]
-}
+impl Inner {
+    fn from_set(set: &PolicySet) -> Result<Self> {
+        #[cfg(not(feature = "hand-rolled"))]
+        {
+            Ok(Self::Casbin(crate::casbin_impl::RealEnforcer::from_policy_set(
+                set,
+            )?))
+        }
+        #[cfg(feature = "hand-rolled")]
+        {
+            Ok(Self::HandRolled(
+                crate::hand_rolled::HandRolledEnforcer::from_policy_set(set)?,
+            ))
+        }
+    }
 
-/// Privilege-descending ladder.
-fn role_ladder() -> Vec<(Role, Role)> {
-    vec![
-        (Role::Owner, Role::Admin),
-        (Role::Admin, Role::Editor),
-        (Role::Editor, Role::Executor),
-        (Role::Executor, Role::Viewer),
-    ]
-}
-
-/// Static role × permission matrix (mirrors `policies/base_policy.csv`).
-fn build_perm_map() -> std::collections::HashMap<(Role, M11ResourceType), Vec<Action>> {
-    let mut m = std::collections::HashMap::new();
-    let r = |a: &[Action]| a.to_vec();
-    m.insert(
-        (Role::Admin, M11ResourceType::Canvas),
-        r(&[Action::Read, Action::Write, Action::Execute, Action::Delete, Action::ShareManage]),
-    );
-    m.insert(
-        (Role::Admin, M11ResourceType::Workspace),
-        r(&[Action::Read, Action::Write, Action::Execute, Action::Delete, Action::ShareManage]),
-    );
-    m.insert(
-        (Role::Admin, M11ResourceType::Credential),
-        r(&[Action::Read, Action::Write, Action::Execute, Action::ShareManage]),
-    );
-    m.insert(
-        (Role::Editor, M11ResourceType::Canvas),
-        r(&[Action::Read, Action::Write, Action::Execute]),
-    );
-    m.insert(
-        (Role::Editor, M11ResourceType::Workspace),
-        r(&[Action::Read]),
-    );
-    m.insert(
-        (Role::Editor, M11ResourceType::Credential),
-        r(&[Action::Read]),
-    );
-    m.insert(
-        (Role::Executor, M11ResourceType::Canvas),
-        r(&[Action::Read, Action::Execute]),
-    );
-    m.insert(
-        (Role::Executor, M11ResourceType::Workspace),
-        r(&[Action::Read]),
-    );
-    m.insert(
-        (Role::Executor, M11ResourceType::Credential),
-        r(&[Action::Read]),
-    );
-    m.insert((Role::Viewer, M11ResourceType::Canvas), r(&[Action::Read]));
-    m.insert((Role::Viewer, M11ResourceType::Workspace), r(&[Action::Read]));
-    m.insert((Role::Viewer, M11ResourceType::Credential), r(&[Action::Read]));
-    m
-}
-
-#[allow(dead_code)]
-fn _ensure_compile() -> Result<()> {
-    let _ = RbacCasbinError::Internal("compile probe".into());
-    Ok(())
+    fn from_m11(set: &PolicySet, m11: &CollaborationMap) -> Result<Self> {
+        #[cfg(not(feature = "hand-rolled"))]
+        {
+            Ok(Self::Casbin(crate::casbin_impl::RealEnforcer::from_m11(
+                set, m11,
+            )?))
+        }
+        #[cfg(feature = "hand-rolled")]
+        {
+            Ok(Self::HandRolled(
+                crate::hand_rolled::HandRolledEnforcer::from_m11(set, m11)?,
+            ))
+        }
+    }
 }

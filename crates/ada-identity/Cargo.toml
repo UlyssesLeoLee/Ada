@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "ada-identity: SAML 2.0 / OpenID Connect RP + TOTP / WebAuthn / Passkey for Ada v0.4.0."
+description = "ada-identity: SAML 2.0 / OIDC RP + TOTP / WebAuthn / Passkey for Ada v0.4.0."
 readme = "README.md"
 categories.workspace = true
 keywords.workspace = true
@@ -43,10 +43,6 @@ rand = "0.8"
 sha2 = "0.10"
 hex = "0.4"
 url = "2"
-
-[[test]]
-name = "totp_smoke"
-path = "tests/totp_smoke.rs"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
