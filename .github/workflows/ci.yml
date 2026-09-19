@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
+    inputs:
+      snapshots:
+        description: "Capture Web SPA screenshots (installs Playwright + Chromium)"
+        type: boolean
+        required: false
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -171,3 +177,30 @@ jobs:
       - name: Stop server
         run: |
           pkill -f gm-console-server || true
+
+      # ----------------------------------------------------------------------
+      # Optional Playwright screenshot capture for gm-console Web SPA.
+      # Off by default — opt in via `workflow_dispatch` with snapshots=true so
+      # the regular CI run stays fast. See apps/gm-console-web/scripts/SPEC.md.
+      # ----------------------------------------------------------------------
+      - name: Install Playwright (Chromium only)
+        if: ${{ inputs.snapshots == 'true' }}
+        run: |
+          npx --yes playwright@1.49.1 install --with-deps chromium
+
+      - name: Render Web screenshots into dist/screenshots
+        if: ${{ inputs.snapshots == 'true' }}
+        run: |
+          node apps/gm-console-web/scripts/render-screenshots.js \
+            --base-url http://127.0.0.1:8080 \
+            --out-dir  apps/gm-console-web/dist/screenshots \
+            --device-filter iphone-6.7,android-phone-portrait \
+            --update-goldens
+
+      - name: Upload screenshot artifact
+        if: ${{ inputs.snapshots == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-screenshots
+          path: apps/gm-console-web/dist/screenshots
+          retention-days: 14

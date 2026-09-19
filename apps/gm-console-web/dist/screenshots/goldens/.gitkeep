@@ -1,0 +1,4 @@
+# Web SPA golden-image landing zone.
+# Golden PNGs are produced by running render-screenshots.js with --update-goldens
+# in CI and are intentionally NOT committed.
+# See INDEX.md for the catalog of shots.
