@@ -1,41 +1,323 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>gm-console — Ada Platform</title>
-  <meta name="description" content="Commercial-grade Web operations console for the Ada platform. Inspect pipelines, monitor incidents, audit and recover from anywhere.">
-  <meta name="theme-color" content="#1E88E5">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1E88E5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B3D91" media="(prefers-color-scheme: dark)">
+  <title>gm-console — Ada Platform Operations Console</title>
+  <meta name="description" content="Commercial-grade Web operations console for the Ada data platform. Inspect pipelines, monitor incidents, audit and recover from anywhere.">
+  <meta name="application-name" content="gm-console">
+  <meta name="generator" content="gm-console shell v0.1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
+  <meta name="author" content="Ada Project Team">
+  <meta name="keywords" content="ada, gm-console, data platform, operations, monitoring, pipelines, incidents">
+
+  <!-- Canonical + alternate -->
+  <link rel="canonical" href="https://gm-console.kanvas.dev/">
+  <link rel="alternate" type="application/rss+xml" title="gm-console changelog" href="https://ada.kanvas.dev/changelog.rss">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="gm-console">
+  <meta property="og:title" content="gm-console — Ada Platform Operations Console">
+  <meta property="og:description" content="Commercial-grade Web operations console for the Ada data platform. Inspect pipelines, monitor incidents, audit and recover from anywhere.">
+  <meta property="og:url" content="https://gm-console.kanvas.dev/">
+  <meta property="og:image" content="https://gm-console.kanvas.dev/og-image.png">
+  <meta property="og:image:alt" content="gm-console dashboard preview">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ja_JP">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="gm-console — Ada Platform Operations Console">
+  <meta name="twitter:description" content="Inspect pipelines, monitor incidents, audit and recover from anywhere.">
+  <meta name="twitter:image" content="https://gm-console.kanvas.dev/og-image.png">
+
+  <!-- Inline SVG favicon (zero extra request) -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231E88E5'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3Eg%3C/text%3E%3C/svg%3E">
+
+  <!-- Structured data: SoftwareApplication + Organization -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "gm-console",
+        "applicationCategory": "BusinessApplication",
+        "applicationSubCategory": "Operations Console",
+        "operatingSystem": "Linux, macOS, Windows (browser-based)",
+        "description": "Commercial-grade Web operations console for the Ada data platform.",
+        "url": "https://gm-console.kanvas.dev/",
+        "downloadUrl": "https://github.com/UlyssesLeoLee/ada",
+        "softwareVersion": "0.1.0",
+        "license": "https://github.com/UlyssesLeoLee/ada/blob/main/LICENSE",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "publisher": { "@type": "Organization", "name": "Ada Project Team", "url": "https://ada.kanvas.dev/" }
+      },
+      {
+        "@type": "Organization",
+        "name": "Ada Project Team",
+        "url": "https://ada.kanvas.dev/",
+        "logo": "https://gm-console.kanvas.dev/logo.png",
+        "sameAs": [
+          "https://github.com/UlyssesLeoLee/ada"
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <!-- Critical CSS inlined to keep first-paint fast.
+       Total CSS budget: < 4KB gz; total inline shell < 12KB. -->
   <style>
     :root {
-      color-scheme: light;
-      font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Hiragino Sans",
-        "Microsoft YaHei", sans-serif;
+      color-scheme: light dark;
+      --bg: #fafcff;
+      --bg-elev: #ffffff;
+      --fg: #1f2933;
+      --fg-muted: #52606d;
+      --fg-faint: #7b8794;
+      --brand: #1E88E5;
+      --brand-fg: #ffffff;
+      --focus: #ffb300;
+      --border: #e3eaf2;
+      --danger: #c0392b;
+      --success: #2e7d32;
     }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-           background: linear-gradient(180deg, #fafcff 0%, #eef4fb 100%); color: #1f2933; }
-    main { max-width: 640px; padding: 48px 32px; text-align: center; }
-    h1 { font-size: 40px; margin: 0 0 12px; letter-spacing: -0.02em; }
-    p  { font-size: 17px; line-height: 1.6; color: #52606d; }
-    a.brand { color: #1E88E5; font-weight: 600; text-decoration: none; }
-    a.brand:hover { text-decoration: underline; }
-    .cta { display: inline-block; margin-top: 24px; padding: 10px 18px; border-radius: 8px;
-           background: #1E88E5; color: white; font-weight: 600; }
-    footer { margin-top: 48px; font-size: 13px; color: #7b8794; }
-    footer a { color: inherit; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1220;
+        --bg-elev: #131c2e;
+        --fg: #e7eef7;
+        --fg-muted: #aab6c5;
+        --fg-faint: #7c8aa0;
+        --brand: #4dabf7;
+        --brand-fg: #0b1220;
+        --focus: #ffd54f;
+        --border: #233148;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   Roboto, "Hiragino Sans", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+      color: var(--fg);
+      background: linear-gradient(180deg, var(--bg) 0%, var(--bg-elev) 100%);
+      display: flex;
+      flex-direction: column;
+    }
+    /* Always-visible focus ring for keyboard users (WCAG 2.4.7) */
+    :focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+    a:hover { text-decoration-thickness: 2px; }
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      background: var(--brand);
+      color: var(--brand-fg);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-weight: 600;
+      z-index: 1000;
+    }
+    .skip-link:focus { left: 12px; top: 12px; }
+    header.site {
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    header.site .brand-mark {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+      color: var(--fg);
+      text-decoration: none;
+    }
+    header.site .brand-mark .dot { color: var(--brand); }
+    nav.primary ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    nav.primary a {
+      color: var(--fg-muted);
+      text-decoration: none;
+      font-weight: 500;
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    nav.primary a:hover, nav.primary a:focus-visible {
+      color: var(--fg);
+      background: color-mix(in srgb, var(--brand) 12%, transparent);
+    }
+    main {
+      flex: 1;
+      width: 100%;
+      max-width: 880px;
+      padding: 48px 24px 32px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: clamp(28px, 4.5vw, 44px);
+      line-height: 1.15;
+      margin: 0 0 12px;
+      letter-spacing: -0.02em;
+    }
+    .lede { font-size: clamp(16px, 2vw, 18px); color: var(--fg-muted); margin: 0 0 28px; }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      background: var(--bg-elev);
+      margin-bottom: 16px;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 18px; }
+    .card p { margin: 0; color: var(--fg-muted); font-size: 14px; }
+    .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      font: inherit;
+    }
+    .btn.primary { background: var(--brand); color: var(--brand-fg); }
+    .btn.primary:hover { filter: brightness(0.92); }
+    .btn.secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+    .btn.secondary:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+    footer.site {
+      border-top: 1px solid var(--border);
+      padding: 16px 24px;
+      font-size: 13px;
+      color: var(--fg-faint);
+      text-align: center;
+    }
+    footer.site a { color: inherit; }
+    footer.site .links { margin-bottom: 4px; }
+    /* SR-only utility for screen-reader labels */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>gm-console</h1>
-    <p>Commercial-grade Web operations console for the Ada data platform.
-       Inspect pipelines, monitor incidents, audit and recover — from anywhere.</p>
-    <a class="cta" href="https://github.com/UlyssesLeoLee/ada" rel="noopener">View on GitHub</a>
-    <footer>
-      <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/healthz">Health</a><br>
-      Built by the Ada Project Team · AGPL v3 + WRITTEN CONSENT
-    </footer>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site" role="banner">
+    <a class="brand-mark" href="/" aria-label="gm-console home">
+      gm<span class="dot">·</span>console
+    </a>
+    <nav class="primary" role="navigation" aria-label="Primary">
+      <ul>
+        <li><a href="/docs">Docs</a></li>
+        <li><a href="/api/v1/pipelines">Pipelines</a></li>
+        <li><a href="/healthz">Status</a></li>
+        <li><a href="https://github.com/UlyssesLeoLee/ada" rel="noopener external">GitHub</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <h1>Operations console for the Ada data platform</h1>
+    <p class="lede">
+      Inspect pipelines, monitor incidents, audit and recover — from anywhere.
+      Built for SREs and platform engineers who need a fast, accessible view
+      into a running platform.
+    </p>
+
+    <section aria-labelledby="feat-pipelines">
+      <div class="card">
+        <h2 id="feat-pipelines">Pipeline visibility</h2>
+        <p>Status, lag, throughput and failure rate at a glance. Powered by the Ada api-gateway.</p>
+      </div>
+      <div class="card">
+        <h2 id="feat-incidents">Incident response</h2>
+        <p>Live alerts with one-click runbook links. Acknowledge and resolve from the browser.</p>
+      </div>
+      <div class="card">
+        <h2 id="feat-audit">Audit + recover</h2>
+        <p>Every action is logged to an immutable trail. Roll back state changes safely.</p>
+      </div>
+    </section>
+
+    <div class="cta-row">
+      <a class="btn primary" href="/api/v1/pipelines" rel="noopener">
+        <span aria-hidden="true">▶</span><span>View pipelines</span>
+      </a>
+      <a class="btn secondary" href="/docs" rel="noopener">
+        <span>Read the docs</span>
+      </a>
+    </div>
   </main>
+
+  <footer class="site" role="contentinfo">
+    <div class="links">
+      <a href="/terms">Terms</a> ·
+      <a href="/privacy">Privacy</a> ·
+      <a href="/healthz">Health</a> ·
+      <a href="/sitemap.xml">Sitemap</a>
+    </div>
+    <div>Built by the Ada Project Team · AGPL v3 + WRITTEN CONSENT</div>
+  </footer>
+
+  <!-- App bootstrap: lazy-loads the rest of the SPA bundle when present.
+       The shell above renders fully without JS (progressive enhancement). -->
+  <script>
+    (function () {
+      var main = document.getElementById('main');
+      if (!main) return;
+      // Hook for downstream SPA bundle: when /app.js exists, load it.
+      // For v0.1.0 the shell is fully static — no JS bundle is required.
+      // Mark hydration so tests/CI can detect SPA readiness.
+      window.requestIdleCallback = window.requestIdleCallback || function (cb) {
+        return setTimeout(function () { cb({ didTimeout: false, timeRemaining: function () { return 0; } }); }, 1);
+      };
+      window.requestIdleCallback(function () {
+        document.documentElement.dataset.shellReady = '1';
+      });
+    })();
+  </script>
 </body>
 </html>

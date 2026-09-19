@@ -58,3 +58,48 @@ spec:
     - name: http
       port: 80
       targetPort: 8080
+---
+# Horizontal Pod Autoscaler — CPU-based, conservative ceiling.
+# gm-console is a thin reverse-proxy + static SPA; it is unlikely to be CPU
+# bound. Scale on CPU is fine; memory rarely moves.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gm-console
+  labels:
+    app: gm-console
+    tier: edge
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gm-console
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 30
+---
+# PodDisruptionBudget — keep at least one pod serving during voluntary
+# disruptions (node drains, upgrades). minAvailable=1 is safe with 2 replicas.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gm-console
+  labels:
+    app: gm-console
+    tier: edge
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: gm-console

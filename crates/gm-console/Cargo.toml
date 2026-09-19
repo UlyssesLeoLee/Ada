@@ -33,9 +33,13 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 rust-embed = "8"
 mime_guess = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+bytes = "1"
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread"] }
+http-body-util = "0.1"
 
 [profile.release]
 opt-level = 3
