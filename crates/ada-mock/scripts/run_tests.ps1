@@ -1,17 +1,17 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # run_tests.ps1 — 跑 mock crate 测试并出结构化结果.
 #
 # 用法:
 #   pwsh scripts/run_tests.ps1                  # 全测
 #   pwsh scripts/run_tests.ps1 -Feature server  # 开 server feature
 #   pwsh scripts/run_tests.ps1 -NoFailFast      # 失败也跑到底
-$ErrorActionPreference = 'Stop'
 
 param(
     [switch]$Feature = $false,
     [string]$FeatureName = 'server',
     [switch]$NoFailFast = $false
 )
+$ErrorActionPreference = 'Stop'
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 Set-Location $root

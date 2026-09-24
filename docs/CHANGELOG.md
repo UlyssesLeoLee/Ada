@@ -5,9 +5,9 @@
 
 > **ドキュメントID**：DOC-CHG-001
 > **文書分類**：横断文書
-> **バージョン**：v2.12.0
+> **バージョン**：v2.13.0
 > **制定日**：2026-08-19
-> **最終更新日**：2026-08-31
+> **最終更新日**：2026-09-20
 > **作成者**：Ada プロジェクトチーム
 > **レビュー**：TBD
 > **承認**：TBD
@@ -49,6 +49,7 @@
 | v2.10.0 | 2026-08-28 | v0.7.0: m12 CRDT 深化（YMap keyed by uuid + ports root YMap + edge dedup + yrs-wasm + `server` feature 默认 on） + observability SRE 硬化（real executor + Prometheus /metrics + hot-reload watcher + shared-secret auth + SLO Phase 7.5 + Error Budget policy）| Mavis（per DEC-008）| TBD | TBD |
 | v2.11.0 | 2026-08-28 | v0.7.1: m12 deep hardening（ClientId API 3 compat tests + legacy-array/legacy-nested `#[deprecated]` v0.8.0 移除 + wasm-crdt wasm32 build verification, flat schema 留 v0.7.2） + observability production-ready（HMAC-SHA256 via blake3 keyed_hash + replay protection + polling 1s 增强 + k8s Deployment/Service/NetworkPolicy/kustomize + main.rs production wiring 含 env 校验 + graceful shutdown 25s）| Mavis（per DEC-008）| TBD | TBD |
 | v2.12.0 | 2026-08-31 | v0.7.2: 独立测试脚手架 crate `ada-mock`（m99 占位, 4 能力层 mocks/server(f=server)/fixtures/builders + TDS 模板 + 3 实例 TDS + 3 scripts: coverage_report.ps1 / run_tests.ps1 / list_tds.py; 30 测试通过, 不接入业务 crate dev-dep per DR-002）| Mavis（per DEC-008）| TBD | TBD |
+| v2.13.0 | 2026-09-20 | ULYS-136 回归测试：拆分 UT/IT/ST 独立脚本（run_ut.ps1 / run_it.ps1 / run_st.ps1）+ 编排器 run_regression.ps1 + aggregate_results.py 汇总输出 summary.json/summary.md；修复既有 3 脚本的 `$ErrorActionPreference` 位置错误（PowerShell `param` 必须为首条可执行语句）。回归 30 测试 PASS（UT 27 + IT 1 + ST 2）| Mavis（per DEC-008）| TBD | TBD |
 
 ---
 

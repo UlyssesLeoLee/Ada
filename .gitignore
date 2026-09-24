@@ -68,6 +68,12 @@ fmt-old*.txt
 push*.txt
 push2.txt
 
+# ada-mock 回归测试产物 (ULYS-136 regression 2026-09-20)
+#   test-results/ 由 run_regression.ps1 生成, 不入库
+test-results/
+.ada-mock-target/
+crates/ada-mock/scripts/__pycache__/
+
 # Local backup of old worktree (non-git, no commit)
 /ada-changelog-bak/
 

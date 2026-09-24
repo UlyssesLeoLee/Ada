@@ -17,6 +17,25 @@ pwsh scripts/coverage_report.ps1 -Threshold 80
 python scripts/list_tds.py
 ```
 
+## 分層回歸 (ULYS-136)
+
+`run_regression.ps1` で UT/IT/ST を順次実行 + `summary.{json,md}` 出力:
+
+```bash
+# 全体回帰 (推奨エントリ)
+pwsh scripts/run_regression.ps1 -TargetDir .ada-mock-target
+
+# 各層を個別実行
+pwsh scripts/run_ut.ps1     # cargo test -p ada-mock --lib
+pwsh scripts/run_it.ps1     # cargo test -p ada-mock --test sample_mock_usage
+pwsh scripts/run_st.ps1     # cargo test -p ada-mock --test sample_mock_usage --features server
+
+# 集計のみ (既に各層 -latest.log がある状態で)
+python scripts/aggregate_results.py
+```
+
+出力: `test-results/regression-{ts}/summary.{json,md}` (各層 passed/failed + 失敗テスト名列挙).
+
 ## 模块地图
 
 | 路径 | 说明 |

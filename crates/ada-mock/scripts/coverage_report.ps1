@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # coverage_report.ps1 — 跑全 workspace 覆盖率并出 HTML 报告.
 #
 # 依赖:
@@ -13,12 +13,12 @@
 # 输出:
 #   target/coverage/html/index.html
 #   target/coverage/summary.txt   (本脚本附加生成)
-$ErrorActionPreference = 'Stop'
 
 param(
     [string]$Crate = '',
     [int]$Threshold = 0
 )
+$ErrorActionPreference = 'Stop'
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 Set-Location $root
