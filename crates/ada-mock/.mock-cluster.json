@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ulysses-star.local/schemas/mock-cluster/v0.1.0-draft.json",
+  "cluster_version": "0.1.0-draft",
+  "project": "ada-mock",
+  "cluster_id": "ada-mock--dev-cluster",
+  "description": "Ada ada-mock cluster switch v0.1 — L1 cluster_switch 雛形 (降級模式 L1 only, per ULYS-190 §4.6 G-MS-01 解決)",
+  "enabled": false,
+  "mode": "offline",
+  "fallback_to_real": false,
+  "aci_compat_version": "0.1.0-draft",
+  "supported_layers": ["ut", "it"],
+  "tags_taxonomy": ["testkit", "in-memory", "fixture", "builder"],
+  "mock_switch_trace_format": "cluster.enabled={cluster.enabled}, cluster.mode={cluster.mode} (L1 only 降級模式, 0 plugins/0 modules per G-MS-01 testkit scaffold 屬性)",
+  "created_at": "2026-09-23T23:35:00Z",
+  "schema_ref": {
+    "design_analysis": "https://github.com/UlyssesLeoLee/Star/blob/agent/minimaxm3/ulys-190/docs/architecture/2026-09-22-mock-switches/00-design-analysis.md",
+    "aci_schema": "(none — Ada 是 testkit scaffold, 不 emit ACI assertion 到外部 per design-analysis §2.2 項目 7 + §6 G-MS-01)",
+    "brief": "https://github.com/UlyssesLeoLee/Star/blob/agent/minimaxm3/ulys-190/docs/briefs/ulys-190-g-ms-01-ada-inventory.md"
+  },
+  "降級模式说明": "Ada ada-mock 是 testkit scaffold (in-memory mocks + fixtures + builders, 不对 emit ACI assertion), 跟 Star/RGS backend mock 屬性根本不同. 落地 L1 cluster_switch only (本文件, enabled=false 預設因 testkit 不对 emit), L2 plugin_switch + L3 module_switch 永久跳過 — 强落地违反 守門 #15 scope creep (over-engineering testkit)."
+}
