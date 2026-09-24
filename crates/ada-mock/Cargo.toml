@@ -42,6 +42,10 @@ thiserror = "1"
 parking_lot = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# ACI 跨项目 emitter (per ULYS-191 §4.3.4 brief v0.1)
+aci-emitter = { workspace = true }
+
 # `time` is only used by the `server` feature (FakeOtlpServer
 # payload builder stamps RFC3339 timestamps). Marked optional so
 # the default build path stays small. Cargo 1.85+ requires this

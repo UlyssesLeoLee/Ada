@@ -75,6 +75,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aci-emitter"
+version = "0.1.0"
+source = "git+https://github.com/UlyssesLeoLee/aci-emitter?rev=df28c56#df28c5646780afa8b84fe8c0b1831c392b76c869"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "ada-billing"
 version = "0.1.0"
 dependencies = [
@@ -397,6 +409,7 @@ dependencies = [
 name = "ada-mock"
 version = "0.1.0"
 dependencies = [
+ "aci-emitter",
  "ada-core",
  "chrono",
  "parking_lot",
