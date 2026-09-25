@@ -58,6 +58,7 @@ categories = ["data-structures", "database", "visualization"]
 # Workspace 共有依存関係（必要時に各 crate から参照）
 # tokio = { version = "1.40", features = ["full"] }
 # axum = "0.7"
+aci-emitter = { git = "https://github.com/UlyssesLeoLee/aci-emitter", rev = "df28c56" }  # ULYS-191 §4.3.4
 # serde = { version = "1", features = ["derive"] }
 # sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 # tracing = "0.1"
