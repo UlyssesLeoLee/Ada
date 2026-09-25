@@ -168,8 +168,10 @@ fn test_aci_emitter_v0_1_compatibility() {
         )
         .expect("build must succeed");
 
-    let path = "/tmp/ada-mock-acis-it3-test.json";
-    em.write(&assertion, path).ok();
+    let dir = tmp_dir();
+    let path = dir.join("assertion-it3.json");
+    em.write(&assertion, &path).expect("write must succeed");
+    let _ = fs::remove_dir_all(&dir);
 
     let python_field_names: Vec<String> =
         REQUIRED_FIELDS.iter().map(|s| (*s).to_string()).collect();
