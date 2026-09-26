@@ -1,6 +1,7 @@
 {
   "$schema": "https://ulysses-star.local/schemas/aci/v0.1.0-draft.json",
   "aci_version": "0.1.0-draft",
+  "aci_compat_version": "0.1.0-draft",
   "project": "ada-mock",
   "description": "Ada ada-mock ACI 契约 v0.1 — 提示词型断言 (LLM-可读)",
   "homepage": "https://github.com/UlyssesLeoLee/Ada/tree/dev/crates/ada-mock",
@@ -124,8 +125,64 @@
     "v1.0": "aci-summary CLI 完整版 + LLM Consumer"
   },
   "reference_docs": [
-    "docs/architecture/2026-09-22-aci-mock-interface/00-design-analysis.md v0.2",
-    "docs/briefs/ulys-191-star-mock-aci-stage1.md v0.1",
-    "scripts/_lib_validate.py (风格参考)"
-  ]
-}
+      "docs/architecture/2026-09-22-aci-mock-interface/00-design-analysis.md v0.2",
+      "docs/briefs/ulys-191-star-mock-aci-stage1.md v0.1",
+      "scripts/_lib_validate.py (风格参考)"
+    ],
+    "plugins": {
+      "mocks": {
+        "plugin_id": "mocks",
+        "enabled": true,
+        "default_mode": "offline",
+        "description": "In-memory mock resources — 4 能力层第 1 层 (Mock 资源)",
+        "modules": {
+          "event_bus": {"module_id": "event_bus", "enabled": true, "mode": "offline"},
+          "scheduler": {"module_id": "scheduler", "enabled": true, "mode": "offline"},
+          "connector": {"module_id": "connector", "enabled": true, "mode": "offline"}
+        }
+      },
+      "server": {
+        "plugin_id": "server",
+        "enabled": true,
+        "default_mode": "offline",
+        "description": "HTTP/OTLP interception — 4 能力层第 2 层 (FakeOtlpServer, feature-gated)",
+        "modules": {
+          "fake_otlp_server": {"module_id": "fake_otlp_server", "enabled": true, "mode": "offline"}
+        }
+      },
+      "fixtures": {
+        "plugin_id": "fixtures",
+        "enabled": true,
+        "default_mode": "offline",
+        "description": "Golden fixtures — 4 能力层第 3 层 (静态 JSON/NDJSON/CRDT 数据)",
+        "modules": {
+          "golden": {"module_id": "golden", "enabled": true, "mode": "offline"},
+          "loader": {"module_id": "loader", "enabled": true, "mode": "offline"}
+        }
+      },
+      "builders": {
+        "plugin_id": "builders",
+        "enabled": true,
+        "default_mode": "offline",
+        "description": "Builders — EventBuilder/JobBuilder/fixed_now/fresh_id (template scaffold)",
+        "modules": {
+          "builders": {"module_id": "builders", "enabled": true, "mode": "offline"}
+        }
+      },
+      "tds": {
+        "plugin_id": "tds",
+        "enabled": true,
+        "default_mode": "offline",
+        "description": "Test Design Spec (TDS) — 4 能力层第 4 层 (设计书 + 报告脚本)",
+        "modules": {
+          "tds_event_bus": {"module_id": "tds_event_bus", "enabled": true, "mode": "offline"},
+          "tds_scheduler": {"module_id": "tds_scheduler", "enabled": true, "mode": "offline"},
+          "tds_fake_otlp": {"module_id": "tds_fake_otlp", "enabled": true, "mode": "offline"}
+        }
+      }
+    },
+    "module_count_total": 10,
+    "module_count_enabled": 10,
+    "module_switch_stage": "stage7 (§4.4 per ULYS-190 cross-project pattern G-MS-04, mirror IM1.0 PR #24 + CATs PR #18 + Star PR #151 + RGS PR #51 + IDE1.0 stage5 + GitGit stage6; reverse of §4.6 G-MS-01 per D-Boy 2026-09-26 04:11 JST)"
+  }
+
