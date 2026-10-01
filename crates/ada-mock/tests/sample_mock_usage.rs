@@ -15,10 +15,8 @@ use ada_mock::mocks::{InMemoryEventBus, InMemoryScheduler, JobState, StubConnect
 #[test]
 fn four_layer_smoke() {
     // ----- 1) fixture 加载黄金集 (能力层 3) -----
-    let envelope: GoldenEnvelope = load_envelope(&FixturePath::relative(
-        "events_basic.envelope.json",
-    ))
-    .expect("load envelope");
+    let envelope: GoldenEnvelope =
+        load_envelope(&FixturePath::relative("events_basic.envelope.json")).expect("load envelope");
     assert_eq!(envelope.schema_version, 1);
     assert_eq!(envelope.events.len(), 3);
 
@@ -33,7 +31,9 @@ fn four_layer_smoke() {
 
     // 入队 3 个 job
     let j1 = JobBuilder::new("ingest").enqueue(&mut sched).expect("j1");
-    let j2 = JobBuilder::new("transform").enqueue(&mut sched).expect("j2");
+    let j2 = JobBuilder::new("transform")
+        .enqueue(&mut sched)
+        .expect("j2");
     let j3 = JobBuilder::new("export").enqueue(&mut sched).expect("j3");
     assert_eq!(sched.in_flight(), 3);
 
@@ -62,16 +62,15 @@ fn four_layer_smoke() {
     assert_eq!(sched.in_flight(), 1);
 
     // ----- 5) StubConnector 一次性读全部 -----
-    let mut c = StubConnector::new(StubKind::Http)
-        .with_records(
-            records
-                .iter()
-                .map(|v| ada_mock::mocks::Record {
-                    id: v["id"].as_str().unwrap().to_string(),
-                    payload: v["payload"].clone(),
-                })
-                .collect(),
-        );
+    let mut c = StubConnector::new(StubKind::Http).with_records(
+        records
+            .iter()
+            .map(|v| ada_mock::mocks::Record {
+                id: v["id"].as_str().unwrap().to_string(),
+                payload: v["payload"].clone(),
+            })
+            .collect(),
+    );
     let got = c.read_all().expect("read");
     assert_eq!(got.len(), 3);
     assert_eq!(c.read_count(), 3);

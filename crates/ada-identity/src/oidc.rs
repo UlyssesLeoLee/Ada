@@ -32,7 +32,11 @@ pub fn generate_code_verifier() -> String {
 /// persist into a server-side session bound to the browser cookie.
 pub fn begin_flow(
     cfg: &OidcProviderConfig,
-) -> Result<(String /* state */, String /* nonce */, String /* code_verifier */)> {
+) -> Result<(
+    String, /* state */
+    String, /* nonce */
+    String, /* code_verifier */
+)> {
     if cfg.scopes.is_empty() {
         return Err(IdentityError::Oidc("scopes empty".into()));
     }

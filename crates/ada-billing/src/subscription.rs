@@ -104,10 +104,7 @@ impl Subscription {
 /// is legal; `Err(BillingError::StripeApi(...))` otherwise. We
 /// reuse `StripeApi(409)` for illegal transitions to keep the
 /// variant count narrow.
-pub fn validate_transition(
-    from: SubscriptionStatus,
-    to: SubscriptionStatus,
-) -> Result<()> {
+pub fn validate_transition(from: SubscriptionStatus, to: SubscriptionStatus) -> Result<()> {
     use SubscriptionStatus::*;
     let ok = matches!(
         (from, to),
@@ -250,11 +247,19 @@ mod tests {
     #[test]
     fn legal_transitions_are_allowed() {
         // Active <-> PastDue <-> Unpaid are all legal.
-        assert!(validate_transition(SubscriptionStatus::Active, SubscriptionStatus::PastDue).is_ok());
-        assert!(validate_transition(SubscriptionStatus::PastDue, SubscriptionStatus::Active).is_ok());
-        assert!(validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Canceled).is_ok());
+        assert!(
+            validate_transition(SubscriptionStatus::Active, SubscriptionStatus::PastDue).is_ok()
+        );
+        assert!(
+            validate_transition(SubscriptionStatus::PastDue, SubscriptionStatus::Active).is_ok()
+        );
+        assert!(
+            validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Canceled).is_ok()
+        );
         // Self-loop is always legal (replays).
-        assert!(validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Active).is_ok());
+        assert!(
+            validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Active).is_ok()
+        );
     }
 
     #[test]

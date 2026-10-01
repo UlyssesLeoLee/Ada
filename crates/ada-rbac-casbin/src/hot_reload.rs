@@ -136,10 +136,7 @@ impl HotReload {
                             }
                         }
                         Ok(ev) => {
-                            eprintln!(
-                                "[hot_reload] ignored: {:?} paths={:?}",
-                                ev.kind, ev.paths
-                            );
+                            eprintln!("[hot_reload] ignored: {:?} paths={:?}", ev.kind, ev.paths);
                         }
                         Err(e) => {
                             eprintln!("[hot_reload] stream error: {e}");

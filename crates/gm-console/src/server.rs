@@ -28,9 +28,7 @@ pub async fn serve(cfg: Config) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(crate::Error::Io)?;
-    axum::serve(listener, app)
-        .await
-        .map_err(crate::Error::Io)?;
+    axum::serve(listener, app).await.map_err(crate::Error::Io)?;
     Ok(())
 }
 

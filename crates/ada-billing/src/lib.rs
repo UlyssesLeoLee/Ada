@@ -65,7 +65,7 @@ pub use customer::{Customer, CustomerId, CustomerService};
 pub use entitlement::{Entitlement, Feature};
 pub use error::{BillingError, Result};
 pub use plan::Plan;
-pub use portal::{PortalSession, PortalService};
+pub use portal::{PortalService, PortalSession};
 pub use subscription::{Subscription, SubscriptionService, SubscriptionStatus};
 pub use webhook::{
     BillingEvent, EventSink, IdempotencyStore, WebhookHandler, WebhookOutcome, WebhookService,

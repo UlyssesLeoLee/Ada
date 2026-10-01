@@ -60,7 +60,10 @@ pub fn router(state: SharedState) -> Router {
         .route("/robots.txt", get(robots_txt))
         .route("/sitemap.xml", get(sitemap_xml))
         // api reverse proxy — wildcard catches any HTTP method
-        .route("/api/*path", get(proxy).post(proxy).put(proxy).delete(proxy).patch(proxy))
+        .route(
+            "/api/*path",
+            get(proxy).post(proxy).put(proxy).delete(proxy).patch(proxy),
+        )
         .with_state(state)
         .fallback(static_fallback)
 }
@@ -135,7 +138,12 @@ async fn proxy(State(cfg): State<SharedState>, uri: Uri, req: Request) -> Result
     // Strip the `/api` prefix; preserve everything else (path + query).
     let path_and_query = uri
         .path_and_query()
-        .map(|pq| pq.as_str().strip_prefix("/api").unwrap_or(pq.as_str()).to_string())
+        .map(|pq| {
+            pq.as_str()
+                .strip_prefix("/api")
+                .unwrap_or(pq.as_str())
+                .to_string()
+        })
         .unwrap_or_else(|| uri.path().to_string());
 
     let upstream = format!(
@@ -169,8 +177,8 @@ async fn proxy(State(cfg): State<SharedState>, uri: Uri, req: Request) -> Result
             crate::Error::Upstream(e.to_string())
         })?;
 
-    let status = StatusCode::from_u16(upstream_resp.status().as_u16())
-        .unwrap_or(StatusCode::BAD_GATEWAY);
+    let status =
+        StatusCode::from_u16(upstream_resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let resp_headers = response_headers(upstream_resp.headers());
     let body_bytes = upstream_resp
         .bytes()
@@ -187,13 +195,35 @@ async fn proxy(State(cfg): State<SharedState>, uri: Uri, req: Request) -> Result
 /// strip hop-by-hop + Host + reqwest-restricted.
 fn forward_headers(incoming: &HeaderMap) -> ReqHeaderMap {
     let mut out = ReqHeaderMap::with_capacity(incoming.len());
-    let allowed = ["authorization", "content-type", "content-length", "content-encoding",
-                   "accept", "accept-encoding", "accept-language", "user-agent",
-                   "x-request-id", "x-forwarded-for", "x-forwarded-proto", "x-tenant-id",
-                   "x-correlation-id", "x-trace-id"];
-    let denied = ["host", "connection", "transfer-encoding", "upgrade", "cookie",
-                  "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
-                  "trailers", "expect"];
+    let allowed = [
+        "authorization",
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "user-agent",
+        "x-request-id",
+        "x-forwarded-for",
+        "x-forwarded-proto",
+        "x-tenant-id",
+        "x-correlation-id",
+        "x-trace-id",
+    ];
+    let denied = [
+        "host",
+        "connection",
+        "transfer-encoding",
+        "upgrade",
+        "cookie",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "expect",
+    ];
     for (name, value) in incoming.iter() {
         let lname = name.as_str().to_ascii_lowercase();
         if denied.iter().any(|d| *d == lname.as_str()) {
@@ -202,8 +232,10 @@ fn forward_headers(incoming: &HeaderMap) -> ReqHeaderMap {
         if !allowed.iter().any(|a| *a == lname.as_str()) {
             continue;
         }
-        if let (Ok(n), Ok(v)) = (ReqHeaderName::from_bytes(name.as_str().as_bytes()),
-                                 HeaderValue::from_bytes(value.as_bytes())) {
+        if let (Ok(n), Ok(v)) = (
+            ReqHeaderName::from_bytes(name.as_str().as_bytes()),
+            HeaderValue::from_bytes(value.as_bytes()),
+        ) {
             out.append(n, v);
         }
     }
@@ -214,9 +246,18 @@ fn forward_headers(incoming: &HeaderMap) -> ReqHeaderMap {
 /// stripping hop-by-hop / forbidden response headers.
 fn response_headers(upstream: &reqwest::header::HeaderMap) -> HeaderMap {
     let mut out = HeaderMap::with_capacity(upstream.len());
-    let denied = ["connection", "transfer-encoding", "upgrade", "keep-alive",
-                  "proxy-authenticate", "proxy-authorization", "te", "trailers",
-                  "server", "set-cookie"];
+    let denied = [
+        "connection",
+        "transfer-encoding",
+        "upgrade",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "server",
+        "set-cookie",
+    ];
     for (name, value) in upstream.iter() {
         let lname = name.as_str().to_ascii_lowercase();
         if denied.iter().any(|d| *d == lname.as_str()) {
@@ -273,7 +314,8 @@ async fn try_disk(dir: &str, path: &str) -> Option<Response> {
     *resp.status_mut() = StatusCode::OK;
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_str(&mime).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        HeaderValue::from_str(&mime)
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
     );
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -290,7 +332,11 @@ fn serve_index() -> Response {
         .header(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))
         .body(Body::from(body.to_string()))
         .unwrap_or_else(|_| {
-            (StatusCode::INTERNAL_SERVER_ERROR, "static fallback build failed").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "static fallback build failed",
+            )
+                .into_response()
         })
 }
 

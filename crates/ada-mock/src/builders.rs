@@ -11,7 +11,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::mocks::{InMemoryEvent, InMemoryEventBus, InMemoryScheduler, JobState, ScheduledJob, SchedulerError};
+use crate::mocks::{
+    InMemoryEvent, InMemoryEventBus, InMemoryScheduler, JobState, ScheduledJob, SchedulerError,
+};
 use crate::Result;
 
 // ---------------------------------------------------------------------------
@@ -100,7 +102,10 @@ impl JobBuilder {
 
     /// 入队 — 调度器分配 ID, 返回 `ScheduledJob` 句柄.
     /// 错误用 `SchedulerError` 表示, 通过 `From` 桥接到 crate 顶级 `Result`.
-    pub fn enqueue(self, sched: &mut InMemoryScheduler) -> std::result::Result<ScheduledJob, SchedulerError> {
+    pub fn enqueue(
+        self,
+        sched: &mut InMemoryScheduler,
+    ) -> std::result::Result<ScheduledJob, SchedulerError> {
         sched.enqueue(self.kind, self.id, self.initial_state)
     }
 }

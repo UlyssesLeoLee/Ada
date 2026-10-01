@@ -34,11 +34,7 @@ pub struct Jwt {
 /// validator is configured to accept unsigned tokens at the
 /// dev-only listener; the production listener requires real RS256
 /// signatures from the JWKS endpoint.
-pub fn mint_jwt(
-    claims: Claims,
-    kid: &str,
-    _private_key: &str,
-) -> Result<Jwt> {
+pub fn mint_jwt(claims: Claims, kid: &str, _private_key: &str) -> Result<Jwt> {
     let header = serde_json::json!({
         "alg": "RS256",
         "typ": "JWT",
@@ -89,10 +85,10 @@ pub fn verify_jwt_stub(token: &str) -> Result<Claims> {
     if parts.len() != 3 {
         return Err(IdentityError::JwtVerification);
     }
-    let body_bytes = crate::base64util::b64url_decode(parts[1])
-        .map_err(|_| IdentityError::JwtVerification)?;
-    let claims: Claims = serde_json::from_slice(&body_bytes)
-        .map_err(|_| IdentityError::JwtVerification)?;
+    let body_bytes =
+        crate::base64util::b64url_decode(parts[1]).map_err(|_| IdentityError::JwtVerification)?;
+    let claims: Claims =
+        serde_json::from_slice(&body_bytes).map_err(|_| IdentityError::JwtVerification)?;
     if claims.exp <= Utc::now().timestamp() {
         return Err(IdentityError::JwtVerification);
     }

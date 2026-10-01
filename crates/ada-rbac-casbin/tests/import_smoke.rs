@@ -14,6 +14,14 @@ fn from_m11_returns_a_working_enforcer() {
 #[test]
 fn bundled_policy_set_files_exist() {
     let set = PolicySet::bundled();
-    assert!(set.model_path.exists(), "model.conf not found at {}", set.model_path.display());
-    assert!(set.policy_path.exists(), "base_policy.csv not found at {}", set.policy_path.display());
+    assert!(
+        set.model_path.exists(),
+        "model.conf not found at {}",
+        set.model_path.display()
+    );
+    assert!(
+        set.policy_path.exists(),
+        "base_policy.csv not found at {}",
+        set.policy_path.display()
+    );
 }

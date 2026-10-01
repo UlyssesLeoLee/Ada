@@ -61,7 +61,10 @@ impl PortalService {
         email: &str,
     ) -> Result<PortalSession> {
         let customer = self.customers.get_or_create(user_id, email).await?;
-        let cid = customer.stripe_customer_id.clone().ok_or(BillingError::MalformedEnvelope)?;
+        let cid = customer
+            .stripe_customer_id
+            .clone()
+            .ok_or(BillingError::MalformedEnvelope)?;
         let now = chrono::Utc::now().timestamp();
         if let Some(cached) = self.cache.by_user.read().get(&cid.0).cloned() {
             if cached.expires_at_unix > now {
@@ -105,7 +108,10 @@ impl PortalService {
             customer_id: cid,
             expires_at_unix: now + 3600,
         };
-        self.cache.by_user.write().insert(session.customer_id.0.clone(), session.clone());
+        self.cache
+            .by_user
+            .write()
+            .insert(session.customer_id.0.clone(), session.clone());
         Ok(session)
     }
 }
@@ -116,15 +122,13 @@ mod tests {
     use crate::config::Config;
 
     fn portal_cfg() -> Arc<Config> {
-        Arc::new(
-            Config {
-                stripe_secret_key: "sk_test_dummy".into(),
-                stripe_webhook_secret: "whsec_dummy".into(),
-                stripe_api_version: "2025-08-27.basil".into(),
-                stripe_portal_return_url: Some("https://app.example.com/billing".into()),
-                stripe_base_url: "https://api.stripe.com/v1".into(),
-            },
-        )
+        Arc::new(Config {
+            stripe_secret_key: "sk_test_dummy".into(),
+            stripe_webhook_secret: "whsec_dummy".into(),
+            stripe_api_version: "2025-08-27.basil".into(),
+            stripe_portal_return_url: Some("https://app.example.com/billing".into()),
+            stripe_base_url: "https://api.stripe.com/v1".into(),
+        })
     }
 
     #[test]

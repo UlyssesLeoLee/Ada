@@ -1,7 +1,7 @@
 //! abac_smoke — tenant isolation + attrs builder behaviour.
 
-use ada_m11_rbac_collab::{Action, ResourceType};
 use ada_m11_rbac_collab::CollaborationMap;
+use ada_m11_rbac_collab::{Action, ResourceType};
 use ada_rbac_casbin::{Attrs, Enforcer, PolicySet};
 
 fn build() -> Enforcer {

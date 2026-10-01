@@ -150,7 +150,10 @@ fn watcher_reloads_after_policy_mutation() {
             None,
         )
         .expect("read ok");
-    assert!(allowed_read, "read policy line was untouched; must still pass");
+    assert!(
+        allowed_read,
+        "read policy line was untouched; must still pass"
+    );
 
     // Suppress unused warnings — these are here to keep the
     // collaborator + m11 imports live for future expansion.
@@ -189,5 +192,8 @@ fn reload_now_is_synchronous_and_idempotent() {
             None,
         )
         .expect("enforce");
-    assert!(allowed, "after reload_now, enforcer still allows owner write");
+    assert!(
+        allowed,
+        "after reload_now, enforcer still allows owner write"
+    );
 }

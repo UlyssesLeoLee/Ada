@@ -126,7 +126,10 @@ mod tests {
         std::env::set_var("STRIPE_SECRET_KEY", "sk_test_dummy");
         std::env::set_var("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
         std::env::set_var("STRIPE_API_VERSION", "2025-08-27.basil");
-        std::env::set_var("STRIPE_PORTAL_RETURN_URL", "https://app.example.com/billing");
+        std::env::set_var(
+            "STRIPE_PORTAL_RETURN_URL",
+            "https://app.example.com/billing",
+        );
     }
 
     fn clear_env_all() {

@@ -11,9 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ada_m11_rbac_collab::{
-    Action, CollaborationMap, ResourceType as M11ResourceType, Role,
-};
+use ada_m11_rbac_collab::{Action, CollaborationMap, ResourceType as M11ResourceType, Role};
 
 use crate::attrs::Attrs;
 use crate::error::{RbacCasbinError, Result};
@@ -88,9 +86,7 @@ impl HandRolledEnforcer {
         m11: Option<&CollaborationMap>,
     ) -> Result<bool> {
         let composite = format!("{}:{}", object_kind.as_str(), object_id);
-        if !self
-            .enforce(user_id, &composite, action, attrs, m11)?
-        {
+        if !self.enforce(user_id, &composite, action, attrs, m11)? {
             return Ok(false);
         }
         let _ = self.inner.perms.get(&(Role::Owner, object_kind));
@@ -103,13 +99,7 @@ impl HandRolledEnforcer {
         &self.inner.set
     }
 
-    fn check(
-        &self,
-        role: Role,
-        _object_id: &str,
-        action: Action,
-        attrs: &Attrs,
-    ) -> Result<bool> {
+    fn check(&self, role: Role, _object_id: &str, action: Action, attrs: &Attrs) -> Result<bool> {
         if matches!(action, Action::Delete) && !attrs.is_owner {
             return Ok(false);
         }
@@ -195,7 +185,12 @@ fn build_perm_map() -> HashMap<(Role, M11ResourceType), Vec<Action>> {
     );
     m.insert(
         (Role::Admin, M11ResourceType::Credential),
-        r(&[Action::Read, Action::Write, Action::Execute, Action::ShareManage]),
+        r(&[
+            Action::Read,
+            Action::Write,
+            Action::Execute,
+            Action::ShareManage,
+        ]),
     );
     m.insert(
         (Role::Editor, M11ResourceType::Canvas),
@@ -222,8 +217,14 @@ fn build_perm_map() -> HashMap<(Role, M11ResourceType), Vec<Action>> {
         r(&[Action::Read]),
     );
     m.insert((Role::Viewer, M11ResourceType::Canvas), r(&[Action::Read]));
-    m.insert((Role::Viewer, M11ResourceType::Workspace), r(&[Action::Read]));
-    m.insert((Role::Viewer, M11ResourceType::Credential), r(&[Action::Read]));
+    m.insert(
+        (Role::Viewer, M11ResourceType::Workspace),
+        r(&[Action::Read]),
+    );
+    m.insert(
+        (Role::Viewer, M11ResourceType::Credential),
+        r(&[Action::Read]),
+    );
     m
 }
 

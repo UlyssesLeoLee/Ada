@@ -1,8 +1,8 @@
 //! enforce_smoke — Owner allows, Viewer denies.
 
+use ada_m11_rbac_collab::CollaborationMap;
 use ada_m11_rbac_collab::{Action, ResourceType};
 use ada_rbac_casbin::{Attrs, Enforcer, PolicySet};
-use ada_m11_rbac_collab::CollaborationMap;
 
 fn build() -> Enforcer {
     Enforcer::from_m11(&PolicySet::bundled(), &CollaborationMap::new()).expect("enforcer")

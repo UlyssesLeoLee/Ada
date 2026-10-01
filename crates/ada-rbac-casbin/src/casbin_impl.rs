@@ -123,7 +123,13 @@ impl RealEnforcer {
     ) -> Result<bool> {
         let guard = run_casbin_blocking(self.inner.lock());
         let is_owner_token = if attrs.is_owner { "true" } else { "false" };
-        let tuple = (user_id, obj, action.as_str(), attrs.tenant_id.as_str(), is_owner_token);
+        let tuple = (
+            user_id,
+            obj,
+            action.as_str(),
+            attrs.tenant_id.as_str(),
+            is_owner_token,
+        );
         guard
             .enforce(tuple)
             .map_err(|e| RbacCasbinError::Internal(format!("casbin enforce: {e}")))
@@ -155,9 +161,9 @@ fn build_enforcer(model_path: &Path, policy_path: &Path) -> Result<CasbinEnforce
     })?;
 
     let mut enforcer: CasbinEnforcer = run_casbin_blocking(async move {
-        let model = DefaultModel::from_str(&body).await.map_err(|e| {
-            RbacCasbinError::ReloadFailed(format!("model parse: {e}"))
-        })?;
+        let model = DefaultModel::from_str(&body)
+            .await
+            .map_err(|e| RbacCasbinError::ReloadFailed(format!("model parse: {e}")))?;
         let adapter = FileAdapter::new(policy_str);
         CasbinEnforcer::new(model, adapter)
             .await

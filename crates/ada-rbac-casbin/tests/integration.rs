@@ -24,13 +24,7 @@ fn owner_can_write_canvas_without_owner_flag() {
     let e = build();
     let attrs = Attrs::new("tenant-a");
     let allowed = e
-        .enforce(
-            "role:owner",
-            "canvas:abc",
-            Action::Write,
-            &attrs,
-            None,
-        )
+        .enforce("role:owner", "canvas:abc", Action::Write, &attrs, None)
         .expect("enforce ok");
     assert!(
         allowed,
@@ -43,13 +37,7 @@ fn viewer_cannot_delete_canvas_without_owner_flag() {
     let e = build();
     let attrs = Attrs::new("tenant-a");
     let allowed = e
-        .enforce(
-            "role:viewer",
-            "canvas:abc",
-            Action::Delete,
-            &attrs,
-            None,
-        )
+        .enforce("role:viewer", "canvas:abc", Action::Delete, &attrs, None)
         .expect("enforce ok");
     assert!(
         !allowed,
@@ -67,26 +55,17 @@ fn role_ladder_owner_satisfies_editor_policy_line() {
     let e = build();
     let attrs = Attrs::new("tenant-a");
     let allowed = e
-        .enforce(
-            "role:owner",
-            "canvas:abc",
-            Action::Write,
-            &attrs,
-            None,
-        )
+        .enforce("role:owner", "canvas:abc", Action::Write, &attrs, None)
         .expect("enforce ok");
-    assert!(allowed, "role ladder: owner -> editor write line must match");
+    assert!(
+        allowed,
+        "role ladder: owner -> editor write line must match"
+    );
 
     // And vice-versa: a request with `r.sub = "role:editor"` also
     // satisfies that same policy line because it is its own sub.
     let allowed_editor = e
-        .enforce(
-            "role:editor",
-            "canvas:abc",
-            Action::Write,
-            &attrs,
-            None,
-        )
+        .enforce("role:editor", "canvas:abc", Action::Write, &attrs, None)
         .expect("enforce ok");
     assert!(
         allowed_editor,
@@ -99,13 +78,7 @@ fn enforce_typed_matches_untyped_for_same_inputs() {
     let e = build();
     let attrs = Attrs::new("tenant-a");
     let untyped = e
-        .enforce(
-            "role:owner",
-            "canvas:abc",
-            Action::Write,
-            &attrs,
-            None,
-        )
+        .enforce("role:owner", "canvas:abc", Action::Write, &attrs, None)
         .expect("enforce ok");
     let typed = e
         .enforce_typed(
@@ -147,5 +120,8 @@ fn owner_flag_required_for_delete() {
         )
         .expect("ok");
     assert!(owner_allowed, "owner-flagged Delete must be allowed");
-    assert!(!no_owner_denied, "non-owner Delete must be denied by is_owner gate");
+    assert!(
+        !no_owner_denied,
+        "non-owner Delete must be denied by is_owner gate"
+    );
 }

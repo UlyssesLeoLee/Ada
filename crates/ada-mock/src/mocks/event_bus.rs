@@ -78,7 +78,10 @@ impl InMemoryEventBus {
         }
         let mut g = self.inner.lock();
         let id = SubscriberId(Uuid::new_v4());
-        g.subscribers.push(Subscriber { id, topic: topic.clone() });
+        g.subscribers.push(Subscriber {
+            id,
+            topic: topic.clone(),
+        });
         g.queues.push(VecDeque::new());
         Ok(id)
     }
@@ -154,7 +157,9 @@ mod tests {
     fn subscribe_publish_recv_round_trip() {
         let bus = InMemoryEventBus::new();
         let sub = bus.subscribe("a.b").unwrap();
-        let ev = bus.publish("a.b", serde_json::json!({"k": 1}), None).unwrap();
+        let ev = bus
+            .publish("a.b", serde_json::json!({"k": 1}), None)
+            .unwrap();
         let got = bus.try_recv(sub).unwrap().expect("one event");
         assert_eq!(got.id, ev.id);
         assert_eq!(got.seq, 1);

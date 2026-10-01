@@ -100,10 +100,7 @@ impl Entitlement {
 /// `SubscriptionService`. This is the boundary the api-gateway
 /// uses: pass a `&SubscriptionService`, get back an `Entitlement`.
 #[must_use]
-pub fn entitlement_for(
-    subs: &SubscriptionService,
-    tenant: TenantId,
-) -> Entitlement {
+pub fn entitlement_for(subs: &SubscriptionService, tenant: TenantId) -> Entitlement {
     Entitlement::for_user(subs, UserId(uuid::Uuid::nil()), tenant)
 }
 

@@ -49,9 +49,8 @@ fn check_readable(p: &Path) -> Result<()> {
             p.display()
         )));
     }
-    let md = std::fs::metadata(p).map_err(|e| {
-        RbacCasbinError::ReloadFailed(format!("metadata {}: {e}", p.display()))
-    })?;
+    let md = std::fs::metadata(p)
+        .map_err(|e| RbacCasbinError::ReloadFailed(format!("metadata {}: {e}", p.display())))?;
     if md.permissions().readonly() && !p.is_file() {
         return Err(RbacCasbinError::ReloadFailed(format!(
             "not a regular file: {}",

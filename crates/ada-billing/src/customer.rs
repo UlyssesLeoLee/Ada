@@ -69,7 +69,9 @@ impl CustomerRegistry {
 
     pub fn ensure(&self, user_id: UserId) -> Customer {
         let mut w = self.by_user.write();
-        w.entry(user_id).or_insert_with(|| Customer::new(user_id)).clone()
+        w.entry(user_id)
+            .or_insert_with(|| Customer::new(user_id))
+            .clone()
     }
 }
 
@@ -89,7 +91,11 @@ impl CustomerService {
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("reqwest client build");
-        Self { cfg, http, registry }
+        Self {
+            cfg,
+            http,
+            registry,
+        }
     }
 
     /// Look up the local customer; lazily create + persist it on
@@ -163,7 +169,10 @@ mod tests {
         let mut c2 = c.clone();
         c2.stripe_customer_id = Some(CustomerId("cus_test_1".into()));
         reg.upsert(c2.clone());
-        assert_eq!(reg.get(uid).and_then(|c| c.stripe_customer_id), c2.stripe_customer_id);
+        assert_eq!(
+            reg.get(uid).and_then(|c| c.stripe_customer_id),
+            c2.stripe_customer_id
+        );
     }
 
     #[test]

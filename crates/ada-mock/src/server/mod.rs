@@ -94,7 +94,8 @@ impl FakeOtlpServer {
 
     /// 主动关闭 (drop 也会自动关).
     pub fn close(mut self) {
-        self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         // 主动断连以让 accept 循环退出
         let _ = TcpStream::connect(self.addr);
         if let Some(j) = self.join.take() {
@@ -105,7 +106,8 @@ impl FakeOtlpServer {
 
 impl Drop for FakeOtlpServer {
     fn drop(&mut self) {
-        self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = TcpStream::connect(self.addr);
         if let Some(j) = self.join.take() {
             let _ = j.join();
@@ -164,9 +166,7 @@ fn handle_one(mut stream: TcpStream, rec: &Recorder) -> Option<TcpStream> {
 
     rec.push(CapturedRequest { raw, body });
 
-    let _ = stream.write_all(
-        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-    );
+    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     Some(stream)
 }
 

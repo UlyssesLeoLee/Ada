@@ -120,9 +120,9 @@ impl Inner {
     fn from_set(set: &PolicySet) -> Result<Self> {
         #[cfg(not(feature = "hand-rolled"))]
         {
-            Ok(Self::Casbin(crate::casbin_impl::RealEnforcer::from_policy_set(
-                set,
-            )?))
+            Ok(Self::Casbin(
+                crate::casbin_impl::RealEnforcer::from_policy_set(set)?,
+            ))
         }
         #[cfg(feature = "hand-rolled")]
         {

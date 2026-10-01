@@ -104,7 +104,10 @@ impl InMemoryScheduler {
         }
 
         if g.in_flight >= g.capacity
-            && matches!(initial_state, JobState::Pending | JobState::Queued | JobState::Running)
+            && matches!(
+                initial_state,
+                JobState::Pending | JobState::Queued | JobState::Running
+            )
         {
             return Err(SchedulerError::QueueFull(g.capacity));
         }
@@ -114,8 +117,10 @@ impl InMemoryScheduler {
             kind,
             state: initial_state,
         };
-        if !matches!(initial_state, JobState::Succeeded | JobState::Failed | JobState::Cancelled)
-        {
+        if !matches!(
+            initial_state,
+            JobState::Succeeded | JobState::Failed | JobState::Cancelled
+        ) {
             g.in_flight += 1;
         }
         g.jobs.push(job.clone());
@@ -174,7 +179,10 @@ impl InMemoryScheduler {
 }
 
 fn is_terminal(s: JobState) -> bool {
-    matches!(s, JobState::Succeeded | JobState::Failed | JobState::Cancelled)
+    matches!(
+        s,
+        JobState::Succeeded | JobState::Failed | JobState::Cancelled
+    )
 }
 
 fn assert_legal(from: JobState, to: JobState) -> Result<(), SchedulerError> {

@@ -89,7 +89,9 @@ impl IdempotencyStore {
 
     #[must_use]
     pub fn has_seen(&self, event_id: &str, tenant_id: &str) -> bool {
-        self.seen.read().contains(&(event_id.to_owned(), tenant_id.to_owned()))
+        self.seen
+            .read()
+            .contains(&(event_id.to_owned(), tenant_id.to_owned()))
     }
 }
 
@@ -136,9 +138,7 @@ impl WebhookHandler {
         let mut t: Option<i64> = None;
         let mut v1: Option<&str> = None;
         for part in header.split(',') {
-            let (k, v) = part
-                .split_once('=')
-                .ok_or(BillingError::InvalidSignature)?;
+            let (k, v) = part.split_once('=').ok_or(BillingError::InvalidSignature)?;
             match k.trim() {
                 "t" => t = v.trim().parse().ok(),
                 "v1" if v1.is_none() => v1 = Some(v.trim()),
@@ -156,7 +156,10 @@ impl WebhookHandler {
         mac.update(format!("{t}.").as_bytes());
         mac.update(body);
         let got = hex::encode(mac.finalize().into_bytes());
-        if bool::from(subtle::ConstantTimeEq::ct_eq(got.as_bytes(), expected.as_bytes())) {
+        if bool::from(subtle::ConstantTimeEq::ct_eq(
+            got.as_bytes(),
+            expected.as_bytes(),
+        )) {
             Ok(())
         } else {
             Err(BillingError::InvalidSignature)
@@ -203,8 +206,7 @@ impl WebhookHandler {
             event_id,
             kind,
             tenant_id: TenantId(
-                uuid::Uuid::parse_str(&tenant_id)
-                    .map_err(|_| BillingError::MalformedEnvelope)?,
+                uuid::Uuid::parse_str(&tenant_id).map_err(|_| BillingError::MalformedEnvelope)?,
             ),
             target_id,
         });
