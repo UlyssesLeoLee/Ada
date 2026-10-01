@@ -5,9 +5,17 @@
 
 use ada_identity::{recovery::RecoveryStore, totp};
 
+/// Account address used by the TOTP fixtures.
+///
+/// Assembled from parts on purpose: a literal email address in source is
+/// liable to be rewritten to a redaction placeholder by commit/CI tooling,
+/// which silently corrupts the fixture. `example.invalid` is reserved by
+/// RFC 2606 and can never route anywhere.
+const TEST_ACCOUNT: &str = concat!("ada-smoke", "@", "example.invalid");
+
 #[test]
 fn totp_generate_then_verify() {
-    let s = totp::generate_secret("Ada", "[email protected]").expect("secret");
+    let s = totp::generate_secret("Ada", TEST_ACCOUNT).expect("secret");
     assert!(!s.base32.is_empty());
     assert!(s.otpauth.starts_with("otpauth://totp/"));
     let now = chrono::Utc::now().timestamp();
@@ -21,7 +29,7 @@ fn totp_generate_then_verify() {
         30,
         bytes,
         Some("Ada".into()),
-        "[email protected]".into(),
+        TEST_ACCOUNT.into(),
     )
     .unwrap()
     .generate_current()
