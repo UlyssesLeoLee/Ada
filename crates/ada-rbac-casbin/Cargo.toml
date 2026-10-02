@@ -52,8 +52,8 @@ name = "hot_reload_real"
 path = "tests/hot_reload_real.rs"
 
 [dependencies]
-ada-core = { path = "../ada-core" }
-ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab" }
+ada-core = { path = "../ada-core", version = "0.1.0" }
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

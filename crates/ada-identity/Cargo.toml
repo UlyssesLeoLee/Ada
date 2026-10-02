@@ -33,9 +33,8 @@ path = "src/lib.rs"
 # replaced with the api-gateway's middleware for outbound calls.
 
 [dependencies]
-ada-core = { path = "../ada-core" }
-ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab" }
-
+ada-core = { path = "../ada-core", version = "0.1.0" }
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"

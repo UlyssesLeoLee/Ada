@@ -56,7 +56,6 @@ time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # Only the workspace's `ada-core` types — the rest of the workspace
 # is intentionally NOT pulled in. This crate is a standalone
 # reference, not a dev-dep target.
-ada-core = { path = "../ada-core" }
-
+ada-core = { path = "../ada-core", version = "0.1.0" }
 [lints]
 workspace = true

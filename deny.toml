@@ -40,6 +40,13 @@ allow = [
   "OpenSSL",
   "MPL-2.0",
   "AGPL-3.0-or-later",
+  # webpki-roots (pulled in transitively by reqwest/rustls) ships the
+  # Mozilla CA bundle under the Community Data License Agreement,
+  # Permissive 2.0. That is a permissive, patent-grant license with no
+  # copyleft or network-use obligation, so it belongs in an allow list
+  # that already accepts MIT/Apache/BSD. Listed explicitly so the
+  # exception is a decision on record rather than a silenced failure.
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 

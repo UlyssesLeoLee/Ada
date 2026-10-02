@@ -70,7 +70,7 @@ metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"], optional = true }
 
 [dev-dependencies]
-ada-core = { path = "../ada-core" }
+ada-core = { path = "../ada-core", version = "0.1.0" }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 

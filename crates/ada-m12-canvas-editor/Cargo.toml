@@ -49,7 +49,7 @@ path = "tests/crdt_sync.rs"
 required-features = ["crdt"]
 
 [dependencies]
-ada-core = { path = "../ada-core" }
+ada-core = { path = "../ada-core", version = "0.1.0" }
 # `tokio` baseline 是 wasm-friendly 子集(`macros,sync,time`)—
 # 这样 `--target wasm32-unknown-unknown` 直接可编。native
 # (含 CI default) 通过下面的 `[target.'cfg(not(...))']` 块
