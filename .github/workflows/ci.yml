@@ -214,6 +214,28 @@ jobs:
       - name: cargo check (ada-m12-canvas-editor --features ${{ matrix.feature }})
         run: cargo check -p ada-m12-canvas-editor --features ${{ matrix.feature }} --all-targets --locked
 
+      # Lint the crate in a configuration that actually includes the code
+      # that matters. The workspace clippy job runs default features, where
+      # `crdt.rs` (1860 lines) is behind `#[cfg(feature = "crdt")]` and is
+      # not compiled at all, and the check step above only proves things
+      # compile. So for a long time nothing linted the canonical CRDT
+      # implementation, and it had accumulated real lints in its non-test
+      # code that no job could see.
+      #
+      # `full` is `["wasm", "bevy"]` and does NOT imply `crdt`, so both are
+      # named here. Run once, on the `full` matrix entry, rather than
+      # repeating an identical lint per feature.
+      #
+      # The two `legacy-*` features are deliberately absent. They are
+      # `#[deprecated]` modules whose *own* test code therefore trips
+      # `deprecated` itself, so `-D warnings` is unsatisfiable there by
+      # construction — no code change can fix it. Both are scheduled for
+      # removal in v0.8.0; the `cargo check` matrix above still proves they
+      # compile in the meantime.
+      - name: cargo clippy (ada-m12-canvas-editor, crdt + bevy + wasm)
+        if: matrix.feature == 'full'
+        run: cargo clippy -p ada-m12-canvas-editor --features full,crdt --all-targets --locked -- -D warnings
+
       # `crdt_sync` is a required-features test target, so `cargo check
       # --all-targets` above only proves it compiles. Running it is the
       # only thing that proves the convergence guarantee still holds.

@@ -187,6 +187,32 @@ impl ClientId {
     pub const fn from_uuid(uuid: uuid::Uuid, label: String) -> Self {
         Self { uuid, label }
     }
+
+    /// The Yrs client-id seed for this client.
+    ///
+    /// Yrs client ids are `u64`; a `ClientId` carries a `u128` UUID. The
+    /// low 64 bits become the seed, so "same Yrs client" here means "same
+    /// low 64 bits", not "same UUID": two UUIDs differing only in their
+    /// high half would seed the same client. For the random v4 UUIDs this
+    /// constructor is fed, that is a 2^-64 collision, and Yrs' own random
+    /// `u64` client ids carry the same exposure.
+    ///
+    /// Taking the low half is a decision, so it is spelled as a decision.
+    /// The previous form was `uuid.as_u128() as u64` at five call sites,
+    /// which silently dropped the top half at every one of them and left a
+    /// reader to notice that on their own. `clippy::cast_possible_truncation`
+    /// rejected all five, and it was right to.
+    #[must_use]
+    pub fn yrs_seed(&self) -> u64 {
+        // Equivalent to `self.uuid.as_u128() as u64`, because `as_u128`
+        // reads the 16 bytes big-endian and the low 64 bits of that are
+        // bytes 8..16 read big-endian. `client_seed_matches_a_truncating_cast`
+        // pins the equivalence rather than leaving it to this comment.
+        let low_half: [u8; 8] = self.uuid.as_bytes()[8..16]
+            .try_into()
+            .expect("a UUID is 16 bytes, so its low half is always 8");
+        u64::from_be_bytes(low_half)
+    }
 }
 
 impl std::fmt::Display for ClientId {
@@ -282,7 +308,7 @@ pub fn reconcile_with_crdt(
     client_id: &ClientId,
 ) -> Result<CrdtReconcileResult, CanvasError> {
     // 1. Build a fresh YDoc seeded with the server's snapshot.
-    let doc = Doc::with_client_id(client_id.uuid.as_u128() as u64);
+    let doc = Doc::with_client_id(client_id.yrs_seed());
     hydrate_doc_from_canvas(&doc, server);
 
     // 2. Apply the client's update on top.
@@ -604,7 +630,7 @@ pub fn iter_elements(doc: &Doc) -> impl Iterator<Item = (uuid::Uuid, ElementSnap
             if !is_alive(&map, &txn) {
                 continue;
             }
-            let Ok(uuid) = uuid::Uuid::parse_str(&k) else {
+            let Ok(uuid) = uuid::Uuid::parse_str(k) else {
                 continue;
             };
             let snap = read_element_snapshot(&map, &txn);
@@ -1691,8 +1717,8 @@ mod tests {
         let b = ClientId::from_uuid(uuid::Uuid::from_u128(0xBBBB_BBBB_BBBB_BBBB), "b".into());
         let mut node = positioned("shared", 0, 0);
         node.id = NodeId(uuid::Uuid::new_v4());
-        let doc_a = Doc::with_client_id(a.uuid.as_u128() as u64);
-        let doc_b = Doc::with_client_id(b.uuid.as_u128() as u64);
+        let doc_a = Doc::with_client_id(a.yrs_seed());
+        let doc_b = Doc::with_client_id(b.yrs_seed());
         insert_element(&doc_a, &node).expect("a insert");
         insert_element(&doc_b, &node).expect("b insert");
         let snap_a = encode_state_as_update(&doc_a);
@@ -1714,6 +1740,58 @@ mod tests {
         // at least the one client entry from the insert).
         assert_ne!(sv_a.len(), 0);
         assert_ne!(sv_b.len(), 0);
+    }
+
+    /// `yrs_seed` is documented as being exactly `uuid.as_u128() as u64`.
+    /// That is a claim about byte order, and byte order is easy to get wrong
+    /// in both directions. A wrong answer here means clients are seeded
+    /// differently from before the refactor — a divergence that only shows
+    /// up under concurrent edits, so nothing else would catch it.
+    ///
+    /// The `as u64` below is the thing being asserted against, so the
+    /// truncation is the point rather than a mistake. The allow is on this
+    /// one test for that reason; a module-level allow would defeat the very
+    /// lint that prompted the change.
+    #[test]
+    #[allow(clippy::cast_possible_truncation)]
+    fn client_seed_matches_a_truncating_cast() {
+        for raw in [
+            0u128,
+            1,
+            u128::from(u64::MAX),
+            u128::from(u64::MAX) + 1,
+            0xAAAA_AAAA_AAAA_AAAA_BBBB_BBBB_BBBB_BBBB,
+            0xFFFF_FFFF_FFFF_FFFF_0000_0000_0000_0000,
+            u128::MAX,
+        ] {
+            let uuid = uuid::Uuid::from_u128(raw);
+            let cid = ClientId::from_uuid(uuid, "x".into());
+            assert_eq!(
+                cid.yrs_seed(),
+                uuid.as_u128() as u64,
+                "yrs_seed must be the low 64 bits for {raw:#034x}"
+            );
+        }
+    }
+
+    /// Two UUIDs differing only in their high half deliberately share a Yrs
+    /// client id. Pinned because it is the sharp edge of `yrs_seed`: a
+    /// future "fix" that reached for the high bits instead would re-seed
+    /// every existing client and orphan its state.
+    #[test]
+    fn yrs_seed_collides_on_the_high_half() {
+        let low = 0x1111_1111_2222_3333_4444_5555_6666_7777u128;
+        let a = ClientId::from_uuid(uuid::Uuid::from_u128(low), "a".into());
+        let b = ClientId::from_uuid(
+            uuid::Uuid::from_u128(low | (0xAAAA_u128 << 64)),
+            "b".into(),
+        );
+        assert_eq!(
+            a.yrs_seed(),
+            b.yrs_seed(),
+            "documented behaviour: only the low 64 bits seed the Yrs client"
+        );
+        assert_ne!(a.uuid, b.uuid, "the UUIDs themselves stay distinct");
     }
 
     /// v0.7.1 compat: serde roundtrip. `ClientId` derives
@@ -1749,8 +1827,8 @@ mod tests {
         );
         let mut node = positioned("shared", 0, 0);
         node.id = NodeId(uuid::Uuid::new_v4());
-        let doc_a = Doc::with_client_id(shared.uuid.as_u128() as u64);
-        let doc_b = Doc::with_client_id(shared.uuid.as_u128() as u64);
+        let doc_a = Doc::with_client_id(shared.yrs_seed());
+        let doc_b = Doc::with_client_id(shared.yrs_seed());
         insert_element(&doc_a, &node).expect("a insert");
         insert_element(&doc_b, &node).expect("b insert");
         let sv_a = encode_state_vector(&doc_a);
@@ -1798,8 +1876,9 @@ mod tests {
     fn multi_client_merge_converges() {
         let docs: Vec<Doc> = (0..3).map(|_| Doc::new()).collect();
         for (i, doc) in docs.iter().enumerate() {
-            for j in 0..10 {
-                let mut n = positioned(&format!("r{i}n{j}"), i as i32, j as i32);
+            let row = i32::try_from(i).expect("the test builds a handful of rows");
+            for j in 0..10i32 {
+                let mut n = positioned(&format!("r{i}n{j}"), row, j);
                 n.id = NodeId(uuid::Uuid::new_v4());
                 insert_element(doc, &n).expect("insert");
             }
