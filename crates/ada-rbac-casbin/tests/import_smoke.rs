@@ -1,10 +1,16 @@
 //! `import_smoke` — verify the enforcer builds from the bundled policy set.
 
-use ada_m11_rbac_collab::CollaborationMap;
-use ada_rbac_casbin::{Enforcer, PolicySet};
+use ada_rbac_casbin::PolicySet;
 
+// Needs a real evaluator; see the note in `tests/enforce_smoke.rs` for
+// the `user_id` role-token contract and why the unsupported build has
+// no evaluator at all.
+#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
 #[test]
 fn from_m11_returns_a_working_enforcer() {
+    use ada_m11_rbac_collab::CollaborationMap;
+    use ada_rbac_casbin::Enforcer;
+
     let m11 = CollaborationMap::new();
     let set = PolicySet::bundled();
     set.validate().expect("policy set valid");

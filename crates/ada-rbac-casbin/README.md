@@ -30,9 +30,21 @@
 
 ## Features
 
-- `default = []` — real casbin 2.x adapter.
-- `hand-rolled` — pin the v0.4.0 evaluator; no `casbin` / `notify`
-  runtime cost.
+Evaluator selection is a three-way function of the feature and the
+target:
+
+| Target         | Features         | Evaluator      | `Enforcer::from_policy_set` |
+|----------------|------------------|----------------|------------------------------|
+| linux / macOS  | `default = []`   | casbin 2.x     | builds the casbin enforcer  |
+| linux / macOS  | `hand-rolled`    | hand-rolled    | builds the hand-rolled one  |
+| any other      | `default = []`   | none           | `Err(UnsupportedEvaluator)` |
+| any other      | `hand-rolled`    | hand-rolled    | builds the hand-rolled one  |
+
+So **Linux/macOS need no flags**, and **every other target (Windows)
+must be built with `--features hand-rolled`** — `casbin` is only
+declared as a dependency for Linux/macOS, so a Windows build with the
+feature off has no evaluator and refuses to construct one rather than
+falling back to something permissive.
 
 ## Public API
 

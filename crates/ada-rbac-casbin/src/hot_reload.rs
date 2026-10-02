@@ -23,13 +23,14 @@ pub struct HotReload {
     /// Number of successful enforcer rebuilds, from both `reload_now`
     /// and the watcher thread.
     ///
-    /// The default `hand-rolled` evaluator resolves every caller to
-    /// `Role::Owner` and short-circuits Owner to allow, so a policy
-    /// delta is not observable through `enforce()` in that build. This
-    /// counter makes "did the watcher actually fire and rebuild?"
-    /// directly observable regardless of which evaluator is compiled in,
-    /// which is also the signal the admin endpoint wants for its audit
-    /// log.
+    /// The two evaluators do not agree on whether a policy delta is
+    /// observable through `enforce()`: the casbin evaluator reads
+    /// `model.conf` + the CSV, so removing a policy line flips the
+    /// verdict, while the hand-rolled evaluator derives grants from
+    /// the m11 role matrix and ignores the CSV entirely. This counter
+    /// is evaluator-independent — it answers "did the watcher actually
+    /// fire and rebuild?", which is also the signal the admin
+    /// endpoint wants for its audit log.
     reloads: Arc<AtomicU64>,
 }
 

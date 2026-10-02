@@ -21,4 +21,17 @@ pub enum RbacCasbinError {
 
     #[error("policy reload failed: {0}")]
     ReloadFailed(String),
+
+    /// No RBAC evaluator is compiled into this build. The casbin
+    /// evaluator is only available on Linux/macOS (its transitive
+    /// `openssl-sys` needs system OpenSSL headers that are not
+    /// present on every dev box), and the hand-rolled evaluator is
+    /// opt-in. Rather than fall back to a permissive evaluator, the
+    /// unsupported configuration is a hard error so a misconfigured
+    /// build fails at construction instead of authorizing everything.
+    #[error(
+        "no RBAC evaluator compiled for target `{target}`: \
+         rebuild with `--features hand-rolled`, or on Linux/macOS for the casbin evaluator"
+    )]
+    UnsupportedEvaluator { target: String },
 }

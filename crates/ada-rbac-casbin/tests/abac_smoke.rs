@@ -1,12 +1,6 @@
 //! `abac_smoke` — tenant isolation + attrs builder behaviour.
 
-use ada_m11_rbac_collab::CollaborationMap;
-use ada_m11_rbac_collab::{Action, ResourceType};
-use ada_rbac_casbin::{Attrs, Enforcer, PolicySet};
-
-fn build() -> Enforcer {
-    Enforcer::from_m11(&PolicySet::bundled(), &CollaborationMap::new()).expect("enforcer")
-}
+use ada_rbac_casbin::Attrs;
 
 #[test]
 fn tenant_id_propagates_into_attrs() {
@@ -17,13 +11,21 @@ fn tenant_id_propagates_into_attrs() {
     assert!(b.is_owner);
 }
 
+// Needs a real evaluator; see the note in `tests/enforce_smoke.rs` for
+// why the bare `"user-uuid-1"` subject this used to pass (asserting
+// `true`) encoded the authorization bypass rather than the policy.
+#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
 #[test]
 fn abac_owner_request_is_allowed() {
-    let e = build();
+    use ada_m11_rbac_collab::CollaborationMap;
+    use ada_m11_rbac_collab::{Action, ResourceType};
+    use ada_rbac_casbin::{Enforcer, PolicySet};
+
+    let e = Enforcer::from_m11(&PolicySet::bundled(), &CollaborationMap::new()).expect("enforcer");
     let attrs = Attrs::new("tenant-a");
     let r = e
         .enforce_typed(
-            "user-uuid-1",
+            "role:owner",
             ResourceType::Canvas,
             "canvas-abc",
             Action::Write,
@@ -31,5 +33,5 @@ fn abac_owner_request_is_allowed() {
             None,
         )
         .expect("ok");
-    assert!(r, "owner-flagged request is allowed");
+    assert!(r, "owner-role request is allowed");
 }

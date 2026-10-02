@@ -63,6 +63,22 @@ jobs:
       - name: cargo test (workspace, no slow e2e)
         run: cargo test --workspace --locked --exclude gm-console
 
+      # ada-rbac-casbin's evaluator is a three-way function of (feature,
+      # target). casbin is only declared for linux/macOS, so on Windows
+      # the default feature set selects the Unsupported path, where the
+      # crate compiles and every constructor returns a hard error -- only
+      # 7 tests run and the hand-rolled evaluator is never exercised.
+      # This step builds it explicitly so the evaluator is actually
+      # tested on the Windows leg too. Linux/macOS need no such step:
+      # their default already reaches casbin.
+      - name: cargo test (rbac hand-rolled evaluator)
+        if: runner.os == 'Windows'
+        run: cargo test -p ada-rbac-casbin --features hand-rolled --locked
+
+      - name: cargo clippy (rbac hand-rolled evaluator)
+        if: runner.os == 'Windows'
+        run: cargo clippy -p ada-rbac-casbin --features hand-rolled --all-targets -- -D warnings
+
   # ----------------------------------------------------------------------
   # Supply-chain security gate.
   # Runs after a clean test pass; fails the build on known-vulnerable deps.

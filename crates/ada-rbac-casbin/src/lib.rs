@@ -9,12 +9,23 @@
 //! `AdminApi`) is preserved unchanged from v0.4.0; only the internal
 //! implementation moved.
 //!
-//! ## Features
+//! ## Evaluator selection
 //!
-//! - Default: real `casbin` 2.x adapter + `notify` watcher.
-//! - `hand-rolled`: pin the v0.4.0 hand-rolled evaluator (no
-//!   `casbin`/`notify` runtime cost, but no model.conf + CSV
-//!   policy fidelity).
+//! Which evaluator is compiled is a three-way function of the
+//! `hand-rolled` feature and the build target (full matrix in
+//! `Cargo.toml`):
+//!
+//! - `hand-rolled` on any target — the v0.4.0 evaluator. The only
+//!   way to get an evaluator on Windows.
+//! - Feature off, Linux/macOS — the real `casbin` 2.x adapter plus
+//!   the `notify` watcher.
+//! - Feature off, any other target — no evaluator. `Enforcer` and
+//!   `HotReload` constructors return
+//!   [`RbacCasbinError::UnsupportedEvaluator`]; there is no permissive
+//!   fallback.
+//!
+//! The public API (`Enforcer`, `Attrs`, `PolicySet`, `HotReload`,
+//! `AdminApi`) is identical in all three configurations.
 //!
 //! See `docs/commercial/auth-billing-arch.md` §4 for the binding
 //! contract this crate implements.
@@ -25,7 +36,10 @@
 #[cfg(feature = "hand-rolled")]
 pub mod hand_rolled;
 
-#[cfg(not(feature = "hand-rolled"))]
+#[cfg(all(
+    not(feature = "hand-rolled"),
+    any(target_os = "linux", target_os = "macos")
+))]
 pub mod casbin_impl;
 
 pub mod admin;

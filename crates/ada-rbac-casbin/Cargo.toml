@@ -14,14 +14,40 @@ keywords.workspace = true
 publish = false
 
 [features]
-# `hand-rolled` (default ON) keeps the v0.4.0 hand-rolled evaluator.
-# `casbin` wires the real casbin 2.x adapter; gated to Linux/macOS
-# via [target.cfg] below because casbin's transitive openssl-sys
-# crate requires system OpenSSL libs not present on every Windows
-# dev box.
-default = ["hand-rolled"]
+# The evaluator is a three-way function of (feature, target):
+#
+#   target            features         evaluator       Enforcer::from_policy_set
+#   ----------------  ---------------  --------------  -----------------------------
+#   linux / macOS     (default = [])   casbin          builds the casbin enforcer
+#   linux / macOS     hand-rolled      hand-rolled     builds the hand-rolled enforcer
+#   any other target  (default = [])   none            Err(UnsupportedEvaluator)
+#   any other target  hand-rolled      hand-rolled     builds the hand-rolled enforcer
+#
+# So a Linux/macOS build needs NO flags, and every other target MUST
+# pass `--features hand-rolled`. A build that falls into the third row
+# has no evaluator at all: it compiles, and every `Enforcer` /
+# `HotReload` constructor returns a hard error. That is deliberate --
+# a misconfigured build must fail loudly instead of silently
+# authorizing everything.
+#
+# `default = []` (rather than the previous `default = ["hand-rolled"]`)
+# because casbin is the intended production evaluator on the
+# platforms that can link it. The old default shipped the hand-rolled
+# evaluator everywhere, and that evaluator resolved every subject to
+# `Role::Owner`.
+#
+# The `casbin` feature that used to be declared here has been REMOVED.
+# Nothing in `src/` ever read `cfg(feature = "casbin")`; the two test
+# references to it have been re-gated onto the real casbin
+# configuration (`!hand-rolled` + linux/macOS), so those assertions now
+# actually compile instead of sitting behind a flag nobody set. It
+# could not be wired in as a third selector input either, because the
+# matrix above requires Linux/macOS to reach casbin with no extra flags.
+#
+# `casbin` itself remains declared under the [target.'cfg(...)']
+# tables below and is untouched.
+default = []
 hand-rolled = []
-casbin = []
 
 [lib]
 name = "ada_rbac_casbin"
@@ -50,6 +76,10 @@ path = "tests/integration.rs"
 [[test]]
 name = "hot_reload_real"
 path = "tests/hot_reload_real.rs"
+
+[[test]]
+name = "unsupported_target"
+path = "tests/unsupported_target.rs"
 
 [dependencies]
 ada-core = { path = "../ada-core", version = "0.1.0" }
