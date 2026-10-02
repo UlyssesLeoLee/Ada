@@ -226,10 +226,10 @@ fn forward_headers(incoming: &HeaderMap) -> ReqHeaderMap {
     ];
     for (name, value) in incoming.iter() {
         let lname = name.as_str().to_ascii_lowercase();
-        if denied.iter().any(|d| *d == lname.as_str()) {
+        if denied.contains(&lname.as_str()) {
             continue;
         }
-        if !allowed.iter().any(|a| *a == lname.as_str()) {
+        if !allowed.contains(&lname.as_str()) {
             continue;
         }
         if let (Ok(n), Ok(v)) = (
@@ -260,7 +260,7 @@ fn response_headers(upstream: &reqwest::header::HeaderMap) -> HeaderMap {
     ];
     for (name, value) in upstream.iter() {
         let lname = name.as_str().to_ascii_lowercase();
-        if denied.iter().any(|d| *d == lname.as_str()) {
+        if denied.contains(&lname.as_str()) {
             continue;
         }
         if let (Ok(n), Ok(v)) = (

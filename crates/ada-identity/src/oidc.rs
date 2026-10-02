@@ -1,4 +1,4 @@
-//! OpenID Connect RP. Authorization Code + PKCE flow.
+//! `OpenID` Connect RP. Authorization Code + PKCE flow.
 //!
 //! v0.4.0 skeleton: state-machine + RFC shapes only. Real wire-format
 //! signing / verification via `openidconnect = "3"` is deferred to
@@ -49,6 +49,13 @@ pub fn begin_flow(
 
 /// Finish the OIDC flow by exchanging `code` for tokens. Real
 /// implementation delegates to `openidconnect::CoreClient`.
+// The `async` signature is deliberate forward-compatibility, not a
+// mistake: v0.5.0 swaps this body for `openidconnect::CoreClient`, which
+// performs a real token-endpoint request. Callers are written against the
+// `.await` today; dropping `async` would break that public API shape and
+// force a second breaking change on every call site when the real
+// implementation lands.
+#[allow(clippy::unused_async)]
 pub async fn complete_flow(
     cfg: &OidcProviderConfig,
     code: &str,

@@ -34,6 +34,13 @@ pub struct Jwt {
 /// validator is configured to accept unsigned tokens at the
 /// dev-only listener; the production listener requires real RS256
 /// signatures from the JWKS endpoint.
+// `Claims` carries PII (iss / sub / aud / tenant / roles). Taking it by
+// value hands ownership to the signing path so the real v0.5.0 signer can
+// drop or zeroize those strings instead of leaving a second live copy in
+// the caller's frame — consistent with this crate's "never echo PII" rule
+// in `error`. Borrowing would also be a breaking change to a public
+// signature for no functional gain.
+#[allow(clippy::needless_pass_by_value)]
 pub fn mint_jwt(claims: Claims, kid: &str, _private_key: &str) -> Result<Jwt> {
     let header = serde_json::json!({
         "alg": "RS256",

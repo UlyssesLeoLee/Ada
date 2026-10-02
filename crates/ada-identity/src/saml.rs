@@ -1,4 +1,4 @@
-//! SAML 2.0 SP. AuthnRequest generation + Response parsing.
+//! SAML 2.0 SP. `AuthnRequest` generation + Response parsing.
 //!
 //! v0.4.0 skeleton: state-machine + RFC shapes only. Real wire-format
 //! signing / verification via `samael = "0.0.22"` is deferred to
@@ -19,7 +19,7 @@ pub struct SamlSpConfig {
     pub name_id_format: String,
 }
 
-/// Begin a SAML 2.0 AuthnRequest. Returns the encoded
+/// Begin a SAML 2.0 `AuthnRequest`. Returns the encoded
 /// `SAMLRequest` query string the SP redirects to.
 pub fn begin_authn(cfg: &SamlSpConfig, acs_index: u32) -> Result<String> {
     if cfg.entity_id.is_empty() || cfg.acs_url.is_empty() {
@@ -40,6 +40,12 @@ fn urlencoding(s: &str) -> String {
 /// Parse a SAML 2.0 response (SAMLResponse=b64xml). Validates the
 /// issuer + audience + signature in production; the v0.4.0
 /// skeleton returns a parsed-OK stub.
+// The `async` signature is deliberate forward-compatibility, not a
+// mistake: v0.5.0 swaps this body for the real xmlsec-backed assertion
+// validation, which is I/O bound. Callers are written against the `.await`
+// today; dropping `async` would break that public API shape and force a
+// second breaking change when the real implementation lands.
+#[allow(clippy::unused_async)]
 pub async fn parse_response(saml_response_b64: &str) -> Result<SamlAssertion> {
     if saml_response_b64.is_empty() {
         return Err(IdentityError::Saml("empty response".into()));

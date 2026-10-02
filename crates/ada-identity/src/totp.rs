@@ -41,21 +41,26 @@ pub fn verify_code(secret_base32: &str, code: u32, now_unix: i64) -> Result<bool
     if secret_base32.is_empty() {
         return Err(IdentityError::Totp("empty secret".into()));
     }
-    let expected = rfc6238(secret_base32, now_unix, 6);
+    let expected = rfc6238(secret_base32, now_unix, 6)?;
     Ok(expected == code)
 }
 
-fn rfc6238(_secret_base32: &str, now_unix: i64, digits: usize) -> u32 {
-    let t = (now_unix / 30) as u64;
+fn rfc6238(_secret_base32: &str, now_unix: i64, digits: u32) -> Result<u32> {
+    // A pre-epoch timestamp has no valid RFC 6238 time step. Casting with
+    // `as` would silently wrap the negative counter into a huge `u64` and
+    // derive a code from a step that cannot exist, so reject it outright
+    // instead of comparing user input against a garbage-derived value.
+    let t = u64::try_from(now_unix / 30)
+        .map_err(|_| IdentityError::Totp("pre-epoch timestamp".into()))?;
     let h = {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(&t.to_le_bytes());
+        hasher.update(t.to_le_bytes());
         let bytes = hasher.finalize();
         u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
     };
-    let mask = 10u32.pow(digits as u32) - 1;
-    h & mask
+    let mask = 10u32.pow(digits) - 1;
+    Ok(h & mask)
 }
 
 fn base32_encode(bytes: &[u8]) -> String {
