@@ -46,7 +46,14 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.98"
-license = "MIT"
+# The repository LICENSE is AGPL-3.0 PLUS an AGPL §13-style additional term
+# requiring prior written consent for any commercial exploitation. This
+# manifest previously said "MIT", which contradicted both the LICENSE file
+# and deny.toml's allow-list, and told any downstream reader that commercial
+# use was permitted when it is not. The SPDX id can only express the base
+# license, so the additional term lives in the LICENSE file and is served
+# verbatim by gm-console's /license endpoint rather than being summarised away.
+license = "AGPL-3.0-or-later"
 authors = ["Ada Project Team"]
 repository = "https://github.com/UlyssesLeoLee/ada"
 homepage = "https://ada.kanvas.dev"

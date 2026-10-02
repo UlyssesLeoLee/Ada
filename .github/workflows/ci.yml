@@ -119,11 +119,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Flutter (stable, no pub fetch)
+      - name: Read pinned Flutter version
+        id: flutter-pin
+        # `.flutter-version` is the single source of truth for the SDK.
+        # It is read into `flutter-version` rather than passed as
+        # `flutter-version-file`: the action's precedence between
+        # `channel` and `flutter-version-file` silently ignored the pin,
+        # so CI drifted onto whatever stable was current and the repo's
+        # declared 3.24.5 was fiction. Passing the version explicitly is
+        # unambiguous.
+        run: |
+          v="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
+          test -n "$v" || { echo "::error::.flutter-version is empty"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Pinned Flutter $v"
+
+      - name: Install Flutter (pinned, no pub fetch)
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version-file: apps/gm-console-app/.flutter-version
+          flutter-version: ${{ steps.flutter-pin.outputs.version }}
+
+      - name: Verify the installed SDK matches the pin
+        # A pin that is not checked is not a pin. This fails loudly if the
+        # action ever stops honouring `flutter-version`.
+        run: |
+          want="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
+          got="$(flutter --version --machine | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4)"
+          echo "pinned=$want installed=$got"
+          test "$got" = "$want" || {
+            echo "::error::Flutter SDK drift: pinned $want but installed $got"
+            exit 1
+          }
 
       - name: flutter pub get
         working-directory: apps/gm-console-app

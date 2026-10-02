@@ -81,9 +81,19 @@ async fn version() -> Json<serde_json::Value> {
 }
 
 async fn license() -> Json<serde_json::Value> {
+    // `CARGO_PKG_LICENSE` is only the SPDX id, and no SPDX id can express
+    // the AGPL §13-style additional term in the repository LICENSE: any
+    // commercial exploitation requires prior written consent. Reporting
+    // the bare id here understated the terms, so the full LICENSE is served
+    // alongside it and the restriction is stated explicitly rather than
+    // left for the reader to discover in a file link.
     Json(json!({
         "license": env!("CARGO_PKG_LICENSE"),
+        "spdx_note": "SPDX identifies the base license only; the binding terms are in `license_text`.",
+        "commercial_use_requires_written_consent": true,
+        "permission_contact": "lidian727@gmail.com",
         "source_url": "https://github.com/UlyssesLeoLee/ada/blob/main/LICENSE",
+        "license_text": include_str!("../../../LICENSE"),
     }))
 }
 

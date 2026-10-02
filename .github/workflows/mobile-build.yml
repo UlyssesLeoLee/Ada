@@ -186,6 +186,20 @@ jobs:
           channel: stable
           flutter-version: ${{ inputs.flutter_version }}
 
+      - name: Verify the installed SDK matches .flutter-version
+        # `flutter_version` is a workflow_dispatch input carrying its own
+        # default, so it can silently drift from the file its own
+        # description points at. Fail loudly rather than signing a
+        # release built with a different SDK than CI analysed.
+        run: |
+          want="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
+          got="$(flutter --version --machine | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4)"
+          echo "dispatch input=${{ inputs.flutter_version }} pinned=$want installed=$got"
+          test "$got" = "$want" || {
+            echo "::error::Flutter SDK drift: .flutter-version says $want but $got was installed"
+            exit 1
+          }
+
       - name: Cache pub & build dirs
         uses: actions/cache@v4.1.2
         with:
