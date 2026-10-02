@@ -40,12 +40,14 @@ fn app_with_session() -> (axum::Router, String) {
 /// another and the failures would depend on execution order.
 fn app_with_roles(tenant_id: &str, roles: Vec<String>) -> (axum::Router, String) {
     let store = Arc::new(SessionStore::new());
-    let token = store.mint(Session {
-        user_id: "user-1".into(),
-        tenant_id: tenant_id.into(),
-        roles,
-        expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
-    });
+    let token = store
+        .mint(Session {
+            user_id: "user-1".into(),
+            tenant_id: tenant_id.into(),
+            roles,
+            expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+        })
+        .expect("mint");
     let auth = ada_m13_api_gateway::auth::AuthContext::bootstrap()
         .expect("bootstrap")
         .with_sessions(Arc::clone(&store));
@@ -417,12 +419,14 @@ async fn a_valid_bearer_token_reaches_the_handler() {
 #[tokio::test]
 async fn a_revoked_session_stops_working() {
     let store = Arc::new(SessionStore::new());
-    let token = store.mint(Session {
-        user_id: "user-1".into(),
-        tenant_id: "tenant-a".into(),
-        roles: vec!["viewer".into()],
-        expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
-    });
+    let token = store
+        .mint(Session {
+            user_id: "user-1".into(),
+            tenant_id: "tenant-a".into(),
+            roles: vec!["viewer".into()],
+            expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+        })
+        .expect("mint");
     let auth = ada_m13_api_gateway::auth::AuthContext::bootstrap()
         .expect("bootstrap")
         .with_sessions(Arc::clone(&store));

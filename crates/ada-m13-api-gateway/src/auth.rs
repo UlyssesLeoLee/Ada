@@ -123,19 +123,26 @@ impl AuthContext {
     /// one obvious way to produce a credential. Deliberately not
     /// reachable from any route: a "create a session" HTTP endpoint
     /// would be an authentication bypass wearing a different hat.
+    ///
+    /// Fallible because [`SessionStore`] is bounded: refusing to mint
+    /// at capacity is what keeps a burst of logins from growing the map
+    /// without limit, and a caller that cannot represent that failure
+    /// will eventually paper over it.
     pub fn mint_session(
         &self,
         user_id: &str,
         tenant_id: &str,
         roles: Vec<String>,
         ttl_secs: u64,
-    ) -> String {
-        self.sessions.mint(ada_identity::session::Session {
-            user_id: user_id.to_owned(),
-            tenant_id: tenant_id.to_owned(),
-            roles,
-            expires_at: std::time::Instant::now() + std::time::Duration::from_secs(ttl_secs),
-        })
+    ) -> Result<String> {
+        self.sessions
+            .mint(ada_identity::session::Session {
+                user_id: user_id.to_owned(),
+                tenant_id: tenant_id.to_owned(),
+                roles,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(ttl_secs),
+            })
+            .map_err(|e| ApiError::ServiceUnavailable(format!("cannot mint session: {e}")))
     }
 
     /// Build a context from the bundled policy set and an empty session
@@ -315,5 +322,58 @@ mod tests {
         let ctx = AuthContext::bootstrap().expect("bootstrap");
         assert!(ctx.resolve("anything").is_none());
         assert!(ctx.resolve("").is_none());
+    }
+
+    /// A minted session is the only thing that produces a working
+    /// credential, so the round trip has to hold.
+    #[test]
+    fn a_minted_session_resolves_to_its_principal() {
+        let ctx = AuthContext::bootstrap().expect("bootstrap");
+        let token = ctx
+            .mint_session("u1", "tenant-a", vec!["viewer".into()], 60)
+            .expect("mint");
+        let p = ctx
+            .resolve(&token)
+            .expect("the token just minted must resolve");
+        assert_eq!(p.user_id, "u1");
+        assert_eq!(p.tenant_id, "tenant-a");
+        assert_eq!(p.roles, vec!["viewer".to_string()]);
+    }
+
+    /// The store's ceiling has to reach the caller, not be swallowed.
+    ///
+    /// A login flow that cannot tell "could not create a session" from
+    /// "session created" will retry in a loop, which turns a bounded
+    /// store into a busy spin instead of a clean failure.
+    #[test]
+    fn a_full_store_is_reported_rather_than_papered_over() {
+        let store = Arc::new(SessionStore::with_max_sessions(1));
+        let ctx = AuthContext::bootstrap()
+            .expect("bootstrap")
+            .with_sessions(Arc::clone(&store));
+        ctx.mint_session("u1", "tenant-a", vec!["viewer".into()], 60)
+            .expect("the first session fits");
+
+        let err = ctx
+            .mint_session("u2", "tenant-a", vec!["viewer".into()], 60)
+            .expect_err("the store holds one session and has a ceiling of one");
+        assert!(
+            matches!(err, ApiError::ServiceUnavailable(_)),
+            "capacity pressure must surface as an error the caller can act on, got {err:?}"
+        );
+    }
+
+    /// Expiry is enforced through the gateway too, not only in the
+    /// store's own tests — this is the path a real request takes.
+    #[test]
+    fn an_expired_session_does_not_resolve() {
+        let ctx = AuthContext::bootstrap().expect("bootstrap");
+        let token = ctx
+            .mint_session("u1", "tenant-a", vec!["viewer".into()], 0)
+            .expect("mint");
+        assert!(
+            ctx.resolve(&token).is_none(),
+            "a zero-TTL session must not authenticate anything"
+        );
     }
 }

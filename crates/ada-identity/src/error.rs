@@ -49,4 +49,20 @@ pub enum IdentityError {
 
     #[error("recovery code already used")]
     RecoveryRedeemed,
+
+    /// The session store is at its configured ceiling and no expired
+    /// entry could be reclaimed to make room.
+    ///
+    /// Reported instead of evicting a live session on purpose. Silently
+    /// logging a signed-in user out to protect the process is the worse
+    /// of the two failures: it is invisible, it is not attributable,
+    /// and it produces a support ticket that reads "I got logged out"
+    /// with no way to correlate it to load. Refusing the new session
+    /// fails loudly, at login, and the store drains on its own as
+    /// sessions reach their expiry.
+    ///
+    /// The number is a *ceiling*, not a target — see
+    /// [`crate::session::SessionStore::with_max_sessions`].
+    #[error("session store is full ({0} sessions)")]
+    SessionStoreFull(usize),
 }
