@@ -17,13 +17,10 @@
 //! The watcher thread is bounded by an atomic flag to avoid leaking
 //! on assertion failure.
 
-// `HotReload::new` builds an `Enforcer`, so every test below needs a
-// real evaluator. The evaluators live behind `hand-rolled`, or behind
-// the casbin dependency that is only declared for Linux/macOS, so a
-// build with neither (the "unsupported" configuration) has no
-// evaluator and its constructors return a hard error by design — see
-// `tests/unsupported_target.rs` for the guard on that path.
-#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
+// `HotReload::new` builds an `Enforcer`, so every test below needs a real
+// evaluator. One is always compiled in now: casbin 2.x by default, the
+// hand-rolled one under `--features hand-rolled`. There is no target-gated
+// configuration left that could leave this build without one.
 mod evaluator {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,15 +32,13 @@ mod evaluator {
     use tempfile::TempDir;
 
     // The real casbin evaluator — as opposed to the hand-rolled one —
-    // is compiled only when `hand-rolled` is off AND the target is
-    // Linux/macOS. This replaced a `#[cfg(feature = "casbin")]` gate
-    // that never matched reality: nothing in `src/` read that feature,
-    // so the casbin-only assertions below were dead code. They are
-    // reachable for the first time under this gate.
-    const CASBIN_EVALUATOR: bool = cfg!(all(
-        not(feature = "hand-rolled"),
-        any(target_os = "linux", target_os = "macos")
-    ));
+    // is compiled whenever `hand-rolled` is off, on every platform. This
+    // replaced a `#[cfg(feature = "casbin")]` gate that never matched
+    // reality: nothing in `src/` read that feature, so the casbin-only
+    // assertions below were dead code. They have been unreachable on
+    // Windows ever since, because casbin itself was declared only for
+    // Linux/macOS.
+    const CASBIN_EVALUATOR: bool = cfg!(not(feature = "hand-rolled"));
 
     const MODEL_CONF: &str = include_str!("../policies/model.conf");
     const BASE_POLICY: &str = include_str!("../policies/base_policy.csv");
@@ -104,11 +99,24 @@ mod evaluator {
             );
         }
 
-        // Now mutate the CSV: drop the `p, role:owner, canvas, write, *, *`
-        // line. After reload, the same request must be denied.
+        // Now mutate the CSV: drop every row granting `write` on `canvas`.
+        //
+        // Dropping only the `role:owner` row is NOT enough, and the
+        // previous version of this test did exactly that, which is why it
+        // only ever passed on the hand-rolled evaluator. The casbin
+        // matcher resolves `g(r.sub, p.sub)`, and `build_enforcer` wires
+        // the ladder `role:owner -> role:admin -> role:editor -> ...`, so
+        // `role:owner` still satisfies `p, role:admin, canvas, write` and
+        // `p, role:editor, canvas, write` after the owner row is gone. The
+        // verdict correctly stayed `true`; the test's model of the policy
+        // was what was wrong.
         let body = BASE_POLICY
             .lines()
-            .filter(|l| !l.starts_with("p, role:owner, canvas, write"))
+            .filter(|l| {
+                !l.starts_with("p, role:owner, canvas, write")
+                    && !l.starts_with("p, role:admin, canvas, write")
+                    && !l.starts_with("p, role:editor, canvas, write")
+            })
             .collect::<Vec<_>>()
             .join("\n");
         // Sample the counter BEFORE touching the file. The watcher's notify
@@ -123,10 +131,12 @@ mod evaluator {
         // Sanity: the mutation must actually change the file, otherwise the
         // whole test would pass for the wrong reason.
         let on_disk = std::fs::read_to_string(&policy_path).expect("reread policy csv");
-        assert!(
-            !on_disk.starts_with("p, role:owner, canvas, write"),
-            "mutation did not remove the owner/write policy line"
-        );
+        for role in ["role:owner", "role:admin", "role:editor"] {
+            assert!(
+                !on_disk.contains(&format!("p, {role}, canvas, write")),
+                "mutation did not remove the {role}/canvas/write policy line"
+            );
+        }
 
         // Poll for the watcher to fire and rebuild the enforcer.
         //
@@ -174,7 +184,8 @@ mod evaluator {
                 .expect("final enforce");
             assert!(
                 denied,
-                "after watcher reload: role:owner write must be denied (line removed)"
+                "after watcher reload: no role in the ladder grants canvas/write, \
+                 so role:owner must be denied"
             );
             // And the unrelated read line should still pass.
             let allowed_read = e

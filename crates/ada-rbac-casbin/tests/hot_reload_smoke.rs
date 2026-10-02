@@ -3,13 +3,10 @@
 //! v0.5.0 makes `spawn_watcher` real (notify-backed); the watcher is
 //! short-lived so we exercise the construction path only.
 
-// `HotReload::new` builds an `Enforcer`, so every test below needs a
-// real evaluator. The evaluators live behind `hand-rolled`, or behind
-// the casbin dependency that is only declared for Linux/macOS, so a
-// build with neither (the "unsupported" configuration) has no
-// evaluator and its constructors return a hard error by design — see
-// `tests/unsupported_target.rs` for the guard on that path.
-#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
+// `HotReload::new` builds an `Enforcer`, so every test below needs a real
+// evaluator. One is always compiled in now: casbin 2.x by default, the
+// hand-rolled one under `--features hand-rolled`. There is no target-gated
+// configuration left that could leave this build without one.
 mod evaluator {
     use ada_rbac_casbin::{HotReload, PolicySet};
 

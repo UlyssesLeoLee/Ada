@@ -7,9 +7,26 @@
 #                                     not tenant-bound; per-tenant
 #                                     grants live in additional rows
 #                                     added at runtime by AdminApi.
-#   is_owner = "*"                  — not Owner-locked at the RBAC layer;
-#                                     tenant-owner-only gates belong to
-#                                     api-gateway step-up MFA checks.
+#   is_owner = "*"                  — the policy rows are NOT the
+#                                     ownership gate. `*` keeps the
+#                                     matcher's
+#                                     `(p.is_owner == r.is_owner ||
+#                                     p.is_owner == "*")` clause true
+#                                     for every row, so ownership is
+#                                     enforced in Rust by
+#                                     `contract::requires_ownership`
+#                                     before the policy is consulted.
+#                                     An earlier revision of this file
+#                                     carried a comment saying the
+#                                     opposite ("not Owner-locked at
+#                                     the RBAC layer"), which is how
+#                                     `role:owner` came to be able to
+#                                     delete objects it did not own:
+#                                     the hand-rolled evaluator gated
+#                                     Delete, this one did not. Keep
+#                                     the gate in code, not in data, so
+#                                     a runtime `AdminApi` policy row
+#                                     cannot reopen it.
 #   eft = allow
 #
 # Leave this file alone at runtime. The m11 role→permission matrix is

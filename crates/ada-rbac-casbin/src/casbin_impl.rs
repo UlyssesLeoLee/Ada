@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 use ada_m11_rbac_collab::{Action, CollaborationMap, ResourceType, Role};
 
 use crate::attrs::Attrs;
+use crate::contract::{requires_ownership, resource_type_of};
 use crate::error::{RbacCasbinError, Result};
 use crate::policy::PolicySet;
 
@@ -73,12 +74,21 @@ impl RealEnforcer {
     }
 
     /// Synchronous enforce entry point. The v0.4.0 hand-rolled surface
-    /// accepted the composite `object_id` ("canvas:<uuid>"); v0.5.0
-    /// matches on the resource type only because the
-    /// `policies/base_policy.csv` rows use resource-type tokens. The
-    /// per-instance identifier (`<uuid>`) is forwarded by the
-    /// api-gateway for tenant scoping but is not part of the
-    /// authorization tuple.
+    /// accepted the composite `object_id` (`"canvas:<uuid>"`); the
+    /// resource type is parsed from that prefix and matched against the
+    /// `policies/base_policy.csv` rows, which are keyed by
+    /// resource-type token. The per-instance identifier (`<uuid>`) is
+    /// forwarded by the api-gateway for tenant scoping but is not part
+    /// of the authorization tuple.
+    ///
+    /// This previously hardcoded `ResourceType::Canvas` and ignored
+    /// `object_id` entirely, so a request for `"workspace:<uuid>"`
+    /// was evaluated against the canvas policy rows. That let a caller
+    /// reach canvas permissions through a workspace (or credential)
+    /// object, and it also meant an object with no recognised prefix
+    /// was authorized rather than denied — the exact behaviour
+    /// `tests/integration.rs::object_without_a_known_resource_type_is_denied`
+    /// forbids. Fail closed instead.
     ///
     /// The caller passes the resolved role token as `user_id`
     /// (e.g. `"role:owner"`); in production the api-gateway maps the
@@ -90,13 +100,18 @@ impl RealEnforcer {
     pub fn enforce(
         &self,
         user_id: &str,
-        _object_id: &str,
+        object_id: &str,
         action: Action,
         attrs: &Attrs,
         m11: Option<&CollaborationMap>,
     ) -> Result<bool> {
         let _ = m11;
-        self.enforce_internal(user_id, ResourceType::Canvas.as_str(), action, attrs)
+        // Fail closed: an object with no known resource type is a deny,
+        // never a guess at which policy rows to check.
+        let Some(resource_type) = resource_type_of(object_id) else {
+            return Ok(false);
+        };
+        self.enforce_internal(user_id, resource_type.as_str(), action, attrs)
     }
 
     /// Typed variant — accepts m11's [`ResourceType`] directly so
@@ -121,6 +136,19 @@ impl RealEnforcer {
         action: Action,
         attrs: &Attrs,
     ) -> Result<bool> {
+        // ABAC gate: destructive actions require the ownership flag,
+        // independent of what the role ladder grants. This is enforced
+        // here in Rust rather than left to the matcher because
+        // `policies/base_policy.csv` sets `is_owner = "*"` on every
+        // row, which makes the matcher's
+        // `(p.is_owner == r.is_owner || p.is_owner == "*")` clause true
+        // unconditionally — so `role:owner` could delete an object it
+        // did not own. The same gate is applied by the hand-rolled
+        // evaluator; both call [`crate::contract::requires_ownership`]
+        // so the two cannot drift apart again.
+        if requires_ownership(action) && !attrs.is_owner {
+            return Ok(false);
+        }
         let guard = run_casbin_blocking(self.inner.lock());
         let is_owner_token = if attrs.is_owner { "true" } else { "false" };
         let tuple = (

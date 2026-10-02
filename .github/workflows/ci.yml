@@ -63,20 +63,18 @@ jobs:
       - name: cargo test (workspace, no slow e2e)
         run: cargo test --workspace --locked --exclude gm-console
 
-      # ada-rbac-casbin's evaluator is a three-way function of (feature,
-      # target). casbin is only declared for linux/macOS, so on Windows
-      # the default feature set selects the Unsupported path, where the
-      # crate compiles and every constructor returns a hard error -- only
-      # 7 tests run and the hand-rolled evaluator is never exercised.
-      # This step builds it explicitly so the evaluator is actually
-      # tested on the Windows leg too. Linux/macOS need no such step:
-      # their default already reaches casbin.
+      # ada-rbac-casbin ships two mutually exclusive evaluators. casbin
+      # 2.x is the default on every platform; the hand-rolled evaluator
+      # is opt-in via `--features hand-rolled`. The default build below
+      # already exercises casbin, so this step exists to cover the other
+      # half of the matrix on every OS -- these two evaluators once
+      # disagreed about the resource type and about whether Delete
+      # requires the ownership flag, and only the hand-rolled side was
+      # reachable from a Windows runner.
       - name: cargo test (rbac hand-rolled evaluator)
-        if: runner.os == 'Windows'
         run: cargo test -p ada-rbac-casbin --features hand-rolled --locked
 
       - name: cargo clippy (rbac hand-rolled evaluator)
-        if: runner.os == 'Windows'
         run: cargo clippy -p ada-rbac-casbin --features hand-rolled --all-targets -- -D warnings
 
       # ada-telemetry's `prometheus` feature is opt-in and not in

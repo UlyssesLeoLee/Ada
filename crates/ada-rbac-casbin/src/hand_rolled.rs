@@ -131,9 +131,11 @@ impl HandRolledEnforcer {
     /// only on the m11 matrix and the ABAC attributes, not on any state
     /// this evaluator holds.
     fn check(role: Role, resource_type: ResourceType, action: Action, attrs: &Attrs) -> bool {
-        // ABAC gate: `Delete` always requires the ownership flag,
-        // independent of what the role ladder grants.
-        if matches!(action, Action::Delete) && !attrs.is_owner {
+        // ABAC gate: destructive actions always require the ownership
+        // flag, independent of what the role ladder grants. The rule
+        // itself is shared with the casbin evaluator — see
+        // [`crate::contract::requires_ownership`].
+        if requires_ownership(action) && !attrs.is_owner {
             return false;
         }
         role_permissions(role).contains(&Permission::new(resource_type, action))
@@ -162,18 +164,7 @@ fn resolve_role(subject: &str, _m11: Option<&CollaborationMap>) -> Option<Role> 
 
 /// Extract the resource type from a `"<kind>:<id>"` object string.
 ///
-/// `enforce_typed` builds this composite itself; the untyped
-/// `enforce` receives it from the caller. Returns `None` when the
-/// prefix is absent or names no known resource type, so an
-/// unrecognised object is denied rather than checked against every
-/// resource type in turn.
-fn resource_type_of(object_id: &str) -> Option<ResourceType> {
-    let (kind, _id) = object_id.split_once(':')?;
-    [
-        ResourceType::Canvas,
-        ResourceType::Workspace,
-        ResourceType::Credential,
-    ]
-    .into_iter()
-    .find(|rt| rt.as_str() == kind)
-}
+/// Lives in [`crate::contract`] so the casbin adapter resolves object
+/// strings the same way — the two evaluators are mutually exclusive at
+/// the `cfg` level and cannot otherwise share this logic.
+use crate::contract::{requires_ownership, resource_type_of};

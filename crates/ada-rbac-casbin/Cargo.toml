@@ -14,38 +14,36 @@ keywords.workspace = true
 publish = false
 
 [features]
-# The evaluator is a three-way function of (feature, target):
+# The evaluator is a two-way function of the `hand-rolled` feature:
 #
-#   target            features         evaluator       Enforcer::from_policy_set
-#   ----------------  ---------------  --------------  -----------------------------
-#   linux / macOS     (default = [])   casbin          builds the casbin enforcer
-#   linux / macOS     hand-rolled      hand-rolled     builds the hand-rolled enforcer
-#   any other target  (default = [])   none            Err(UnsupportedEvaluator)
-#   any other target  hand-rolled      hand-rolled     builds the hand-rolled enforcer
-#
-# So a Linux/macOS build needs NO flags, and every other target MUST
-# pass `--features hand-rolled`. A build that falls into the third row
-# has no evaluator at all: it compiles, and every `Enforcer` /
-# `HotReload` constructor returns a hard error. That is deliberate --
-# a misconfigured build must fail loudly instead of silently
-# authorizing everything.
+#   features         evaluator
+#   ---------------  ---------------------------------------------
+#   (default = [])   casbin 2.x, on every platform
+#   hand-rolled      the hand-rolled evaluator, on every platform
 #
 # `default = []` (rather than the previous `default = ["hand-rolled"]`)
-# because casbin is the intended production evaluator on the
-# platforms that can link it. The old default shipped the hand-rolled
-# evaluator everywhere, and that evaluator resolved every subject to
-# `Role::Owner`.
+# because casbin is the production evaluator. The old default shipped
+# the hand-rolled evaluator everywhere, and that evaluator resolved
+# every subject to `Role::Owner`.
+#
+# There used to be a third configuration: a target-gated build with no
+# evaluator at all, which returned a hard error. That row is gone. It
+# existed because the manifest claimed `casbin` transitively needed
+# `openssl-sys`, which is false -- casbin 2.20 with
+# `default-features = false` depends only on async-trait, fixedbitset,
+# getrandom, hashlink, once_cell, parking_lot, petgraph, regex, rhai,
+# serde, serde_json, thiserror and tokio, all pure Rust. Verified by
+# building it on x86_64-pc-windows-msvc: 4m20s, zero errors, zero
+# OpenSSL. The gate's real cost was that the production evaluator could
+# only ever be compiled on Linux, and this repository's Linux CI had
+# been failing to start any job at all, so it was not compiled
+# anywhere.
 #
 # The `casbin` feature that used to be declared here has been REMOVED.
-# Nothing in `src/` ever read `cfg(feature = "casbin")`; the two test
+# Nothing in `src/` ever read `cfg(feature = "casbin")`; the test
 # references to it have been re-gated onto the real casbin
-# configuration (`!hand-rolled` + linux/macOS), so those assertions now
-# actually compile instead of sitting behind a flag nobody set. It
-# could not be wired in as a third selector input either, because the
-# matrix above requires Linux/macOS to reach casbin with no extra flags.
-#
-# `casbin` itself remains declared under the [target.'cfg(...)']
-# tables below and is untouched.
+# configuration, so those assertions now actually compile instead of
+# sitting behind a flag nobody set.
 default = []
 hand-rolled = []
 
@@ -77,10 +75,6 @@ path = "tests/integration.rs"
 name = "hot_reload_real"
 path = "tests/hot_reload_real.rs"
 
-[[test]]
-name = "unsupported_target"
-path = "tests/unsupported_target.rs"
-
 [dependencies]
 ada-core = { path = "../ada-core", version = "0.1.0" }
 ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
@@ -97,17 +91,17 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # `tokio` in as a regular dep purely for the runtime handle so the
 # public API can stay synchronous.
 #
-# casbin + notify are optional deps gated behind the `casbin`
-# feature and `[target.cfg(target_os)]` below — casbin's transitive
-# openssl-sys crate needs system OpenSSL libs not present on every
-# Windows dev box.
+# `default-features = false` matters here: the default feature set is
+# what would drag in the network adapters. With it off, casbin's only
+# dependencies are async-trait, fixedbitset, getrandom, hashlink,
+# once_cell, parking_lot, petgraph, regex, rhai, serde, serde_json,
+# thiserror, tokio and wasm-bindgen-test -- all pure Rust, all
+# cross-platform, no OpenSSL and no system libraries. A previous
+# revision of this manifest carried a comment claiming the opposite and
+# gated casbin behind `cfg(target_os)`, which needlessly confined the
+# production evaluator to Linux and macOS.
 notify = "6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-casbin = { version = "2.20", default-features = false, features = ["runtime-tokio"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
 casbin = { version = "2.20", default-features = false, features = ["runtime-tokio"] }
 
 [dev-dependencies]

@@ -30,21 +30,40 @@
 
 ## Features
 
-Evaluator selection is a three-way function of the feature and the
-target:
+Evaluator selection is a two-way function of the feature, and does not
+depend on the target:
 
-| Target         | Features         | Evaluator      | `Enforcer::from_policy_set` |
-|----------------|------------------|----------------|------------------------------|
-| linux / macOS  | `default = []`   | casbin 2.x     | builds the casbin enforcer  |
-| linux / macOS  | `hand-rolled`    | hand-rolled    | builds the hand-rolled one  |
-| any other      | `default = []`   | none           | `Err(UnsupportedEvaluator)` |
-| any other      | `hand-rolled`    | hand-rolled    | builds the hand-rolled one  |
+| Target   | Features       | Evaluator   | `Enforcer::from_policy_set` |
+|----------|----------------|-------------|------------------------------|
+| any      | `default = []` | casbin 2.x  | builds the casbin enforcer  |
+| any      | `hand-rolled`  | hand-rolled | builds the hand-rolled one  |
 
-So **Linux/macOS need no flags**, and **every other target (Windows)
-must be built with `--features hand-rolled`** — `casbin` is only
-declared as a dependency for Linux/macOS, so a Windows build with the
-feature off has no evaluator and refuses to construct one rather than
-falling back to something permissive.
+So **no flags are needed on any platform**, and `--features hand-rolled`
+is the escape hatch for exercising the fallback evaluator.
+
+A previous revision gated `casbin` on `cfg(target_os = "linux" | "macos")`
+and documented the reason as casbin's transitive `openssl-sys`
+dependency. That is not true of casbin 2.20 with
+`default-features = false`: its only dependencies are async-trait,
+fixedbitset, getrandom, hashlink, once_cell, parking_lot, petgraph,
+regex, rhai, serde, serde_json, thiserror, tokio and wasm-bindgen-test,
+all pure Rust. Building it on `x86_64-pc-windows-msvc` takes 4m20s and
+needs no system libraries.
+
+The gate was not free. It confined the production evaluator to one
+platform, and since this repository's Linux CI had failed to start any
+job in 24 consecutive runs, the casbin evaluator was not compiled
+anywhere at all. Turning it on locally on Windows immediately surfaced
+two live authorization defects that had been sitting in `casbin_impl.rs`
+unnoticed: `enforce` hardcoded `ResourceType::Canvas` and ignored the
+caller's object entirely, and the ownership gate that the hand-rolled
+evaluator enforced was inert because every policy row sets `is_owner` to
+`"*"`.
+
+Ownership is now enforced in code, by
+`ada_rbac_casbin::contract::requires_ownership`, which both evaluators
+call before consulting the policy — so a runtime `AdminApi` policy row
+cannot reopen the hole.
 
 ## Public API
 

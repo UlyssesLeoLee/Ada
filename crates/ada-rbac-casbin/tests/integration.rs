@@ -12,13 +12,11 @@
 //! The tests use `PolicySet::bundled()` so they do not touch the
 //! workspace layout.
 
-// Every test below needs a real evaluator to drive. The evaluators
-// live behind `hand-rolled`, or behind the casbin dependency that is
-// only declared for Linux/macOS, so a build with neither (the
-// "unsupported" configuration) has no evaluator and its constructors
-// return a hard error by design — see `tests/unsupported_target.rs`
+// Every test below needs a real evaluator. One is always compiled in
+// now: casbin 2.x by default, the hand-rolled one under
+// `--features hand-rolled`. There is no target-gated configuration
+// left that could leave this build without one.
 // for the guard on that path.
-#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
 mod evaluator {
     use ada_m11_rbac_collab::{Action, CollaborationMap, ResourceType};
     use ada_rbac_casbin::{Attrs, Enforcer, PolicySet};

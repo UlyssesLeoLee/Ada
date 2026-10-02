@@ -1,12 +1,10 @@
 //! `enforce_smoke` — Owner allows, Viewer denies.
 
-// Every test below needs a real evaluator. The evaluators live behind
-// `hand-rolled`, or behind the casbin dependency that is only declared
-// for Linux/macOS, so a build with neither (the "unsupported"
-// configuration) has no evaluator and its constructors return a hard
-// error by design — see `tests/unsupported_target.rs` for the guard
+// Every test below needs a real evaluator. One is always compiled in
+// now: casbin 2.x by default, the hand-rolled one under
+// `--features hand-rolled`. There is no target-gated configuration
+// left that could leave this build without one.
 // on that path.
-#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
 mod evaluator {
     use ada_m11_rbac_collab::CollaborationMap;
     use ada_m11_rbac_collab::{Action, ResourceType};

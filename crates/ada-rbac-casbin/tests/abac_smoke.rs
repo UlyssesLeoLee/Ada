@@ -14,7 +14,6 @@ fn tenant_id_propagates_into_attrs() {
 // Needs a real evaluator; see the note in `tests/enforce_smoke.rs` for
 // why the bare `"user-uuid-1"` subject this used to pass (asserting
 // `true`) encoded the authorization bypass rather than the policy.
-#[cfg(any(feature = "hand-rolled", target_os = "linux", target_os = "macos"))]
 #[test]
 fn abac_owner_request_is_allowed() {
     use ada_m11_rbac_collab::CollaborationMap;
