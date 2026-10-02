@@ -85,14 +85,13 @@ fn four_layer_smoke() {
 #[test]
 fn four_layer_with_otlp_capture() {
     use ada_mock::server::FakeOtlpServer;
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpStream};
 
     let srv = FakeOtlpServer::start().expect("start otlp mock");
     let addr = srv.addr;
 
     // 同步 TCP 客户端, 模拟 OTLP/HTTP push
-    use std::io::{Read, Write};
-    use std::net::{Shutdown, TcpStream};
-
     let mut s = TcpStream::connect(addr).expect("connect");
     let body = serde_json::to_vec(&golden_event("ada.metric.tick", 7)).unwrap();
     let head = format!(

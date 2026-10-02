@@ -1,4 +1,4 @@
-//! `server` feature 模块 — 简单的 TcpListener 风格 mock 服务器.
+//! `server` feature 模块 — 简单的 `TcpListener` 风格 mock 服务器.
 //!
 //! 4 能力层之第 2 层: HTTP / OTLP 拦截.
 //!
@@ -75,9 +75,8 @@ impl FakeOtlpServer {
         let join = thread::spawn(move || {
             // 单连接服务: accept 一次, 然后 exit. 适合"测试一次推送".
             while !closed_cl.load(std::sync::atomic::Ordering::Relaxed) {
-                let (stream, _) = match listener.accept() {
-                    Ok(p) => p,
-                    Err(_) => return,
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
                 };
                 if let Some(resp) = handle_one(stream, &rec) {
                     let _ = resp.shutdown(Shutdown::Write);
@@ -141,9 +140,8 @@ fn handle_one(mut stream: TcpStream, rec: &Recorder) -> Option<TcpStream> {
             let body_start = idx + 4;
             let already = raw.len() - body_start;
             body.extend_from_slice(&raw[body_start..]);
-            let need = match content_length {
-                Some(c) => c,
-                None => break,
+            let Some(need) = content_length else {
+                break;
             };
             if already >= need {
                 break;

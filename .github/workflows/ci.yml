@@ -126,10 +126,46 @@ jobs:
       # `default = ["otlp"]`, so nothing else in this workflow compiles it.
       # It had silently rotted to the point where it no longer built at
       # all: a missing import plus a call written against an older
-      # `metrics-exporter-prometheus` API. Checking it here is what stops
-      # the same thing happening again.
-      - name: cargo check (telemetry prometheus feature)
-        run: cargo check -p ada-telemetry --features prometheus --locked
+      # `metrics-exporter-prometheus` API.
+      #
+      # This lane used to be `cargo check -p ada-telemetry --features
+      # prometheus`, which was not enough. `src/testing.rs` is declared
+      # `#[cfg(any(feature = "testing", test))]`, so a plain `cargo check`
+      # (no `test` cfg, no `testing` feature) does not compile the module
+      # AT ALL -- and `cargo test --workspace` never enables `prometheus`,
+      # so it compiles the module with every item inside stubbed out. The
+      # intersection, prometheus ON *and* the module ON, was built by
+      # nothing, leaving `TestHandle` and `test_recorder` free to rot
+      # behind a comment claiming they were covered.
+      #
+      # Proved with a type error planted in `TestHandle::render`:
+      # this lane went RED (E0308) while both the old `cargo check` and
+      # `cargo test --workspace` stayed GREEN. `--all-targets` brings in
+      # the test target (`cfg(test)`); `testing` brings in the lib build
+      # a downstream crate would actually link against.
+      - name: cargo test (telemetry prometheus feature)
+        run: cargo test -p ada-telemetry --features prometheus,testing --locked
+
+      - name: cargo clippy (telemetry prometheus feature)
+        run: cargo clippy -p ada-telemetry --features prometheus,testing --all-targets --locked -- -D warnings
+
+      # ada-mock's `server` feature holds the FakeOtlpServer TcpListener
+      # module -- the crate's HTTP/OTLP capture layer, and the only
+      # thing here that can prove an exporter's push request shape. It is
+      # `default = []` and no job passed `--features server`, so it was
+      # never compiled, never linted, never run.
+      #
+      # The failure mode here is subtler than a missing `--features`
+      # flag: the integration test that exercises the server is itself
+      # `#[cfg(feature = "server")]` (tests/sample_mock_usage.rs), so
+      # `cargo clippy --workspace --all-targets` compiles the file and
+      # lints nothing in it. Turning the feature on immediately surfaced
+      # 3 lints in the module and 6 more in that test.
+      - name: cargo test (mock server capture)
+        run: cargo test -p ada-mock --features server --locked
+
+      - name: cargo clippy (mock server capture)
+        run: cargo clippy -p ada-mock --features server --all-targets --locked -- -D warnings
 
       # ada-remediation's binary is the payload of the k8s Deployment in
       # deploy/k8s/ada-remediation.yaml (replicas: 2, port 9100, an
