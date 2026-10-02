@@ -13,8 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use ada_billing::webhook::EventKind;
 use ada_billing::{
-    BillingError, BillingEvent, Config, EventSink, IdempotencyStore, WebhookHandler,
-    WebhookOutcome,
+    BillingError, BillingEvent, Config, EventSink, IdempotencyStore, WebhookHandler, WebhookOutcome,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -83,7 +82,9 @@ fn a_signature_from_the_configured_secret_is_accepted() {
     let h = handler();
     let body = b"{\"id\":\"evt_smoke_1\"}";
 
-    assert!(h.verify_signature(&sign(SECRET, NOW, body), body, NOW).is_ok());
+    assert!(h
+        .verify_signature(&sign(SECRET, NOW, body), body, NOW)
+        .is_ok());
     // Extra `v1=` entries are tolerated; the first one is checked.
     let multi = format!("{},v1=deadbeef", sign(SECRET, NOW, body));
     assert!(h.verify_signature(&multi, body, NOW).is_ok());
@@ -119,8 +120,12 @@ fn timestamps_outside_the_five_minute_window_are_rejected() {
     let body = b"{\"id\":\"evt_smoke_3\"}";
 
     // Boundary is inclusive at 300 s either way.
-    assert!(h.verify_signature(&sign(SECRET, NOW - 300, body), body, NOW).is_ok());
-    assert!(h.verify_signature(&sign(SECRET, NOW + 300, body), body, NOW).is_ok());
+    assert!(h
+        .verify_signature(&sign(SECRET, NOW - 300, body), body, NOW)
+        .is_ok());
+    assert!(h
+        .verify_signature(&sign(SECRET, NOW + 300, body), body, NOW)
+        .is_ok());
 
     for stale in [NOW - 301, NOW + 301] {
         let err = h
@@ -165,7 +170,10 @@ fn a_replayed_event_is_dropped_as_a_duplicate() {
         "in_smoke_5",
     );
 
-    assert_eq!(h.handle(&body, &sink).expect("first"), WebhookOutcome::Accepted);
+    assert_eq!(
+        h.handle(&body, &sink).expect("first"),
+        WebhookOutcome::Accepted
+    );
     assert_eq!(
         h.handle(&body, &sink).expect("second"),
         WebhookOutcome::Duplicate
@@ -185,11 +193,27 @@ fn the_idempotency_key_is_scoped_by_tenant() {
     let sink = CaptureSink::default();
     let tenant_a = Uuid::new_v4();
     let tenant_b = Uuid::new_v4();
-    let body_a = event_body("evt_smoke_6", "invoice.payment_failed", &tenant_a.to_string(), "in_6");
-    let body_b = event_body("evt_smoke_6", "invoice.payment_failed", &tenant_b.to_string(), "in_6");
+    let body_a = event_body(
+        "evt_smoke_6",
+        "invoice.payment_failed",
+        &tenant_a.to_string(),
+        "in_6",
+    );
+    let body_b = event_body(
+        "evt_smoke_6",
+        "invoice.payment_failed",
+        &tenant_b.to_string(),
+        "in_6",
+    );
 
-    assert_eq!(h.handle(&body_a, &sink).expect("a"), WebhookOutcome::Accepted);
-    assert_eq!(h.handle(&body_b, &sink).expect("b"), WebhookOutcome::Accepted);
+    assert_eq!(
+        h.handle(&body_a, &sink).expect("a"),
+        WebhookOutcome::Accepted
+    );
+    assert_eq!(
+        h.handle(&body_b, &sink).expect("b"),
+        WebhookOutcome::Accepted
+    );
 
     let events = sink.events();
     assert_eq!(events.len(), 2);
@@ -214,10 +238,7 @@ fn every_documented_event_kind_is_recognised() {
             EventKind::CustomerSubscriptionDeleted,
         ),
         ("invoice.paid", EventKind::InvoicePaid),
-        (
-            "invoice.payment_failed",
-            EventKind::InvoicePaymentFailed,
-        ),
+        ("invoice.payment_failed", EventKind::InvoicePaymentFailed),
     ];
 
     for (idx, (type_str, kind)) in expected.iter().enumerate() {
@@ -252,7 +273,12 @@ fn malformed_envelopes_are_rejected_before_dispatch() {
     assert!(matches!(err, BillingError::MalformedEnvelope), "got {err}");
 
     // Unknown `type`.
-    let unknown_kind = event_body("evt_bad_kind", "charge.refunded", &tenant.to_string(), "ch_1");
+    let unknown_kind = event_body(
+        "evt_bad_kind",
+        "charge.refunded",
+        &tenant.to_string(),
+        "ch_1",
+    );
     let err = h.handle(&unknown_kind, &sink).expect_err("unknown type");
     assert!(matches!(err, BillingError::MalformedEnvelope), "got {err}");
 
@@ -272,5 +298,8 @@ fn malformed_envelopes_are_rejected_before_dispatch() {
     let err = h.handle(&bad_tenant, &sink).expect_err("non-uuid tenant");
     assert!(matches!(err, BillingError::MalformedEnvelope), "got {err}");
 
-    assert!(sink.events().is_empty(), "no malformed body may be dispatched");
+    assert!(
+        sink.events().is_empty(),
+        "no malformed body may be dispatched"
+    );
 }

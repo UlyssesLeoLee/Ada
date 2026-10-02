@@ -149,18 +149,18 @@ fn apply_transition_persists_the_row_for_a_new_tenant() {
 fn rejected_transition_leaves_the_previous_row_untouched() {
     let (_registry, svc) = service();
     let tenant = TenantId(Uuid::new_v4());
-    svc.apply_transition(tenant, Active, Plan::Team, Some("sub_smoke_2".into()), Some(1))
-        .expect("seed subscription");
+    svc.apply_transition(
+        tenant,
+        Active,
+        Plan::Team,
+        Some("sub_smoke_2".into()),
+        Some(1),
+    )
+    .expect("seed subscription");
 
     // active -> incomplete is not in the legal set.
     let err = svc
-        .apply_transition(
-            tenant,
-            Incomplete,
-            Plan::Free,
-            None,
-            None,
-        )
+        .apply_transition(tenant, Incomplete, Plan::Free, None, None)
         .expect_err("active -> incomplete must be rejected");
     assert!(matches!(err, BillingError::StripeApi(409)), "got {err}");
 
@@ -175,12 +175,30 @@ fn trialing_can_be_promoted_to_active_then_flagged_past_due() {
     let (_registry, svc) = service();
     let tenant = TenantId(Uuid::new_v4());
 
-    svc.apply_transition(tenant, Trialing, Plan::Team, Some("sub_smoke_3".into()), Some(10))
-        .expect("start trial");
-    svc.apply_transition(tenant, Active, Plan::Team, Some("sub_smoke_3".into()), Some(20))
-        .expect("trial converts");
-    svc.apply_transition(tenant, PastDue, Plan::Team, Some("sub_smoke_3".into()), Some(30))
-        .expect("invoice fails");
+    svc.apply_transition(
+        tenant,
+        Trialing,
+        Plan::Team,
+        Some("sub_smoke_3".into()),
+        Some(10),
+    )
+    .expect("start trial");
+    svc.apply_transition(
+        tenant,
+        Active,
+        Plan::Team,
+        Some("sub_smoke_3".into()),
+        Some(20),
+    )
+    .expect("trial converts");
+    svc.apply_transition(
+        tenant,
+        PastDue,
+        Plan::Team,
+        Some("sub_smoke_3".into()),
+        Some(30),
+    )
+    .expect("invoice fails");
 
     let row = svc.current(tenant).expect("row");
     assert_eq!(row.status, PastDue);

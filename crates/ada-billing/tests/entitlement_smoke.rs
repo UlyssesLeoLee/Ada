@@ -145,7 +145,10 @@ fn an_entitlement_resolves_through_the_subscription_service() {
     // `Entitlement::for_user` resolves the same snapshot.
     let by_user = Entitlement::for_user(&svc, UserId(Uuid::new_v4()), tenant);
     assert_eq!(by_user.plan(), e.plan());
-    assert_eq!(by_user.can_use(Feature::CustomSla), e.can_use(Feature::CustomSla));
+    assert_eq!(
+        by_user.can_use(Feature::CustomSla),
+        e.can_use(Feature::CustomSla)
+    );
 
     // A downgrade re-reads the same row and drops the gates again.
     svc.apply_transition(tenant, Canceled, Plan::Free, None, None)

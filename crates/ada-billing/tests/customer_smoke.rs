@@ -65,7 +65,10 @@ async fn get_or_create_stores_the_stripe_id_and_lookup_reads_it_back() {
     let uid = UserId(Uuid::new_v4());
 
     // No mapping exists before the first call.
-    assert!(svc.lookup(uid).is_none(), "lookup must miss before creation");
+    assert!(
+        svc.lookup(uid).is_none(),
+        "lookup must miss before creation"
+    );
 
     let customer = svc
         .get_or_create(uid, "[email protected]")
@@ -101,8 +104,7 @@ async fn request_shape_is_form_encoded_with_bearer_auth_and_idempotency_key() {
             format!("user({uid})"),
         ))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"id": "cus_smoke_2"})),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "cus_smoke_2"})),
         )
         .mount(&server)
         .await;
@@ -186,8 +188,7 @@ async fn response_without_an_id_is_rejected_as_a_malformed_envelope() {
     Mock::given(method("POST"))
         .and(path("/v1/customers"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"object": "customer"})),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"object": "customer"})),
         )
         .mount(&server)
         .await;

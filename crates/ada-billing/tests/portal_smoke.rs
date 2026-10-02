@@ -67,7 +67,12 @@ async fn mount_happy_path(server: &MockServer, customer_id: &str, portal_url: &s
 #[tokio::test]
 async fn a_session_url_is_returned_with_a_one_hour_expiry() {
     let server = MockServer::start().await;
-    mount_happy_path(&server, "cus_portal_1", "https://billing.stripe.com/s/smoke").await;
+    mount_happy_path(
+        &server,
+        "cus_portal_1",
+        "https://billing.stripe.com/s/smoke",
+    )
+    .await;
     let svc = service(cfg_for(&server, Some("https://app.example.com/billing")));
 
     let before = Utc::now().timestamp();
@@ -134,8 +139,7 @@ async fn an_unset_return_url_falls_back_to_the_billing_path() {
     Mock::given(method("POST"))
         .and(path("/v1/customers"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"id": "cus_portal_3"})),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "cus_portal_3"})),
         )
         .mount(&server)
         .await;
@@ -196,8 +200,7 @@ async fn a_stripe_error_status_is_propagated_as_a_billing_error() {
     Mock::given(method("POST"))
         .and(path("/v1/customers"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"id": "cus_portal_5"})),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "cus_portal_5"})),
         )
         .mount(&server)
         .await;
