@@ -53,7 +53,7 @@ spec:
     spec:
       containers:
         - name: ada-api-gateway
-          image: ghcr.io/ada-project/ada-api-gateway:0.1.0
+          image: ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
           ports:
             - containerPort: 8080
               name: http

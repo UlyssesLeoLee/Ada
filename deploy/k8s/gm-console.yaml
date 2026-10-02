@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: gm-console
-          image: ghcr.io/ada-project/gm-console:0.1.0
+          image: ghcr.io/ulyssesleolee/gm-console:v0.1.0
           ports:
             - containerPort: 8080
               name: http

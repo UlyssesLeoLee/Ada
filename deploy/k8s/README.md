@@ -10,7 +10,66 @@ the deployed topology.
 - `ada-api-gateway.yaml` — Deployment + Service + PodDisruptionBudget for the gateway
 - `ada-remediation.yaml` — ConfigMap + Secret (placeholders) + Deployment + Service + NetworkPolicy
 - `gm-console.yaml` — Deployment + Service + HPA + PodDisruptionBudget for the web console
-- `kustomization.yaml` — kustomize entry point
+- `kustomization.yaml` — kustomize entry point, and the single place
+  the image registry is named
+
+## The images cannot be built: there is no Dockerfile
+
+**Applying these manifests produces three Deployments that never start.**
+All three images are referenced, and none of them exists:
+
+```text
+ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
+ghcr.io/ulyssesleolee/ada-remediation:v0.7.1
+ghcr.io/ulyssesleolee/gm-console:v0.1.0
+```
+
+The repository contains **no Dockerfile for any of the three**, and none
+of the four workflows in `.github/workflows/` builds or pushes an image —
+there is no `docker` or `buildx` step anywhere in CI. So there is no
+reproducible build path for any image this directory references, and a
+fresh `kubectl apply -k deploy/k8s/` lands every pod in
+`ImagePullBackOff` with no local cause.
+
+Two details that make this awkward to diagnose:
+
+- The three services are Rust workspace members, so a build needs the
+  whole workspace, not one crate directory. `ada-remediation` in
+  particular only produces its binary with `--features bin`.
+- `gm-console` has no frontend at all in this repository — only `src`,
+  `tests` and `Cargo.toml`. `GM_CONSOLE_STATIC_DIR` has nothing to point
+  at, so the console serves no UI even once it is running.
+
+This is recorded rather than fixed here because writing three
+Dockerfiles that cannot be built is the same mistake as the webhook
+signing example this file used to carry: an artifact that looks right and
+fails on first use. The build needs a base image and a crate registry,
+and neither was reachable while this was written.
+
+### One registry, one tag format
+
+The three references used to disagree, which nothing flagged — each line
+is a valid image reference and each manifest reads fine alone:
+
+```text
+ghcr.io/ada-project/ada-api-gateway:0.1.0
+ghcr.io/ulysse/ada-remediation:v0.7.1     <- a second registry
+ghcr.io/ada-project/gm-console:0.1.0      <- and no `v` prefix
+```
+
+Neither original namespace matched the account that owns this repository
+(`git@github.com:UlyssesLeoLee/Ada.git`): `ada-project` is not a namespace
+that owner can push to, and `ulysse` reads like the username truncated. All
+three now point at `ghcr.io/ulyssesleolee/`, which is what a `docker push`
+from that account actually produces.
+
+`kustomization.yaml` now declares all three in an `images:` block, so a
+retarget is one edit (or `kustomize edit set image <name>=<ref>`), and
+`crates/ada-core/tests/deploy_images.rs` fails the build if they drift
+apart again. The manifests keep the full reference on purpose:
+`kubectl apply -f <file>` bypasses the kustomization, and a bare name
+there would silently resolve against the node's default registry.
+
 
 ## The topology, and what it was not doing
 
@@ -272,9 +331,17 @@ keeps at least one pod serving).
   runbooks in place, swap for a CSI-backed RWX volume or
   use a `Reloader` sidecar that restarts the pod on
   ConfigMap change.
-- Real HMAC-SHA256 via `blake3::keyed_hash` + manual hex
-  (not the IETF-standard `HMAC-SHA256`). Functionally
-  equivalent for webhook authentication (server holds
-  secret, client signs, server verifies) but a strict
-  compliance audit may flag it. v0.7.2 will switch to
-  standard HMAC-SHA256 once `hmac` + `sha2` crates ship.
+- The signature is `blake3::keyed_hash` with manual hex encoding,
+  not the IETF-standard HMAC-SHA256. Functionally equivalent for
+  webhook authentication (server holds the secret, client signs,
+  server verifies) but a strict compliance audit may flag it.
+  v0.7.2 will switch to standard HMAC-SHA256 once `hmac` + `sha2`
+  ship. Note that Python's stdlib `hmac`/`hashlib` cannot produce
+  a signature this server accepts today, so an external client
+  cannot be wired up without a small signing shim.
+- The signature covers `timestamp || 0x00 || body`, not the body
+  alone. A body-only signature made a captured request replayable
+  forever, because the replay window reads the header the caller
+  supplied. The cost is that the two parties must agree on the
+  timestamp: a client cannot sign once and send twice, and cannot
+  batch a queued payload with a stale clock.

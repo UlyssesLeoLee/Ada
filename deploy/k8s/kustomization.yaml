@@ -64,3 +64,45 @@ labels:
     pairs:
       app.kubernetes.io/managed-by: kustomize
       app.kubernetes.io/part-of: ada-platform
+
+# Image references, declared once.
+#
+# These three services previously named their images inconsistently:
+#
+#   ghcr.io/ada-project/ada-api-gateway:0.1.0
+#   ghcr.io/ulysse/ada-remediation:v0.7.1     <- different registry
+#   ghcr.io/ada-project/gm-console:0.1.0      <- and a different tag style
+#
+# Two registries in one directory means two places to publish, two sets of
+# credentials, and a Deployment that pulls from whichever one happens to be
+# reachable. Nothing flagged it: each line is a well-formed image reference,
+# and the rendered output only shows the split if you read all three.
+#
+# Neither original namespace was this one either. `ada-project` is not the
+# GitHub owner (the remote is `UlyssesLeoLee/Ada`), and `ulysse` looks like
+# the username truncated, so no image here was publishable under the account
+# that owns the repository. The namespace is now the owner's, which is what
+# `docker push` would produce.
+#
+# The manifests carry the full reference so that `kubectl apply -f <file>`
+# -- which bypasses this file entirely -- still resolves the right image.
+# This block is the single override point on top of that: retarget every
+# image for another environment with one edit here, or
+# `kustomize edit set image <name>=<ref>`.
+#
+# `name:` deliberately omits the tag so it matches regardless of which tag
+# the manifest happens to carry.
+#
+# UNRESOLVED: no image here is buildable. There is no Dockerfile anywhere in
+# this repository, and no CI job that builds or pushes one, so all three
+# Deployments land in ImagePullBackOff. See deploy/k8s/README.md.
+images:
+  - name: ada-api-gateway
+    newName: ghcr.io/ulyssesleolee/ada-api-gateway
+    newTag: v0.1.0
+  - name: ada-remediation
+    newName: ghcr.io/ulyssesleolee/ada-remediation
+    newTag: v0.7.1
+  - name: gm-console
+    newName: ghcr.io/ulyssesleolee/gm-console
+    newTag: v0.1.0
