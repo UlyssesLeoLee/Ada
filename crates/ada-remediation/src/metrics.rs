@@ -203,18 +203,40 @@ mod tests {
     use super::*;
     use crate::MemoryStore;
 
+    /// A successful `install()` is observable through
+    /// `is_installed()`.
+    ///
+    /// There is deliberately no assertion about the *content* of
+    /// `render()` here. Every `#[test]` in this module shares one
+    /// process, and `install` competes for the process-global `metrics`
+    /// recorder, so whether this test wins that race is a scheduling
+    /// outcome. A loser never gets a handle, `METRICS` stays empty, and
+    /// `render()` returns "" for the rest of the process even though
+    /// `metrics::*!` still routes to the winner's recorder.
+    ///
+    /// The previous version of this test -- `render_empty_before_install`
+    /// -- branched on `is_installed()` and asserted rendered text in the
+    /// installed case. That assumed our own counter had been described by
+    /// then, which holds only if a particular sibling test ran first.
+    /// Dropping that assumption exposed a second race: a loser can observe
+    /// `is_installed()` flip to true once the winner finishes
+    /// `get_or_init`, so neither the rendered text nor the "loser implies
+    /// an empty cell" pairing is stable either.
+    ///
+    /// What is stable is asserted below. The populated path is covered by
+    /// `metrics_endpoint_returns_prometheus_text_format`; the empty
+    /// fallback is documented on [`install`].
     #[test]
-    fn render_empty_before_install() {
-        // Force a clean slate: if the test harness has
-        // already installed the recorder (e.g. another
-        // test ran first), `render` will return non-empty
-        // — that path is also fine to assert.
-        let s = render();
-        if is_installed() {
-            assert!(s.contains("ada_remediation"));
-        } else {
-            assert_eq!(s, "");
+    fn a_successful_install_is_observable() {
+        let outcome = install();
+        if outcome.is_ok() {
+            assert!(
+                is_installed(),
+                "install() returned Ok but the cell is empty -- the handle was dropped"
+            );
         }
+        // `render` must tolerate a missing handle on either branch.
+        let _snapshot = render();
     }
 
     #[test]

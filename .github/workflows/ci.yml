@@ -86,6 +86,28 @@ jobs:
       - name: cargo check (telemetry prometheus feature)
         run: cargo check -p ada-telemetry --features prometheus --locked
 
+      # ada-remediation's binary is the payload of the k8s Deployment in
+      # deploy/k8s/ada-remediation.yaml (replicas: 2, port 9100, an
+      # HMAC-authenticated webhook and a NetworkPolicy). Its `[[bin]]`
+      # carries `required-features = ["bin"]` and `default = []`, and no
+      # job in this repository passed `--features bin`, so the whole
+      # service -- its env handling, graceful shutdown and runbook
+      # execution -- was never compiled by anything. `release.yml` builds
+      # gm-console only, and there is no Dockerfile, so the image that
+      # manifest references has no reproducible build path either. This
+      # step is the part of that gap that CI can close on its own.
+      - name: cargo build (remediation binary)
+        run: cargo build -p ada-remediation --features bin --locked
+
+      # Without `--features bin`, `src/main.rs` does not exist as a
+      # target at all, so its unit tests are not part of
+      # `cargo test --workspace` either. This is what runs them.
+      - name: cargo test (remediation binary)
+        run: cargo test -p ada-remediation --features bin --locked
+
+      - name: cargo clippy (remediation binary)
+        run: cargo clippy -p ada-remediation --features bin --all-targets -- -D warnings
+
   # ----------------------------------------------------------------------
   # Feature-coverage gate.
   #

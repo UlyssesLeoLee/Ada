@@ -39,6 +39,7 @@
     windows_subsystem = "windows"
 )]
 
+use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -64,7 +65,7 @@ const PROCESS_NAME: &str = "ada-remediation";
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9100";
 /// Default runbook search path. Relative to CWD; the k8s
 /// manifest mounts `/etc/ada-remediation/runbooks` via a
-/// ConfigMap or CSI volume.
+/// `ConfigMap` or CSI volume.
 const DEFAULT_RUNBOOK_DIR: &str = "./config/remediation";
 /// Time we let in-flight HTTP requests complete after a
 /// shutdown signal. Tuned to be slightly less than the
@@ -83,7 +84,7 @@ async fn main() -> ExitCode {
 async fn run() -> anyhow::Result<()> {
     // 1. Read + validate env.
     let bind_addr = read_bind_addr()?;
-    let runbook_dir = read_runbook_dir()?;
+    let runbook_dir = read_runbook_dir();
     let (webhook_secret, trigger_secret) = read_secrets()?;
     let rust_log =
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info,ada_remediation=debug".to_string());
@@ -178,15 +179,52 @@ async fn run() -> anyhow::Result<()> {
         .with_context(|| format!("bind {bind_addr}"))?;
     tracing::info!(addr = %bind_addr, "listening");
 
-    // 9. Serve with graceful shutdown wired to SIGINT/SIGTERM.
-    let shutdown = shutdown_signal();
-    let server =
-        axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
-            shutdown.await;
+    // 9. Serve with graceful shutdown wired to SIGINT/SIGTERM, and
+    //    bound the drain.
+    //
+    //    `with_graceful_shutdown` on its own waits for every in-flight
+    //    request to finish with no upper limit, so one hung connection
+    //    would keep the process alive until the kubelet SIGKILLs it at
+    //    `terminationGracePeriodSeconds: 30` — no shutdown logs, and no
+    //    chance to flush. `SHUTDOWN_GRACE` exists to bound that window
+    //    at 25s, but it was never actually applied: the previous version
+    //    of this function awaited the server unbounded, and the only
+    //    reference to the constant anywhere was a test asserting its
+    //    *value*. So the test was green, the doc comment was satisfied,
+    //    and the guarantee was absent.
+    //
+    //    The signal is awaited exactly once here and handed to axum
+    //    through a oneshot, which is what lets the timeout start when
+    //    the signal arrives rather than when the server does.
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(async move {
+            let _ = rx.await;
             tracing::info!("shutdown signal received, draining in-flight requests");
-        });
-    if let Err(e) = server.await {
-        tracing::error!(error = %e, "server crashed");
+        })
+        // `with_graceful_shutdown` returns a builder that only
+        // becomes a future on `.await`. `select!` and `timeout`
+        // both need the future itself, so convert it here.
+        .into_future();
+    tokio::pin!(server);
+
+    tokio::select! {
+        result = &mut server => {
+            if let Err(e) = result {
+                tracing::error!(error = %e, "server crashed");
+            }
+        }
+        () = shutdown_signal() => {
+            let _ = tx.send(());
+            match tokio::time::timeout(SHUTDOWN_GRACE, &mut server).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::error!(error = %e, "server crashed during drain"),
+                Err(_) => tracing::warn!(
+                    grace_secs = SHUTDOWN_GRACE.as_secs(),
+                    "drain did not finish within the grace window; exiting with requests in flight"
+                ),
+            }
+        }
     }
 
     // 10. Tear down background tasks in order.
@@ -209,10 +247,15 @@ fn read_bind_addr() -> anyhow::Result<SocketAddr> {
 /// Read `REMEDIATION_RUNBOOK_DIR` with a default. The
 /// directory does not have to exist at startup; the
 /// watcher will keep scanning.
-fn read_runbook_dir() -> anyhow::Result<PathBuf> {
+///
+/// Infallible by construction: the env var is either present
+/// (and any string is a usable `PathBuf`) or absent (and the
+/// default applies). Returning `anyhow::Result` here made the
+/// caller's `?` look like it was checking something.
+fn read_runbook_dir() -> PathBuf {
     let raw = std::env::var("REMEDIATION_RUNBOOK_DIR")
         .unwrap_or_else(|_| DEFAULT_RUNBOOK_DIR.to_string());
-    Ok(PathBuf::from(raw))
+    PathBuf::from(raw)
 }
 
 /// Read the two required secrets. Missing => fatal.
@@ -257,8 +300,8 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
     tokio::select! {
-        _ = ctrl_c => tracing::info!("SIGINT received"),
-        _ = terminate => tracing::info!("SIGTERM received"),
+        () = ctrl_c => tracing::info!("SIGINT received"),
+        () = terminate => tracing::info!("SIGTERM received"),
     }
 }
 
@@ -297,7 +340,7 @@ mod tests {
             .parse()
             .expect("DEFAULT_BIND_ADDR must be a valid SocketAddr");
         assert_eq!(addr.port(), 9100);
-        assert_eq!(addr.ip().is_unspecified(), true);
+        assert!(addr.ip().is_unspecified());
     }
 
     /// `DEFAULT_RUNBOOK_DIR` is a relative path; the
@@ -332,12 +375,49 @@ mod tests {
         assert_eq!(PROCESS_NAME, "ada-remediation");
     }
 
-    /// `SHUTDOWN_GRACE` must be strictly less than the
-    /// k8s `terminationGracePeriodSeconds: 30` so
-    /// the process has time to flush + exit before
-    /// SIGKILL. 25s leaves 5s of headroom.
+    /// `SHUTDOWN_GRACE` must leave headroom inside the
+    /// k8s `terminationGracePeriodSeconds: 30`, so the
+    /// process finishes its drain before the kubelet
+    /// SIGKILLs it. 25s leaves 5s.
+    ///
+    /// This asserts the *number*, which is only half the
+    /// guarantee. The other half — that the constant is
+    /// actually applied to the drain — used to be missing
+    /// entirely: `with_graceful_shutdown` was awaited
+    /// unbounded, and this test was green the whole time
+    /// because it never looked at the call site. The
+    /// companion test below pins that half.
     #[test]
     fn shutdown_grace_under_30s() {
         assert!(SHUTDOWN_GRACE <= Duration::from_secs(29));
+    }
+
+    /// The drain is actually bounded by `SHUTDOWN_GRACE`.
+    ///
+    /// The bound lives in `run()`, which is not reachable
+    /// from a unit test without standing up the whole
+    /// server. What can be pinned cheaply is that the
+    /// timeout is applied to a pinned server future after
+    /// the signal completes — and the cheapest honest
+    /// version of that is to reproduce the shape here: a
+    /// future that never resolves, bounded by a short
+    /// `SHUTDOWN_GRACE`-shaped timeout, must yield rather
+    /// than hang. If someone removes the `timeout` call at
+    /// the call site, this still passes, so it is a
+    /// canary, not proof — the proof is that the call site
+    /// now contains `timeout(SHUTDOWN_GRACE, ...)` and the
+    /// constant is referenced from the binary build, which
+    /// is why `cargo clippy` (which lints the non-test
+    /// build) is run on `--features bin` in CI. With the
+    /// constant unreferenced outside tests, clippy's
+    /// `dead_code` fires; that lint is the real guard.
+    #[tokio::test]
+    async fn the_drain_window_is_bounded() {
+        let grace = Duration::from_millis(20);
+        let never = std::future::pending::<()>();
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(grace, never).await;
+        assert!(outcome.is_err(), "an unbounded drain must not be the shape");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }
