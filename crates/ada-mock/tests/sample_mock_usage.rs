@@ -6,7 +6,7 @@
 //!
 //! 场景: "scheduler 入队 3 个 job, 中途通过 event bus 收到 cancel 事件,
 //! 第 2 个 job 转 Cancelled, 剩余两个进入 Running 直到 Succeeded, 同时
-//! 把指标通过 FakeOtlpServer 推出去, 由测试断言推送 body 形状."
+//! 把指标通过 `FakeOtlpServer` 推出去, 由测试断言推送 body 形状."
 
 use ada_mock::builders::{EventBuilder, GoldenEnvelope, JobBuilder};
 use ada_mock::fixtures::{golden_event, load_envelope, load_ndjson, FixturePath};

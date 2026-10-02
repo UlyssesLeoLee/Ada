@@ -1,4 +1,4 @@
-//! StubConnector — 业务 ada-m01 acquisition 的"形状相似"克隆.
+//! `StubConnector` — 业务 ada-m01 acquisition 的"形状相似"克隆.
 //!
 //! 业务版本有 `FileConnector / StdinConnector / HttpConnector` 三个具体
 //! 实现, 这里合并为单一 `StubConnector` + `StubKind` 枚举, 便于测试
@@ -58,12 +58,14 @@ impl StubConnector {
     }
 
     /// 链式: 预置一批 record.
+    #[must_use]
     pub fn with_records(mut self, records: Vec<Record>) -> Self {
         self.records = records;
         self
     }
 
     /// 链式: 让前 N 次 `read_all` 报 `Err`, 之后正常 — 用于重试/退避测试.
+    #[must_use]
     pub fn with_transient_failures(mut self, n: usize) -> Self {
         self.fail_times = n;
         self

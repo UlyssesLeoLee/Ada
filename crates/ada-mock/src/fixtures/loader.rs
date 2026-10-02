@@ -39,7 +39,7 @@ impl FixturePath {
     }
 }
 
-/// 加载 GoldenEnvelope (含 schema_version 校验).
+/// 加载 `GoldenEnvelope` (含 `schema_version` 校验).
 pub fn load_envelope(path: &FixturePath) -> Result<GoldenEnvelope> {
     let p = path.resolve();
     let raw =
