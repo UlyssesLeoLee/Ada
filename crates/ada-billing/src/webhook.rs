@@ -96,6 +96,12 @@ impl IdempotencyStore {
     }
 
     /// Returns `true` if this is the first time we've seen the key.
+    ///
+    /// This is the deduplication primitive, and it is deliberately the
+    /// *only* way to ask "have I seen this?". The answer and the insert
+    /// are decided under one write lock, so a caller that branches on the
+    /// return value cannot lose the race. See [`IdempotencyStore::has_seen`]
+    /// for why the read variant is not safe to pair with this.
     pub fn record(&self, event_id: &str, tenant_id: &str) -> bool {
         let key = (event_id.to_owned(), tenant_id.to_owned());
         let mut w = self.seen.write();
@@ -104,11 +110,41 @@ impl IdempotencyStore {
 
     /// Returns `true` if the `(event_id, tenant_id)` key was already
     /// recorded.
+    ///
+    /// **Not a safe way to deduplicate.** This takes the read lock and
+    /// releases it before the caller does anything else, so
+    ///
+    /// ```text
+    /// if !store.has_seen(id, tenant) && store.record(id, tenant) { ... }
+    /// ```
+    ///
+    /// still lets two threads pass the check before either inserts.
+    /// Branch on [`IdempotencyStore::record`]'s return value instead. This
+    /// accessor exists for assertions and diagnostics, which is how the
+    /// tests use it.
     #[must_use]
     pub fn has_seen(&self, event_id: &str, tenant_id: &str) -> bool {
         self.seen
             .read()
             .contains(&(event_id.to_owned(), tenant_id.to_owned()))
+    }
+
+    /// Number of keys currently held. Diagnostics only — see
+    /// [`IdempotencyStore::has_seen`] for why this is not a dedup path.
+    ///
+    /// Worth watching: the store has no retention policy, so this only ever
+    /// grows. It is the number to alert on before a long-running process
+    /// starts losing its dedup history (and, if a bound is added, the number
+    /// that bound applies to).
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.seen.read().len()
+    }
+
+    /// `true` when no keys are held. Pairs with [`IdempotencyStore::len`].
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.seen.read().is_empty()
     }
 }
 
@@ -227,10 +263,32 @@ impl WebhookHandler {
             uuid::Uuid::parse_str(&tenant_id).map_err(|_| BillingError::MalformedEnvelope)?,
         );
 
-        if self.idem.has_seen(&event_id, &tenant_id) {
+        // Check-and-record in ONE step.
+        //
+        // This used to be:
+        //
+        //     if self.idem.has_seen(&event_id, &tenant_id) {
+        //         return Ok(WebhookOutcome::Duplicate);
+        //     }
+        //     self.idem.record(&event_id, &tenant_id);   // return value discarded
+        //
+        // which takes the read lock, drops it, then takes the write lock.
+        // Two deliveries of the same event that interleave between those
+        // two acquisitions both observe "not seen", both insert, and both
+        // dispatch — the subscription change is applied twice, from one
+        // Stripe event, on the money path.
+        //
+        // `record` returns whether the key was new for exactly this
+        // reason. Deciding the answer under the same write lock that
+        // performs the insert is what makes the loser of the race receive
+        // `Duplicate` instead of an event it has already processed.
+        //
+        // Note `has_seen` below is NOT the dedup path and must not be used
+        // as one. It is a separate read lock, so pairing it with `record`
+        // reintroduces the window this line removed.
+        if !self.idem.record(&event_id, &tenant_id) {
             return Ok(WebhookOutcome::Duplicate);
         }
-        self.idem.record(&event_id, &tenant_id);
         // Audit emission goes through ada-m11-rbac-collab in the
         // api-gateway wiring; here we only emit the BillingEvent.
         sink.handle(BillingEvent {
@@ -400,5 +458,103 @@ mod tests {
         assert!(!s.record("evt_a", "tenant_a"));
         assert!(s.has_seen("evt_a", "tenant_a"));
         assert!(!s.has_seen("evt_b", "tenant_a"));
+        assert!(!s.is_empty());
+        assert_eq!(s.len(), 1);
+    }
+
+    /// The dedup decision and the dispatch have to be serialized with each
+    /// other, not merely with other calls.
+    ///
+    /// `handle` used to read `has_seen` and *then* call `record`. Those are
+    /// two separate lock acquisitions, so concurrent deliveries of one
+    /// Stripe event could all pass the check before any of them inserted —
+    /// and every one of them would go on to dispatch, applying the same
+    /// subscription change several times from a single event. Stripe does
+    /// deliver duplicates in practice (that is the whole reason this table
+    /// exists), and nothing about the duplicate has to be simultaneous for
+    /// the bug to be a bug: it only needs two deliveries to overlap.
+    ///
+    /// The barrier is what makes this a real test rather than a hopeful
+    /// one. Without it the threads rarely collide and the old code would
+    /// pass most of the time, which is the usual way a race "tests green"
+    /// for months.
+    #[test]
+    fn concurrent_deliveries_of_one_event_dispatch_exactly_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Barrier;
+
+        const THREADS: usize = 16;
+        const ROUNDS: usize = 16;
+
+        struct CountingSink(AtomicUsize);
+        impl EventSink for CountingSink {
+            fn handle(&self, _ev: BillingEvent) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let mut accepted = 0usize;
+        let mut duplicates = 0usize;
+        let mut dispatched = 0usize;
+
+        for round in 0..ROUNDS {
+            let cfg = Arc::new(Config {
+                stripe_secret_key: "sk_test_dummy".into(),
+                stripe_webhook_secret: "whsec".into(),
+                stripe_api_version: "2025-08-27.basil".into(),
+                stripe_portal_return_url: None,
+                stripe_base_url: "https://api.stripe.com/v1".into(),
+            });
+            let h = Arc::new(WebhookHandler::new(
+                cfg,
+                Arc::new(IdempotencyStore::new()),
+            ));
+            let sink = Arc::new(CountingSink(AtomicUsize::new(0)));
+            let barrier = Arc::new(Barrier::new(THREADS));
+            let body = serde_json::to_vec(&evt(
+                &format!("evt_race_{round}"),
+                "customer.subscription.updated",
+                "018f0000-0000-4000-8000-000000000001",
+                "sub_1",
+            ))
+            .unwrap();
+
+            let handles: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    let h = Arc::clone(&h);
+                    let sink = Arc::clone(&sink);
+                    let barrier = Arc::clone(&barrier);
+                    let body = body.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        h.handle(&body, &*sink)
+                    })
+                })
+                .collect();
+
+            for t in handles {
+                match t.join().expect("worker thread") {
+                    Ok(WebhookOutcome::Accepted) => accepted += 1,
+                    Ok(WebhookOutcome::Duplicate) => duplicates += 1,
+                    Err(e) => panic!("handle must not fail for a well-formed event: {e}"),
+                }
+            }
+            dispatched += sink.0.load(Ordering::SeqCst);
+        }
+
+        assert_eq!(
+            accepted, ROUNDS,
+            "exactly one delivery per event may be Accepted"
+        );
+        assert_eq!(
+            duplicates,
+            THREADS * ROUNDS - ROUNDS,
+            "every other delivery must be told Duplicate"
+        );
+        assert_eq!(
+            dispatched, ROUNDS,
+            "the sink must see each event exactly once — more than one \
+             dispatch of a single Stripe event is a double charge"
+        );
     }
 }
