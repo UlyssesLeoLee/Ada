@@ -22,9 +22,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ada_m11_rbac_collab::{Action, CollaborationMap, ResourceType};
+use ada_m11_rbac_collab::{Action, CollaborationMap};
 use ada_rbac_casbin::{Attrs, HotReload, PolicySet};
 use tempfile::TempDir;
+
+// `ResourceType` is only referenced by the casbin-gated enforcement
+// assertions below, so only import it when that gate is compiled in.
+#[cfg(feature = "casbin")]
+use ada_m11_rbac_collab::ResourceType;
 
 const MODEL_CONF: &str = include_str!("../policies/model.conf");
 const BASE_POLICY: &str = include_str!("../policies/base_policy.csv");
