@@ -88,7 +88,11 @@ jobs:
           cargo deny check advisories bans sources licenses
 
       - name: Trivy fs scan (fail on CRITICAL only)
-        uses: aquasecurity/trivy-action@0.24.0
+        # Pinned by commit SHA: this is the supply-chain gate, so the
+        # action must not be movable under us. The tag is `v0.24.0`
+        # (note the leading `v`); the previous `@0.24.0` referenced a ref
+        # that does not exist and the job failed to start.
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
         with:
           scan-type: fs
           scan-ref: .
@@ -97,7 +101,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy config scan (k8s manifests)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
         with:
           scan-type: config
           scan-ref: deploy/k8s
