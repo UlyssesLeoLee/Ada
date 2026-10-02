@@ -168,32 +168,68 @@ kubectl -n observability get pods -l app.kubernetes.io/name=ada-remediation
 kubectl -n observability logs -l app.kubernetes.io/name=ada-remediation -f
 ```
 
-## Verifying HMAC + webhook
+## Verifying the webhook signature
 
-Once the pod is up, verify the webhook rejects unsigned
-requests:
+The scheme is **blake3 keyed-hash** over `timestamp || 0x00 || body`
+(see `crates/ada-remediation/src/auth.rs`) — *not* HMAC-SHA256. Python's
+stdlib `hmac`/`hashlib` therefore cannot produce a signature this server
+accepts, even when it is given the right secret and the right bytes. An
+earlier version of this file showed an `hmac.new(secret, TS.BODY, sha256)`
+example; every request signed that way was rejected.
+
+Produce the signature with the crate's own helper, `auth::sign_at`
+(also exposed as `LoggingClient::sign_request`):
+
+```rust
+let ts  = ada_remediation::auth::now_unix_secs().to_string();
+let sig = ada_remediation::auth::sign_at(secret.as_bytes(), ts.as_bytes(), &body);
+```
+
+The timestamp is *inside* the signed material, and that is load-bearing.
+A signature over the body alone makes a captured `(body, signature)` pair
+a permanent credential: the 5-minute window compares the **supplied**
+header against the server clock, so an attacker simply attaches a current
+timestamp and the window never expires for them. With the timestamp signed,
+refreshing the header invalidates the signature (`403`).
+
+Once the pod is up, verify the webhook rejects unsigned requests:
 
 ```bash
-# this should return 401
+# this should return 200 -- /health is unauthenticated
 kubectl -n observability exec -it deploy/ada-remediation -- \
-  wget -q -O - http://localhost:9100/healthz
-# /healthz is unauthenticated, expected to return 200
+  wget -q -O - http://localhost:9100/health
+# note: this service does NOT serve /healthz, which is what gm-console serves
 
 kubectl -n observability port-forward deploy/ada-remediation 9100:9100 &
 sleep 1
 
-# compute signature locally
-SECRET="<the value of REMEDIATION_WEBHOOK_SECRET>"
-TS=$(date +%s)
-BODY='{"alerts":[{"status":"firing","labels":{"alertname":"DiskSpaceFillingFast"}}]}'
-SIG=$(python3 -c "import hmac,hashlib,sys; print(hmac.new(b'$SECRET', b'$TS.$BODY', hashlib.sha256).hexdigest())")
-
+# signed request, with $SIG from auth::sign_at and $TS matching the
+# timestamp that was signed:
 curl -i -X POST http://localhost:9100/webhook/alertmanager \
   -H "X-Webhook-Signature: $SIG" \
   -H "X-Webhook-Timestamp: $TS" \
   -H "Content-Type: application/json" \
   -d "$BODY"
 ```
+
+Two failure modes are worth knowing, because the status codes differ:
+
+- `401` — missing/unparseable header, or the timestamp outside the window.
+- `403` — the signature did not match. This includes the replay case above.
+
+Two other things about this endpoint as it stands:
+
+- The service starts with **no runbooks**. The five runbooks do
+  exist, in `config/remediation/`, and `crates/ada-remediation`
+  loads them from there. But the Deployment mounts a ConfigMap
+  named `ada-remediation-runbooks` at that path, and that ConfigMap
+  is **referenced and never defined** in `deploy/k8s/`. Marked
+  `optional: true`, so the mount succeeds with an empty directory
+  and nothing warns. A validly signed alert is therefore accepted
+  and then matches zero actions — the service runs, answers its
+  probes, and remediates nothing.
+- `/health`, not `/healthz`, is the health route; see the
+  note in `ada-remediation.yaml`.
 
 ## Graceful shutdown
 
