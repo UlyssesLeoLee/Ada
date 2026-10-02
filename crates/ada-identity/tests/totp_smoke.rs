@@ -11,12 +11,11 @@
 //! The file therefore did not compile, and nothing caught it because CI
 //! had never been able to run a build.
 //!
-//! Until `totp-rs` lands in v0.5.0 the independent-reference half of a
-//! round-trip cannot be written: the crate's own RFC 6238 step is a
-//! private, time-only derivation, so there is no public way to compute an
-//! expected code from a secret. These tests cover the contract the public
-//! API does expose. The RFC 6238 Appendix D reference vectors stay
-//! deferred in `rfc6238_vectors.rs` until that dependency exists.
+//! The crate implements RFC 6238 itself (in-house, on `hmac` +
+//! `sha1`), so the reference half of a round-trip is now possible: the
+//! RFC 6238 test vectors and the secret-sensitivity regression tests
+//! live in `rfc6238_vectors.rs`. These tests cover the contract the
+//! public smoke surface exposes end to end.
 
 use ada_identity::{recovery::RecoveryStore, totp};
 
@@ -46,6 +45,25 @@ fn totp_generate_then_verify() {
     let now = chrono::Utc::now().timestamp();
     let r = totp::verify_code(&s.base32, 0, now).expect("verify returns a verdict");
     assert!(!r, "code 0 must not verify");
+}
+
+#[test]
+fn otpauth_uri_records_the_algorithm_the_verifier_uses() {
+    // The key URI format lets a client read the algorithm and digit
+    // count off the URI. Advertising the default silently is how a
+    // server ends up verifying SHA-1 while a client provisioned
+    // SHA-256 and produces codes that never match.
+    let s = totp::generate_secret("Ada", TEST_ACCOUNT).expect("secret");
+    assert!(
+        s.otpauth.contains("&algorithm=SHA1"),
+        "otpauth must name the algorithm: {}",
+        s.otpauth
+    );
+    assert!(
+        s.otpauth.contains("&digits=6"),
+        "otpauth must name the digit count: {}",
+        s.otpauth
+    );
 }
 
 #[test]
