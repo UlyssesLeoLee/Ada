@@ -1,4 +1,4 @@
-//! portal_smoke — single-use Billing Portal session issuance.
+//! `portal_smoke` — single-use Billing Portal session issuance.
 //!
 //! `PortalService` needs two upstream calls to satisfy one
 //! `create_session`: the lazy `POST /v1/customers` (via

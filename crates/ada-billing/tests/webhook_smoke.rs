@@ -1,4 +1,4 @@
-//! webhook_smoke — `Stripe-Signature` verification, idempotent replay
+//! `webhook_smoke` — `Stripe-Signature` verification, idempotent replay
 //! handling, and envelope validation.
 //!
 //! Drives `WebhookHandler` directly. The crate does not export an axum
@@ -249,7 +249,8 @@ fn every_documented_event_kind_is_recognised() {
             "sub_kind",
         );
         h.handle(&body, &CaptureSink::default()).expect("handle");
-        assert_eq!(EventKind::from_str(type_str), Some(*kind));
+        let parsed: EventKind = type_str.parse().expect("documented type must parse");
+        assert_eq!(parsed, *kind);
     }
 }
 

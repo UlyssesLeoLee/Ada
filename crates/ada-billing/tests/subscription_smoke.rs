@@ -1,4 +1,4 @@
-//! subscription_smoke — the seven-state machine and its transitions.
+//! `subscription_smoke` — the seven-state machine and its transitions.
 //!
 //! This module has no HTTP surface: `SubscriptionService` validates
 //! every transition locally *before* any Stripe REST call (see

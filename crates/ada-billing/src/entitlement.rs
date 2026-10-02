@@ -9,11 +9,8 @@
 //! | `Team`       | 10      | unlimited     | 90 days         | no           |
 //! | `Enterprise` | custom  | unlimited     | 365 days        | yes          |
 
-use std::sync::Arc;
-
 use ada_core::{TenantId, UserId};
 
-use crate::error::Result;
 use crate::plan::Plan;
 use crate::subscription::{Subscription, SubscriptionService, SubscriptionStatus};
 
@@ -74,6 +71,7 @@ impl Entitlement {
         self.status.is_entitled()
     }
 
+    /// The plan tier this snapshot was resolved from.
     #[must_use]
     pub fn plan(&self) -> Plan {
         self.plan
@@ -87,11 +85,19 @@ impl Entitlement {
             return false;
         }
         match f {
-            Feature::MultiTenant => self.plan >= Plan::Team,
-            Feature::UnlimitedPipelines => self.plan >= Plan::Team,
-            Feature::ExtendedAuditRetention => self.plan >= Plan::Team,
-            Feature::SsoRequired => self.plan == Plan::Enterprise,
-            Feature::CustomSla => self.plan == Plan::Enterprise,
+            // The Team-tier gates (multi-tenant, pipelines, audit
+            // retention) all unlock at the same tier per the plan
+            // matrix in the module docs, so they share one arm. The
+            // variants stay separate in the enum so a future
+            // per-feature matrix can diverge without an API change.
+            Feature::MultiTenant
+            | Feature::UnlimitedPipelines
+            | Feature::ExtendedAuditRetention => self.plan >= Plan::Team,
+            // Enterprise-only gates. Not `>= Plan::Enterprise`: there
+            // is no higher tier to grow into, but spelling the check
+            // as an equality keeps a future tier from silently
+            // inheriting SSO / custom-SLA entitlements.
+            Feature::SsoRequired | Feature::CustomSla => self.plan == Plan::Enterprise,
         }
     }
 }
@@ -108,6 +114,7 @@ pub fn entitlement_for(subs: &SubscriptionService, tenant: TenantId) -> Entitlem
 mod tests {
     use super::*;
     use crate::subscription::SubscriptionRegistry;
+    use std::sync::Arc;
 
     fn svc_with_plan(plan: Plan, status: SubscriptionStatus) -> SubscriptionService {
         let reg = Arc::new(SubscriptionRegistry::new());
@@ -192,7 +199,7 @@ mod tests {
             Feature::SsoRequired,
             Feature::CustomSla,
         ] {
-            assert!(!e.can_use(f), "feature {:?} must be denied", f);
+            assert!(!e.can_use(f), "feature {f:?} must be denied");
         }
     }
 

@@ -18,8 +18,12 @@ use crate::error::{BillingError, Result};
 /// A short-lived portal session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortalSession {
+    /// The single-use Stripe-hosted portal URL.
     pub url: String,
+    /// The Stripe customer the session belongs to.
     pub customer_id: CustomerId,
+    /// Unix epoch seconds after which the session is no longer served
+    /// from cache (Stripe's own TTL is 1 h).
     pub expires_at_unix: i64,
 }
 
@@ -38,6 +42,8 @@ pub struct PortalService {
 }
 
 impl PortalService {
+    /// Build a portal service with its own 10 s-timeout HTTP client
+    /// and an empty session cache.
     #[must_use]
     pub fn new(cfg: Arc<Config>, customers: CustomerService) -> Self {
         let http = Client::builder()
