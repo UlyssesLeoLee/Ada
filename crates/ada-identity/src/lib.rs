@@ -16,7 +16,8 @@
 //!   parsing (`samael = "0.0"`).
 //! - [`webauthn`] — `WebAuthn` RP: registration + authentication
 //!   (`webauthn-rs = "0.6"`).
-//! - [`totp`] — RFC 6238 TOTP (`totp-rs = "5"`).
+//! - [`totp`] — RFC 6238 TOTP, in-house HMAC (`hmac` + `sha1`/`sha2`),
+//!   verified against the published test vectors.
 //! - [`passkey`] — `WebAuthn` resident-key flow (re-export of webauthn).
 //! - [`recovery`] — single-use recovery code generation + redemption.
 //! - [`session`] — opaque session token + cookie management.
