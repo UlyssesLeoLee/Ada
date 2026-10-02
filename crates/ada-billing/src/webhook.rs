@@ -215,6 +215,18 @@ impl WebhookHandler {
             .ok_or(BillingError::MalformedEnvelope)?
             .to_owned();
 
+        // Validate the tenant **before** the idempotency table is
+        // touched. Registering the key first would make a non-UUID
+        // `metadata.tenant_id` permanently swallow the event: the
+        // first delivery errors out, and every Stripe retry then hits
+        // `has_seen` and is answered `Duplicate` — a success Stripe
+        // stops retrying, so the subscription change is lost with no
+        // error surfaced. Validation must strictly precede dedup
+        // registration.
+        let tenant = TenantId(
+            uuid::Uuid::parse_str(&tenant_id).map_err(|_| BillingError::MalformedEnvelope)?,
+        );
+
         if self.idem.has_seen(&event_id, &tenant_id) {
             return Ok(WebhookOutcome::Duplicate);
         }
@@ -224,9 +236,7 @@ impl WebhookHandler {
         sink.handle(BillingEvent {
             event_id,
             kind,
-            tenant_id: TenantId(
-                uuid::Uuid::parse_str(&tenant_id).map_err(|_| BillingError::MalformedEnvelope)?,
-            ),
+            tenant_id: tenant,
             target_id,
         });
         Ok(WebhookOutcome::Accepted)

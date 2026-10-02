@@ -42,6 +42,12 @@ impl EventSink for CaptureSink {
 }
 
 fn handler() -> WebhookHandler {
+    handler_over(Arc::new(IdempotencyStore::new()))
+}
+
+/// Same handler, but over a store the test keeps a handle on, so the
+/// registration side of the dedup contract is observable.
+fn handler_over(idem: Arc<IdempotencyStore>) -> WebhookHandler {
     let cfg = Config {
         stripe_secret_key: "sk_test_smoke".into(),
         stripe_webhook_secret: SECRET.into(),
@@ -49,7 +55,7 @@ fn handler() -> WebhookHandler {
         stripe_portal_return_url: None,
         stripe_base_url: "https://api.stripe.com/v1".into(),
     };
-    WebhookHandler::new(Arc::new(cfg), Arc::new(IdempotencyStore::new()))
+    WebhookHandler::new(Arc::new(cfg), idem)
 }
 
 /// `t=<unix>,v1=<hex>` over `HMAC-SHA256(secret, "<t>.<body>")`.
@@ -304,4 +310,59 @@ fn malformed_envelopes_are_rejected_before_dispatch() {
         0,
         "no malformed body may be dispatched"
     );
+}
+
+#[test]
+fn a_non_uuid_tenant_id_does_not_register_the_idempotency_key() {
+    // Regression: validation must precede dedup registration. If the
+    // key were recorded before the tenant is parsed, the first
+    // delivery would error out with the key already on file, and the
+    // Stripe retry would be answered `Duplicate` — a success — so the
+    // event would be lost silently and permanently.
+    let idem = Arc::new(IdempotencyStore::new());
+    let h = handler_over(Arc::clone(&idem));
+    let sink = CaptureSink::default();
+    let malformed = event_body(
+        "evt_regression_1",
+        "invoice.payment_failed",
+        "tenant-1",
+        "in_regression_1",
+    );
+
+    // (a) the malformed delivery is still rejected as a malformed
+    // envelope, and nothing is dispatched.
+    let err = h.handle(&malformed, &sink).expect_err("non-uuid tenant");
+    assert!(matches!(err, BillingError::MalformedEnvelope), "got {err}");
+    assert_eq!(sink.events().len(), 0, "nothing may be dispatched");
+
+    // (b) the key was not recorded. The key is `(event.id, tenant_id)`
+    // as a *string*, so the retry Stripe actually sends carries the
+    // same non-UUID tenant: it must be re-validated and rejected
+    // again, never answered `Duplicate`.
+    assert!(
+        !idem.has_seen("evt_regression_1", "tenant-1"),
+        "a rejected envelope must not leave a key in the dedup table"
+    );
+    let retry = h
+        .handle(&malformed, &sink)
+        .expect_err("the retry must be re-validated, not deduped");
+    assert!(
+        matches!(retry, BillingError::MalformedEnvelope),
+        "got {retry}"
+    );
+
+    // The event is not permanently lost: once Stripe sends the same
+    // `event.id` with a well-formed tenant, it is processed rather
+    // than silently dropped.
+    let corrected = event_body(
+        "evt_regression_1",
+        "invoice.payment_failed",
+        &Uuid::new_v4().to_string(),
+        "in_regression_1",
+    );
+    assert_eq!(
+        h.handle(&corrected, &sink).expect("corrected tenant"),
+        WebhookOutcome::Accepted
+    );
+    assert_eq!(sink.events().len(), 1);
 }

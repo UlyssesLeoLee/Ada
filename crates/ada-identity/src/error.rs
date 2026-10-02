@@ -25,6 +25,19 @@ pub enum IdentityError {
     #[error("jwt signing failed")]
     JwtSigning,
 
+    /// RS256 signing is not implemented in this build, so `mint_jwt` and
+    /// `verify_jwt_stub` both fail closed with this variant instead of
+    /// producing or accepting a token whose signature segment is empty.
+    ///
+    /// This is deliberately distinct from [`IdentityError::JwtSigning`]
+    /// (a signer that ran and failed) and from
+    /// [`IdentityError::JwtVerification`] (a signature that was checked
+    /// and did not match). A caller triaging this variant needs to know
+    /// that the fix is "wire up a real signer", not "retry" and not
+    /// "check the JWKS".
+    #[error("jwt signing not implemented")]
+    JwtSigningUnavailable,
+
     #[error("jwt verification failed")]
     JwtVerification,
 
