@@ -1,4 +1,4 @@
-//! totp_smoke — TOTP secret generation, code verification and recovery
+//! `totp_smoke` — TOTP secret generation, code verification and recovery
 //! code round-trip.
 //!
 //! ## Why this file does not use `totp-rs`

@@ -27,7 +27,11 @@ impl RecoveryStore {
             .map(|_| {
                 let mut buf = [0u8; 8];
                 rand::Rng::fill(&mut rand::thread_rng(), &mut buf[..]);
-                let raw: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+                // `hex::encode` is exactly the concatenation of
+                // `format!("{b:02x}")` over the bytes (lowercase, zero
+                // padded, two chars per byte) and is already a dependency
+                // of this module, so the emitted code is byte-identical.
+                let raw = hex::encode(buf);
                 let h = sha256_hex(raw.as_bytes());
                 self.seen.write().insert(h);
                 raw
