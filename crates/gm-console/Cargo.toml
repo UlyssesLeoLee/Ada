@@ -41,8 +41,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio = { version = "1.40", features = ["macros", "rt-multi-thread"] }
 http-body-util = "0.1"
 
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-strip = "debuginfo"
+# NOTE: the release profile that used to live here was silently ignored.
+# Cargo only honours `[profile.*]` at the workspace root, and the root
+# Cargo.toml already declares an identical `[profile.release]`
+# (opt-level 3, lto = "thin", codegen-units = 1, strip = "debuginfo").
+# Keeping a copy here just made every cargo invocation in the workspace
+# print "profiles for the non root package will be ignored".
