@@ -1,4 +1,4 @@
-//! import_smoke — verify the enforcer builds from the bundled policy set.
+//! `import_smoke` — verify the enforcer builds from the bundled policy set.
 
 use ada_m11_rbac_collab::CollaborationMap;
 use ada_rbac_casbin::{Enforcer, PolicySet};

@@ -67,8 +67,10 @@ impl HotReload {
     fn model_path(&self) -> PathBuf {
         self.policy_path
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("policies"))
+            .map_or_else(
+                || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("policies"),
+                Path::to_path_buf,
+            )
             .join("model.conf")
     }
 
@@ -105,7 +107,9 @@ impl HotReload {
             .to_path_buf();
         watcher
             .watch(&watch_root, RecursiveMode::NonRecursive)
-            .map_err(|e| RbacCasbinError::ReloadFailed(format!("watch {watch_root:?}: {e}")))?;
+            .map_err(|e| {
+                RbacCasbinError::ReloadFailed(format!("watch {}: {e}", watch_root.display()))
+            })?;
 
         let handle = thread::Builder::new()
             .name("ada-rbac-casbin::hot_reload".into())
@@ -148,7 +152,7 @@ impl HotReload {
 
         Ok(ActiveWatcher {
             _watcher: Box::new(watcher),
-            _thread: Some(handle),
+            thread_handle: Some(handle),
         })
     }
 
@@ -198,7 +202,7 @@ fn is_policy_event(ev: &Event, policy: &Path) -> bool {
 /// (the channel closes when the watcher drops the sender).
 pub struct ActiveWatcher {
     _watcher: Box<dyn Watcher + Send>,
-    _thread: Option<thread::JoinHandle<()>>,
+    thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for ActiveWatcher {
@@ -213,6 +217,6 @@ impl Drop for ActiveWatcher {
         // dispatch thread observes `rx.recv()` returning Err and
         // exits. Joining the thread would block shutdown; we let it
         // detach naturally.
-        self._thread.take();
+        self.thread_handle.take();
     }
 }

@@ -68,7 +68,7 @@ impl HandRolledEnforcer {
     ) -> Result<bool> {
         let roles = effective_roles_for(user_id, m11);
         for role in roles {
-            if self.check(role, object_id, action, attrs)? {
+            if self.check(role, object_id, action, attrs) {
                 return Ok(true);
             }
         }
@@ -99,30 +99,27 @@ impl HandRolledEnforcer {
         &self.inner.set
     }
 
-    fn check(&self, role: Role, _object_id: &str, action: Action, attrs: &Attrs) -> Result<bool> {
+    fn check(&self, role: Role, _object_id: &str, action: Action, attrs: &Attrs) -> bool {
         if matches!(action, Action::Delete) && !attrs.is_owner {
-            return Ok(false);
+            return false;
         }
         if role == Role::Owner {
-            return Ok(true);
+            return true;
         }
         for (high, low) in &self.inner.role_ladder {
-            if *high == role && self.role_allows(*low, action)? {
-                return Ok(true);
+            if *high == role && self.role_allows(*low, action) {
+                return true;
             }
-            if *low == role && self.role_allows(*low, action)? {
-                return Ok(true);
+            if *low == role && self.role_allows(*low, action) {
+                return true;
             }
         }
-        if self.role_allows(role, action)? {
-            return Ok(true);
-        }
-        Ok(false)
+        self.role_allows(role, action)
     }
 
-    fn role_allows(&self, role: Role, action: Action) -> Result<bool> {
+    fn role_allows(&self, role: Role, action: Action) -> bool {
         if role == Role::Owner {
-            return Ok(true);
+            return true;
         }
         for rt in [
             M11ResourceType::Canvas,
@@ -131,11 +128,11 @@ impl HandRolledEnforcer {
         ] {
             if let Some(actions) = self.inner.perms.get(&(role, rt)) {
                 if actions.contains(&action) {
-                    return Ok(true);
+                    return true;
                 }
             }
         }
-        Ok(false)
+        false
     }
 }
 
@@ -229,7 +226,6 @@ fn build_perm_map() -> HashMap<(Role, M11ResourceType), Vec<Action>> {
 }
 
 #[allow(dead_code)]
-fn _ensure_compile() -> Result<()> {
+fn _ensure_compile() {
     let _ = RbacCasbinError::Internal("compile probe".into());
-    Ok(())
 }

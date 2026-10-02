@@ -1,4 +1,4 @@
-//! hot_reload_smoke — reload_now swaps the enforcer in place.
+//! `hot_reload_smoke` — `reload_now` swaps the enforcer in place.
 //!
 //! v0.5.0 makes `spawn_watcher` real (notify-backed); the watcher is
 //! short-lived so we exercise the construction path only.

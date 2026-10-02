@@ -1,4 +1,4 @@
-//! enforce_smoke — Owner allows, Viewer denies.
+//! `enforce_smoke` — Owner allows, Viewer denies.
 
 use ada_m11_rbac_collab::CollaborationMap;
 use ada_m11_rbac_collab::{Action, ResourceType};

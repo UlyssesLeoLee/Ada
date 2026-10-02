@@ -1,4 +1,4 @@
-//! abac_smoke — tenant isolation + attrs builder behaviour.
+//! `abac_smoke` — tenant isolation + attrs builder behaviour.
 
 use ada_m11_rbac_collab::CollaborationMap;
 use ada_m11_rbac_collab::{Action, ResourceType};

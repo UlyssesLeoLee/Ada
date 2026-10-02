@@ -1,4 +1,4 @@
-//! hot_reload_real.rs — exercises the notify-backed watcher.
+//! `hot_reload_real.rs` — exercises the notify-backed watcher.
 //!
 //! Strategy:
 //!
