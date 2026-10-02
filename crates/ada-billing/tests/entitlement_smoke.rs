@@ -1,4 +1,4 @@
-//! entitlement_smoke — plan-tier feature gating.
+//! `entitlement_smoke` — plan-tier feature gating.
 //!
 //! Pure in-process surface: `Entitlement` is derived from a
 //! `Subscription` row and exposes `can_use(Feature)`, so there is no

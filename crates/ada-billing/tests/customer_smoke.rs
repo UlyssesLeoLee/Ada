@@ -1,4 +1,4 @@
-//! customer_smoke — `UserId ↔ Stripe customer.id` round-trip.
+//! `customer_smoke` — `UserId ↔ Stripe customer.id` round-trip.
 //!
 //! Drives `CustomerService` against a `wiremock` Stripe endpoint: the
 //! form-encoded `POST /v1/customers` request shape, the lazy-create +
@@ -100,8 +100,10 @@ async fn request_shape_is_form_encoded_with_bearer_auth_and_idempotency_key() {
         .and(header("stripe-version", API_VERSION))
         .and(header(
             "idempotency-key",
-            // `UserId`'s Display is `user(<uuid>)`, not the bare uuid.
-            format!("user({uid})"),
+            // `UserId`'s Display already renders `user(<uuid>)` — that
+            // Display output *is* the header value, so do not wrap it
+            // in a second `user(...)`.
+            uid.to_string(),
         ))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "cus_smoke_2"})),

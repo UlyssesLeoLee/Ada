@@ -119,6 +119,23 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// The process environment is process-global state, and the test
+    /// harness runs these tests on parallel threads. Every test that
+    /// mutates one of the four documented vars must hold this lock,
+    /// otherwise a sibling test can overwrite a var between `set_var`
+    /// and the `from_env()` call and make the result non-deterministic.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Acquire [`ENV_LOCK`]. Poisoning is ignored (recovered rather
+    /// than propagated) so one panicking test cannot cascade into
+    /// every other env test.
+    fn env_guard() -> MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     /// Helper: build a `Config` with all four required env vars set,
     /// then clear them so the next test starts from a clean slate.
@@ -141,6 +158,7 @@ mod tests {
 
     #[test]
     fn from_env_happy_path() {
+        let _guard = env_guard();
         set_env_all();
         let cfg = Config::from_env().expect("from_env");
         clear_env_all();
@@ -156,6 +174,7 @@ mod tests {
 
     #[test]
     fn from_env_portal_return_url_optional() {
+        let _guard = env_guard();
         std::env::set_var("STRIPE_SECRET_KEY", "sk_test_dummy");
         std::env::set_var("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
         std::env::set_var("STRIPE_API_VERSION", "2025-08-27.basil");
@@ -168,6 +187,7 @@ mod tests {
 
     #[test]
     fn from_env_empty_value_is_rejected() {
+        let _guard = env_guard();
         std::env::set_var("STRIPE_SECRET_KEY", "");
         std::env::set_var("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
         std::env::set_var("STRIPE_API_VERSION", "2025-08-27.basil");
@@ -178,6 +198,7 @@ mod tests {
 
     #[test]
     fn from_env_missing_secret_reports_variable_name_only() {
+        let _guard = env_guard();
         // Only set the webhook secret; the secret key is missing.
         std::env::remove_var("STRIPE_SECRET_KEY");
         std::env::set_var("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
@@ -193,6 +214,7 @@ mod tests {
 
     #[test]
     fn with_base_url_overrides_stripe_base_url() {
+        let _guard = env_guard();
         set_env_all();
         let cfg = Config::from_env()
             .expect("from_env")
@@ -203,6 +225,7 @@ mod tests {
 
     #[test]
     fn is_test_mode_distinguishes_live_key() {
+        let _guard = env_guard();
         std::env::set_var("STRIPE_SECRET_KEY", "sk_live_dummy");
         std::env::set_var("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
         std::env::set_var("STRIPE_API_VERSION", "2025-08-27.basil");

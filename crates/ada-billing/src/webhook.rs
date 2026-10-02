@@ -36,23 +36,34 @@ type HmacSha256 = Hmac<Sha256>;
 /// `&'static str` so the matcher exhausts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventKind {
+    /// `customer.subscription.created`.
     CustomerSubscriptionCreated,
+    /// `customer.subscription.updated`.
     CustomerSubscriptionUpdated,
+    /// `customer.subscription.deleted`.
     CustomerSubscriptionDeleted,
+    /// `invoice.paid`.
     InvoicePaid,
+    /// `invoice.payment_failed`.
     InvoicePaymentFailed,
 }
 
-impl EventKind {
-    #[must_use]
-    pub fn from_str(s: &str) -> Option<Self> {
-        Some(match s {
+/// Parsing is a trait impl rather than an inherent `from_str` so the
+/// type composes with `str::parse` and matches how
+/// [`crate::subscription::SubscriptionStatus`] is parsed in this
+/// crate. The error is [`BillingError::MalformedEnvelope`] because
+/// the only caller reads the token out of a Stripe event envelope.
+impl core::str::FromStr for EventKind {
+    type Err = BillingError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
             "customer.subscription.created" => Self::CustomerSubscriptionCreated,
             "customer.subscription.updated" => Self::CustomerSubscriptionUpdated,
             "customer.subscription.deleted" => Self::CustomerSubscriptionDeleted,
             "invoice.paid" => Self::InvoicePaid,
             "invoice.payment_failed" => Self::InvoicePaymentFailed,
-            _ => return None,
+            _ => return Err(BillingError::MalformedEnvelope),
         })
     }
 }
@@ -61,8 +72,11 @@ impl EventKind {
 /// processing (DB updates, plan tier change notifications, …).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BillingEvent {
+    /// Stripe's `event.id`; also the idempotency key.
     pub event_id: String,
+    /// The event's `type`, parsed into a known token.
     pub kind: EventKind,
+    /// The tenant resolved from the event's metadata.
     pub tenant_id: TenantId,
     /// Stripe-side identifier (`sub_…` / `cus_…`).
     pub target_id: String,
@@ -75,6 +89,7 @@ pub struct IdempotencyStore {
 }
 
 impl IdempotencyStore {
+    /// Create an empty store.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -87,6 +102,8 @@ impl IdempotencyStore {
         w.insert(key)
     }
 
+    /// Returns `true` if the `(event_id, tenant_id)` key was already
+    /// recorded.
     #[must_use]
     pub fn has_seen(&self, event_id: &str, tenant_id: &str) -> bool {
         self.seen
@@ -98,6 +115,7 @@ impl IdempotencyStore {
 /// Trait alias for "something that can receive a `BillingEvent`".
 /// The api-gateway implements this; tests use a `mpsc::UnboundedSender`.
 pub trait EventSink: Send + Sync + 'static {
+    /// Receive one accepted [`BillingEvent`].
     fn handle(&self, ev: BillingEvent);
 }
 
@@ -122,6 +140,7 @@ pub struct WebhookHandler {
 }
 
 impl WebhookHandler {
+    /// Build a handler over the shared config + idempotency store.
     #[must_use]
     pub fn new(cfg: Arc<Config>, idem: Arc<IdempotencyStore>) -> Self {
         Self { cfg, idem }
@@ -180,7 +199,7 @@ impl WebhookHandler {
             .get("type")
             .and_then(|v| v.as_str())
             .ok_or(BillingError::MalformedEnvelope)?;
-        let kind = EventKind::from_str(kind_str).ok_or(BillingError::MalformedEnvelope)?;
+        let kind: EventKind = kind_str.parse()?;
         // Tenant resolution: in v0.4.0 we tag every event with the
         // tenant that owns the customer. The full mapping comes from
         // the api-gateway's tenant context; for the v0.4.0 skeleton
@@ -217,8 +236,22 @@ impl WebhookHandler {
 /// Convenience wrapper used by the api-gateway route. Holds the
 /// handler + an event sink + the mpsc sender used by tests.
 pub struct WebhookService {
+    /// The signature-verifying / deduplicating handler.
     pub handler: WebhookHandler,
+    /// The downstream receiver for accepted events.
     pub sink: Arc<dyn EventSink>,
+}
+
+// Manual rather than derived: `Arc<dyn EventSink>` is not `Debug`, and
+// the sink is an opaque trait object whose internals are not ours to
+// print. Eliding it keeps the impl total without leaking event data.
+impl core::fmt::Debug for WebhookService {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WebhookService")
+            .field("handler", &self.handler)
+            .field("sink", &"<dyn EventSink>")
+            .finish()
+    }
 }
 
 #[cfg(test)]
