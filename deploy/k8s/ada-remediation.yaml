@@ -113,7 +113,22 @@ spec:
               memory: 512Mi
           livenessProbe:
             httpGet:
-              path: /healthz
+              # Must be a path `ada-remediation` actually serves. It
+              # serves `/health`, not `/healthz`. This manifest
+              # previously probed `/healthz`, which 404s: readiness
+              # never went green, so the pod was never added to the
+              # Service, and liveness killed the container after
+              # ~35s, for a permanent CrashLoopBackOff. Nothing in
+              # `cargo build` or `kubectl apply` can catch a probe path
+              # that is valid YAML and a valid HTTP path but is not
+              # routed -- the three services disagree on the spelling
+              # (`gm-console` -> /healthz, `ada-api-gateway` ->
+              # /health/live + /health/ready, this one -> /health) and
+              # each manifest has to name its own. The invariant is
+              # pinned by `ada-core`'s `probe_paths_match_the_routes_they_call`
+              # test, which reads this file and the router source
+              # together.
+              path: /health
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -121,7 +136,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /health
               port: http
             initialDelaySeconds: 2
             periodSeconds: 5

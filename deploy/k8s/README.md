@@ -208,7 +208,16 @@ keeps at least one pod serving).
 
 - `/metrics` — Prometheus text format (no auth, gated by
   `NetworkPolicy` to `prometheus` namespace only)
-- `/healthz` — liveness + readiness (no auth)
+- `/health` — liveness + readiness (no auth). **This service serves
+  `/health`, not `/healthz`.** The three services in this directory do
+  not agree on the spelling: `gm-console` serves `/healthz`,
+  `ada-api-gateway` serves `/health/live` + `/health/ready`, and this
+  one serves `/health`. Each manifest has to name its own, and this
+  manifest used to name `gm-console`'s — which 404s, so readiness
+  never went green and liveness killed the container after ~35s. The
+  invariant is now pinned by a test in `ada-core`
+  (`probe_paths_match_the_routes_they_call`) that reads every manifest
+  and the corresponding router source together.
 - `/webhook/alertmanager` — Alertmanager v4 payload
   (HMAC-SHA256 signed)
 - `/remediation/trigger` — manual operator trigger
