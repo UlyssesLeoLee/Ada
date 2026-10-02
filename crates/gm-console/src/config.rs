@@ -7,6 +7,29 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub bind_addr: String,
     pub upstream_url: String,
+    /// Optional override for the static document root.
+    ///
+    /// # This directory is a PUBLIC document root
+    ///
+    /// When set, every readable file inside it — subdirectories
+    /// included — is served by URL, minus dotfiles and dot-directories.
+    /// Anything in here is public. Never point this at a directory that
+    /// contains anything other than built assets: a project root, a
+    /// directory holding `.env` variants, or a working copy.
+    ///
+    /// The served paths go through
+    /// [`crate::routes::resolve_static_path`], which refuses any path
+    /// segment beginning with `.` — that covers `.env`, `.git`, and
+    /// `..` as a traversal, in one rule. Ordinary files in ordinary
+    /// subdirectories are served, because that is what a static server
+    /// does; the guard exists to keep secrets that are conventionally
+    /// hidden out, not to second-guess what belongs in a build output
+    /// directory.
+    ///
+    /// Unset in `deploy/k8s/gm-console.yaml`, so a deployed pod serves
+    /// the `index.html` compiled into the binary and has no directory
+    /// to get wrong. It exists for local iteration, where a `dist/` is
+    /// rebuilt constantly.
     pub static_dir: Option<String>,
     pub log_level: String,
     pub enable_compression: bool,

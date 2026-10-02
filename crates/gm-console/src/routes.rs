@@ -296,8 +296,17 @@ fn response_headers(upstream: &reqwest::header::HeaderMap) -> HeaderMap {
 /// If `GM_CONSOLE_STATIC_DIR` is set and the requested path resolves to a file
 /// under that directory, serve it (with mime sniffing). Otherwise serve the
 /// bundled `apps/gm-console-web/dist/index.html`.
+///
+/// A path under `/api` is never answered from here. The gateway owns that
+/// namespace and its statuses carry meaning (401, 403, 404, 502); handing a
+/// bare `/api` back as `200 text/html` tells an API client it called a working
+/// endpoint. Verified: `/api` and `/api/` both used to return the SPA shell,
+/// because `/api/*path` needs a segment to match.
 async fn static_fallback(req: Request) -> Response {
     let path = req.uri().path().to_string();
+    if path == "/api" || path.starts_with("/api/") {
+        return ApiNotFound.into_response();
+    }
     // Try disk fallback first (dev / hot-iteration).
     if let Ok(dir) = std::env::var("GM_CONSOLE_STATIC_DIR") {
         if let Some(resp) = try_disk(&dir, &path).await {
@@ -307,20 +316,94 @@ async fn static_fallback(req: Request) -> Response {
     serve_index()
 }
 
-/// Serve a file from disk under `dir`. Returns `None` when the path is unsafe
-/// or the file does not exist; caller falls back to bundled index.html.
-async fn try_disk(dir: &str, path: &str) -> Option<Response> {
-    // Reject any path-traversal attempts.
-    if path.contains("..") {
+/// 404 for an `/api` path that matched no route, so the gateway's
+/// namespace never answers with the SPA shell.
+#[derive(Debug)]
+struct ApiNotFound;
+
+impl IntoResponse for ApiNotFound {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": { "code": "NOT_FOUND", "message": "no such api route" }
+            })),
+        )
+            .into_response()
+    }
+}
+
+/// Map a request path to a readable file under `dir`, or `None` if it
+/// must not be served.
+///
+/// ## The rule
+///
+/// Every path segment is rejected if it starts with `.`. One predicate,
+/// two properties:
+///
+/// - **Containment.** `..` is the only thing in a path that can move you
+///   out of a directory, and it always does so as a whole segment. A
+///   substring test for `".."` was both too broad (`foo..bar` is a
+///   perfectly good filename) and too narrow — it missed the Windows
+///   spelling, where `/assets/x\..\..\..\secret` is a single `/`-segment
+///   containing backslashes, so the substring was never checked against
+///   the segments the filesystem actually resolves.
+/// - **Dotfile refusal.** `.env`, `.npmrc` and `.git` are how secrets
+///   actually leak out of a static directory. This was not in the old
+///   check at all: with `GM_CONSOLE_STATIC_DIR` pointed at a build output
+///   directory, `GET /.env` returned its contents. Verified against a
+///   running server, not inferred.
+///
+/// The candidate is then built by pushing validated segments onto the
+/// root, rather than by string concatenation, so there is no
+/// unvalidated text left for the filesystem to reinterpret.
+///
+/// ## Do not add percent-decoding here
+///
+/// The path is used exactly as it arrives, undecoded, and
+/// `tokio::fs::read` does not decode either — that is why `%2e%2e` is
+/// inert and cannot become `..`. Decoding the path here would look like a
+/// correctness improvement and would silently reopen the traversal. If
+/// decoding is ever genuinely needed, it has to happen *before* this
+/// function, on the segment list.
+///
+/// Symlinks under `dir` are not resolved or refused. That is an operator
+/// decision about what they put in the directory, not something a
+/// request can control.
+fn resolve_static_path(dir: &str, request_path: &str) -> Option<std::path::PathBuf> {
+    if dir.is_empty() {
         return None;
     }
-    let stripped = path.trim_start_matches('/');
-    // SPA: a directory request becomes /<dir>/index.html
-    let candidate = if stripped.is_empty() {
-        format!("{dir}/index.html")
+    // Both separators, so a Windows-style traversal cannot hide inside a
+    // single `/`-delimited segment.
+    let segments: Vec<&str> = request_path
+        .trim_start_matches('/')
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // A directory request becomes the index document.
+    let segments: Vec<&str> = if segments.is_empty() {
+        vec!["index.html"]
     } else {
-        format!("{dir}/{stripped}")
+        segments
     };
+
+    let mut out = std::path::PathBuf::from(dir);
+    for seg in segments {
+        if seg.starts_with('.') {
+            return None;
+        }
+        out.push(seg);
+    }
+    Some(out)
+}
+
+/// Serve a file from disk under `dir`. Returns `None` when the path is
+/// unsafe or the file does not exist; caller falls back to the bundled
+/// index.html.
+async fn try_disk(dir: &str, path: &str) -> Option<Response> {
+    let candidate = resolve_static_path(dir, path)?;
     let bytes: Bytes = match tokio::fs::read(&candidate).await {
         Ok(b) => Bytes::from(b),
         Err(_) => return None,
@@ -363,4 +446,78 @@ fn serve_index() -> Response {
 #[allow(dead_code)]
 fn _unused_method_silencer(_: Method) {
     let _ = (StatusCode::OK, header::ACCEPT);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_static_path;
+    use std::path::PathBuf;
+
+    /// The predicate is private, so its edge cases live here rather than
+    /// in `tests/static_files.rs`, which tests the *served* behaviour
+    /// instead. Widening the public API to reach one function would be
+    /// the wrong trade for a security check.
+    #[test]
+    fn ordinary_files_resolve_under_the_root() {
+        let p = |s: &str| resolve_static_path("/srv/static", s);
+        assert_eq!(p("/"), Some(PathBuf::from("/srv/static/index.html")));
+        assert_eq!(p(""), Some(PathBuf::from("/srv/static/index.html")));
+        assert_eq!(p("/a/b/c.js"), Some(PathBuf::from("/srv/static/a/b/c.js")));
+        // Repeated and trailing separators are cosmetic.
+        assert_eq!(p("//a//b.js"), Some(PathBuf::from("/srv/static/a/b.js")));
+    }
+
+    /// A dot *inside* a name is not a dot segment. The old
+    /// `path.contains("..")` test rejected these real filenames.
+    #[test]
+    fn dots_inside_a_name_are_not_a_traversal() {
+        assert_eq!(
+            resolve_static_path("/srv/static", "/v1..2.js"),
+            Some(PathBuf::from("/srv/static/v1..2.js"))
+        );
+        assert_eq!(
+            resolve_static_path("/srv/static", "/a..b/c.js"),
+            Some(PathBuf::from("/srv/static/a..b/c.js"))
+        );
+    }
+
+    #[test]
+    fn dot_segments_are_refused() {
+        let p = |s: &str| resolve_static_path("/srv/static", s);
+        assert_eq!(p("/.."), None);
+        assert_eq!(p("/a/../b"), None);
+        assert_eq!(p("/a/b/.."), None);
+        assert_eq!(p("/./a"), None);
+    }
+
+    /// A Windows-style traversal is a single `/`-segment containing
+    /// backslashes, so splitting on `/` alone would miss it. This is the
+    /// case the old substring check could not see, because it never
+    /// compared against the segments the filesystem actually resolves.
+    #[test]
+    fn backslash_separated_traversal_is_refused() {
+        let p = |s: &str| resolve_static_path("/srv/static", s);
+        assert_eq!(p(r"/a\b\..\..\c"), None);
+        assert_eq!(p(r"..\..\secret"), None);
+        assert_eq!(p(r"/a\..\b"), None);
+    }
+
+    /// The other half of the predicate: dotfiles are how secrets leave a
+    /// static directory. Verified against a running server before the fix
+    /// — `GET /.env` returned its contents.
+    #[test]
+    fn dotfiles_and_dot_directories_are_refused() {
+        let p = |s: &str| resolve_static_path("/srv/static", s);
+        assert_eq!(p("/.env"), None);
+        assert_eq!(p("/.env.local"), None);
+        assert_eq!(p("/.git/config"), None);
+        assert_eq!(p("/secrets/.aws/credentials"), None);
+    }
+
+    /// An empty root is not a usable static directory, and must not
+    /// degrade into "serve from the process working directory".
+    #[test]
+    fn an_empty_root_is_refused() {
+        assert_eq!(resolve_static_path("", "/a.js"), None);
+    }
 }
