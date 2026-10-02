@@ -21,6 +21,7 @@ kind: Kustomization
 namespace: observability
 
 resources:
+  - ada-api-gateway.yaml
   - ada-remediation.yaml
   - gm-console.yaml
 

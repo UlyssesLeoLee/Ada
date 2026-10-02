@@ -29,6 +29,7 @@
 mod error;
 mod health;
 mod router;
+pub mod server;
 mod state;
 
 pub use error::{ApiError, Result};

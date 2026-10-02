@@ -17,15 +17,27 @@ publish = false
 name = "ada_m13_api_gateway"
 path = "src/lib.rs"
 
+# Named `ada-api-gateway`, not after the package
+# (`ada-m13-api-gateway`), because the name is load-bearing: it is the
+# Service name in deploy/k8s/ada-api-gateway.yaml and the host half of
+# `GM_CONSOLE_UPSTREAM` in gm-console.yaml. Renaming the binary to match
+# the package would silently break the proxy's upstream resolution.
+[[bin]]
+name = "ada-api-gateway"
+path = "src/main.rs"
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
 
 # M-12 v0.5.0 server-side reconciliation smoke test. Registered
-# explicitly per the B2 lesson: when [lib] has a `path` and
-# tests/*.rs is non-trivial, [[test]] makes the target visible
-# to `cargo test --workspace`. The test pulls m12 with the
-# `server` feature (see [dev-dependencies]).
+# explicitly so it can carry the `ada-m12-canvas-editor` dev-dependency
+# story in one place. Note this is NOT a workaround for any Cargo
+# discovery bug: the "B2 lesson" comment that used to sit here claimed
+# Cargo drops `tests/*.rs` when `[lib]` sets `path`. That is false, and
+# it was disproved by checking six other crates in this workspace that
+# rely on the implicit discovery with an explicit `[lib] path` and
+# declare no `[[test]]` at all — every one of their test files builds.
 [[test]]
 name = "reconcile_smoke"
 path = "tests/reconcile_smoke.rs"
@@ -33,7 +45,7 @@ path = "tests/reconcile_smoke.rs"
 [dependencies]
 ada-core = { path = "../ada-core", version = "0.1.0" }
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower = "0.5"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 utoipa = { version = "4", features = ["axum_extras"] }
@@ -41,6 +53,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
 # Phase 4 distributed-trace support: M-13's outbound

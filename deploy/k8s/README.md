@@ -1,12 +1,63 @@
 # ada-remediation k8s deployment (v0.7.1)
 
 This directory contains a minimal k8s deployment for the
-`ada-remediation` binary built from `crates/ada-remediation/`.
+`ada-remediation` binary built from `crates/ada-remediation/`, plus the
+`ada-api-gateway` and `gm-console` services that make up the rest of
+the deployed topology.
 
 ## Files
 
+- `ada-api-gateway.yaml` — Deployment + Service + PodDisruptionBudget for the gateway
 - `ada-remediation.yaml` — ConfigMap + Secret (placeholders) + Deployment + Service + NetworkPolicy
+- `gm-console.yaml` — Deployment + Service + HPA + PodDisruptionBudget for the web console
 - `kustomization.yaml` — kustomize entry point
+
+## The topology, and what it was not doing
+
+The request path is:
+
+```
+client -> gm-console (Service :80) -> /api/* -> ada-api-gateway (Service :8080)
+```
+
+`gm-console` is a reverse proxy in front of a static SPA. It forwards
+`/api/<rest>` to `$GM_CONSOLE_UPSTREAM` and forwards the client's
+`authorization` and `x-tenant-id` headers **verbatim**. Its source
+comment says "auth, rate limit and observability live in api-gateway",
+so the gateway is the security boundary by design.
+
+**That boundary did not exist until this manifest was added.** Until
+then the only two Services in this directory were `gm-console` and
+`ada-remediation`; the string `ada-api-gateway` appeared solely as an
+env value in `gm-console.yaml`, never as a Service. In-cluster DNS
+resolved no record for it, so every `/api/*` request through the only
+deployed service returned **502 BAD_GATEWAY**. The failure is silent in
+the sense that nothing in the build or the manifests fails — a
+reference to a service that does not exist is not a YAML error.
+
+## What is still missing: authentication
+
+**A green deployment here is not a secured one.** As of this commit the
+gateway mounts four routes and none of them require a credential:
+
+| Route | Auth required |
+|---|---|
+| `GET /health` | no |
+| `GET /health/live` | no |
+| `GET /health/ready` | no |
+| `GET /api/v1/ping` | no |
+
+`ada-identity`, `ada-rbac-casbin` and `ada-billing` are **not**
+dependencies of `ada-m13-api-gateway`. Nothing validates the token
+`gm-console` forwards, and nothing derives a tenant from it. Wiring
+those crates in as middleware is the next step and is tracked in the
+`fix/ci-workflow-parse-errors` branch history.
+
+The crate's own `src/lib.rs` describes itself as the "minimum skeleton"
+and places the middleware chain in a later phase, so this is declared
+missing work rather than a broken implementation — but the deployment
+made it invisible, because a gateway that is never reached cannot be
+observed to lack auth.
 
 ## Prerequisites
 
