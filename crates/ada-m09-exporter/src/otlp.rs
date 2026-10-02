@@ -460,7 +460,7 @@ mod tests {
         let bad = Metric::now("", MetricKind::Counter, 1.0, HashMap::new());
         let err = e.export(&[bad]).expect_err("invalid");
         assert!(matches!(err, ExporterError::InvalidMetric(_)));
-        assert!(e.is_empty(), "failed export must not write");
+        assert_eq!(e.len(), 0, "failed export must not write");
     }
 
     #[test]

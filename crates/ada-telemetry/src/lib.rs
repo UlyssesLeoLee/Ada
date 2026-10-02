@@ -408,12 +408,12 @@ mod tests {
 
     #[test]
     fn crate_version_is_set() {
-        assert!(!VERSION.is_empty());
+        assert_ne!(VERSION, "");
     }
 
     #[test]
     fn crate_name_is_set() {
-        assert!(!NAME.is_empty());
+        assert_ne!(NAME, "");
     }
 
     #[test]

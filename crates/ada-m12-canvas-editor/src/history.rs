@@ -146,7 +146,7 @@ mod tests {
         h.push(EditOp::RemoveNode {
             id: NodeId(Uuid::new_v4()),
         });
-        assert!(h.redo.is_empty(), "expected redo to be cleared");
+        assert_eq!(h.redo.len(), 0, "expected redo to be cleared");
     }
 
     #[test]
@@ -156,6 +156,6 @@ mod tests {
         h.push(EditOp::RemoveNode {
             id: NodeId(Uuid::new_v4()),
         });
-        assert!(!h.is_empty());
+        assert_ne!(h.undo_len(), 0);
     }
 }

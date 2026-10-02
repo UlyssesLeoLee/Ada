@@ -299,8 +299,9 @@ fn malformed_envelopes_are_rejected_before_dispatch() {
     let err = h.handle(&bad_tenant, &sink).expect_err("non-uuid tenant");
     assert!(matches!(err, BillingError::MalformedEnvelope), "got {err}");
 
-    assert!(
-        sink.events().is_empty(),
+    assert_eq!(
+        sink.events().len(),
+        0,
         "no malformed body may be dispatched"
     );
 }

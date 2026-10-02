@@ -550,7 +550,7 @@ mod tests {
         // when secrets aren't wired up.
         let r = ex.execute(&step, &ctx()).await.unwrap();
         assert!(r.message.contains("skipped"));
-        assert!(lc.recorded().is_empty());
+        assert_eq!(lc.recorded().len(), 0);
     }
 
     #[tokio::test]

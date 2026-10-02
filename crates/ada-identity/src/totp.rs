@@ -434,6 +434,6 @@ mod tests {
 
     #[test]
     fn base32_decode_empty_is_empty() {
-        assert!(base32_decode("").expect("decodes").is_empty());
+        assert_eq!(base32_decode("").expect("decodes").len(), 0);
     }
 }

@@ -30,7 +30,7 @@ const TEST_ACCOUNT: &str = concat!("ada-smoke", "@", "example.invalid");
 #[test]
 fn totp_generate_then_verify() {
     let s = totp::generate_secret("Ada", TEST_ACCOUNT).expect("secret");
-    assert!(!s.base32.is_empty());
+    assert_ne!(s.base32, "");
     assert!(s.otpauth.starts_with("otpauth://totp/"));
     assert!(s.otpauth.contains("issuer=Ada"), "otpauth: {}", s.otpauth);
     assert!(

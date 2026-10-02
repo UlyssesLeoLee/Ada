@@ -16,7 +16,7 @@ async fn install_list_uninstall_round_trip() {
 
     host.uninstall(id).await.expect("uninstall");
     let list = host.list().await.expect("list");
-    assert!(list.is_empty(), "expected empty after uninstall");
+    assert_eq!(list.len(), 0, "expected empty after uninstall");
 }
 
 #[tokio::test]

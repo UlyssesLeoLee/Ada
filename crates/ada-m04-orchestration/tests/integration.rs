@@ -38,7 +38,7 @@ async fn worker_pulls_enqueues_runs_succeeds() {
 
     assert_eq!(s.state_of(id).await.unwrap(), JobState::Succeeded);
     assert_eq!(s.in_flight().await, 0);
-    assert!(s.poll().await.unwrap().is_empty());
+    assert_eq!(s.poll().await.unwrap().len(), 0);
 }
 
 #[tokio::test]

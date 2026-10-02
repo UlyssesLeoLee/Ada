@@ -155,7 +155,7 @@ mod tests {
         let p = NormalizationPipeline::from_rules(rules.clone());
         assert_eq!(p.rules(), rules.as_slice());
         assert_eq!(p.len(), 2);
-        assert!(!p.is_empty());
+        assert_ne!(p.len(), 0);
     }
 
     #[test]

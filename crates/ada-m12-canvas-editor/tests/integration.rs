@@ -128,7 +128,7 @@ mod server_recon_integration {
 
         assert_eq!(r.new_version, 2);
         assert!(!r.had_conflict);
-        assert!(r.server_wins.is_empty());
+        assert_eq!(r.server_wins.len(), 0);
         assert_eq!(r.client_wins, vec![cn]);
         assert_eq!(r.merged.nodes().len(), 2);
         assert_eq!(r.merged.name(), "integration-doc");
@@ -149,7 +149,7 @@ mod server_recon_integration {
         assert_eq!(r.new_version, 2);
         assert!(r.had_conflict);
         assert_eq!(r.server_wins, vec![sn]);
-        assert!(r.client_wins.is_empty());
+        assert_eq!(r.client_wins.len(), 0);
 
         let merged_node = r.merged.get_node(sn).expect("node in merged");
         assert_eq!(merged_node.position, Position::new(0, 0));
@@ -164,10 +164,10 @@ mod server_recon_integration {
 
         assert_eq!(r.new_version, 1);
         assert!(!r.had_conflict);
-        assert!(r.server_wins.is_empty());
-        assert!(r.client_wins.is_empty());
-        assert!(r.merged.nodes().is_empty());
-        assert!(r.merged.edges().is_empty());
+        assert_eq!(r.server_wins.len(), 0);
+        assert_eq!(r.client_wins.len(), 0);
+        assert_eq!(r.merged.nodes().len(), 0);
+        assert_eq!(r.merged.edges().len(), 0);
     }
 
     #[test]

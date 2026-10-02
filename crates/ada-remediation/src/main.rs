@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn default_runbook_dir_is_a_path() {
         let p = std::path::Path::new(DEFAULT_RUNBOOK_DIR);
-        assert!(!p.as_os_str().is_empty());
+        assert_ne!(p.as_os_str(), "");
         assert!(p.is_relative() || p.is_absolute());
     }
 

@@ -226,12 +226,12 @@ mod tests {
 
     #[test]
     fn version_not_empty() {
-        assert!(!VERSION.is_empty());
+        assert_ne!(VERSION, "");
     }
 
     #[test]
     fn name_not_empty() {
-        assert!(!NAME.is_empty());
+        assert_ne!(NAME, "");
     }
 
     #[test]

@@ -309,7 +309,7 @@ mod tests {
         // max(1, 0) + 1 = 2
         assert_eq!(r.new_version, 2);
         assert!(!r.had_conflict);
-        assert!(r.server_wins.is_empty());
+        assert_eq!(r.server_wins.len(), 0);
         assert_eq!(r.client_wins, vec![cn]);
         assert_eq!(r.merged.nodes().len(), 2);
     }
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(r.new_version, 2);
         assert!(r.had_conflict, "conflict should be flagged");
         assert_eq!(r.server_wins, vec![sn]);
-        assert!(r.client_wins.is_empty());
+        assert_eq!(r.client_wins.len(), 0);
 
         // The merged canvas holds the server's copy (0, 0).
         let merged_node = r.merged.get_node(sn).expect("node in merged");
@@ -351,10 +351,10 @@ mod tests {
 
         assert_eq!(r.new_version, 1);
         assert!(!r.had_conflict);
-        assert!(r.server_wins.is_empty());
-        assert!(r.client_wins.is_empty());
-        assert!(r.merged.nodes().is_empty());
-        assert!(r.merged.edges().is_empty());
+        assert_eq!(r.server_wins.len(), 0);
+        assert_eq!(r.client_wins.len(), 0);
+        assert_eq!(r.merged.nodes().len(), 0);
+        assert_eq!(r.merged.edges().len(), 0);
     }
 
     /// Case 4: client_version ahead of server_version (clock

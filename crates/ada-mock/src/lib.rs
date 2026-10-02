@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn version_not_empty() {
-        assert!(!MOCK_VERSION.is_empty());
+        assert_ne!(MOCK_VERSION, "");
     }
 
     #[test]

@@ -67,7 +67,7 @@ fn reconcile_endpoint_accepts_client_version() {
     // new_version = max(1, 0) + 1 = 2
     assert_eq!(r.new_version, 2);
     // Server's node was already in server, not a "client win".
-    assert!(r.server_wins.is_empty());
+    assert_eq!(r.server_wins.len(), 0);
     // Client's node was a "client win".
     assert_eq!(r.client_wins, vec![cn]);
     // Merged canvas has both nodes.
@@ -94,7 +94,7 @@ fn reconcile_endpoint_conflict_marks_server_wins() {
 
     assert!(r.had_conflict);
     assert_eq!(r.server_wins, vec![sn]);
-    assert!(r.client_wins.is_empty());
+    assert_eq!(r.client_wins.len(), 0);
 
     // Server's version of the node is in the merged canvas.
     let merged_node = r.merged.get_node(sn).expect("node in merged");

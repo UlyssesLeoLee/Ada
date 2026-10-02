@@ -125,7 +125,7 @@ ada_app_y_total 2
 
     #[test]
     fn metric_names_handles_empty() {
-        assert!(metric_names("").is_empty());
-        assert!(metric_names("# only a comment\n\n").is_empty());
+        assert_eq!(metric_names("").len(), 0);
+        assert_eq!(metric_names("# only a comment\n\n").len(), 0);
     }
 }

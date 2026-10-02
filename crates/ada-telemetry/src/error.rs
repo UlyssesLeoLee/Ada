@@ -116,6 +116,6 @@ mod tests {
             reason: "test",
         }
         .into();
-        assert!(!e.to_string().is_empty());
+        assert_ne!(e.to_string(), "");
     }
 }

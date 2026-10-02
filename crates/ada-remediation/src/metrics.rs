@@ -297,8 +297,9 @@ mod tests {
         record_step_outcome("test-action-success", "success");
         if is_installed() {
             let snapshot = render();
+            let snapshot_is_empty = snapshot.is_empty();
             assert!(
-                snapshot.contains("ada_remediation_actions_total") || snapshot.is_empty(),
+                snapshot.contains("ada_remediation_actions_total") || snapshot_is_empty,
                 "snapshot should mention actions_total or be empty: {snapshot}"
             );
         }
@@ -314,8 +315,9 @@ mod tests {
         record_step_outcome("test-action-failure", "failure");
         if is_installed() {
             let snapshot = render();
+            let snapshot_is_empty = snapshot.is_empty();
             assert!(
-                snapshot.contains("ada_remediation_actions_total") || snapshot.is_empty(),
+                snapshot.contains("ada_remediation_actions_total") || snapshot_is_empty,
                 "snapshot should mention actions_total or be empty: {snapshot}"
             );
         }
@@ -328,8 +330,9 @@ mod tests {
         // Same smoke check as the counter test.
         if is_installed() {
             let snapshot = render();
+            let snapshot_is_empty = snapshot.is_empty();
             assert!(
-                snapshot.contains("ada_remediation_action_duration_seconds") || snapshot.is_empty()
+                snapshot.contains("ada_remediation_action_duration_seconds") || snapshot_is_empty
             );
         }
     }
@@ -341,9 +344,10 @@ mod tests {
         record_state_transition("Executing", "Cooldown");
         if is_installed() {
             let snapshot = render();
+            let snapshot_is_empty = snapshot.is_empty();
             assert!(
                 snapshot.contains("ada_remediation_engine_state_transitions_total")
-                    || snapshot.is_empty()
+                    || snapshot_is_empty
             );
         }
     }
@@ -357,7 +361,8 @@ mod tests {
         ));
         if is_installed() {
             let snapshot = render();
-            assert!(snapshot.contains("ada_remediation_cooldown_active") || snapshot.is_empty());
+            let snapshot_is_empty = snapshot.is_empty();
+            assert!(snapshot.contains("ada_remediation_cooldown_active") || snapshot_is_empty);
         }
     }
 

@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn flow_node_new_has_empty_label() {
         let n = FlowNode::new("n-1", NodeKind::Source);
-        assert!(n.label.is_empty());
+        assert_eq!(n.label, "");
     }
 
     #[test]
