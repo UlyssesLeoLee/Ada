@@ -77,6 +77,24 @@ jobs:
       - name: cargo test (workspace, no slow e2e)
         run: cargo test --workspace --locked --exclude gm-console
 
+      # The kustomization must render. `deploy/k8s/kustomization.yaml` had
+      # a second `---` after its comment block, which made the first YAML
+      # document empty; kustomize reads the first document, so the
+      # `kubectl apply -k deploy/k8s/` documented in the README and in the
+      # file's own header failed with `error: kustomization.yaml is empty`.
+      # Nothing in `cargo build`, `cargo test` or `kubectl apply -f` can
+      # catch that, because per-file apply skips the kustomization
+      # entirely and a multi-document YAML file is legal.
+      #
+      # ubuntu-latest ships kubectl, so this is free. The semantic checks
+      # on the same file -- no duplicate keys, no selector-injecting
+      # label transformer, no per-service values in the shared one -- are
+      # in `crates/ada-core/tests/kustomization.rs` and need no tooling, so
+      # they run on every `cargo test` including on a contributor's
+      # machine with no cluster.
+      - name: kubectl kustomize (deploy/k8s must render)
+        run: kubectl kustomize deploy/k8s/ > /dev/null
+
       # ada-rbac-casbin ships two mutually exclusive evaluators. casbin
       # 2.x is the default on every platform; the hand-rolled evaluator
       # is opt-in via `--features hand-rolled`. The default build below
