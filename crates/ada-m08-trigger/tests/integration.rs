@@ -39,7 +39,7 @@ fn event_trigger_matches_glob_topics() {
     let hits = m.match_event("module.removed");
     assert_eq!(hits.len(), 1);
     let hits = m.match_event("module.ada-m14.registered");
-    assert!(hits.is_empty());
+    assert_eq!(hits.len(), 0);
 }
 
 #[test]

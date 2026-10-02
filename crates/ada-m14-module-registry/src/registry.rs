@@ -610,7 +610,6 @@ mod tests {
     #[tokio::test]
     async fn empty_registry_is_empty() {
         let r = ModuleRegistry::new();
-        assert!(r.is_empty());
         assert_eq!(r.len(), 0);
         assert!(r.list().is_empty());
     }

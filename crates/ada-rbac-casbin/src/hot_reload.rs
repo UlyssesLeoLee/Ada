@@ -5,6 +5,7 @@
 //! watcher rebuilds the enforcer and atomically swaps the handle.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -19,12 +20,24 @@ use crate::policy::PolicySet;
 pub struct HotReload {
     cell: Arc<RwLock<Enforcer>>,
     policy_path: PathBuf,
+    /// Number of successful enforcer rebuilds, from both `reload_now`
+    /// and the watcher thread.
+    ///
+    /// The default `hand-rolled` evaluator resolves every caller to
+    /// `Role::Owner` and short-circuits Owner to allow, so a policy
+    /// delta is not observable through `enforce()` in that build. This
+    /// counter makes "did the watcher actually fire and rebuild?"
+    /// directly observable regardless of which evaluator is compiled in,
+    /// which is also the signal the admin endpoint wants for its audit
+    /// log.
+    reloads: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for HotReload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HotReload")
             .field("policy_path", &self.policy_path)
+            .field("reloads", &self.reload_count())
             .finish_non_exhaustive()
     }
 }
@@ -38,7 +51,14 @@ impl HotReload {
         Ok(Self {
             cell: Arc::new(RwLock::new(enforcer)),
             policy_path: set.policy_path.clone(),
+            reloads: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    /// Number of enforcer rebuilds completed so far.
+    #[must_use]
+    pub fn reload_count(&self) -> u64 {
+        self.reloads.load(Ordering::SeqCst)
     }
 
     /// Snapshot of the current enforcer.
@@ -58,6 +78,7 @@ impl HotReload {
         let next = Enforcer::from_policy_set(&set)?;
         let mut w = self.cell.write();
         *w = next;
+        self.reloads.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -90,6 +111,7 @@ impl HotReload {
         let policy_for_reload = self.policy_path.clone();
         let model_path = self.model_path();
         let cell = Arc::clone(&self.cell);
+        let reloads = Arc::clone(&self.reloads);
 
         let (tx, rx) = std::sync::mpsc::channel::<notify::Result<Event>>();
         let mut watcher = notify::recommended_watcher(move |res| {
@@ -133,6 +155,7 @@ impl HotReload {
                                     eprintln!("[hot_reload] reload_now ok");
                                     let mut w = cell.write();
                                     *w = next;
+                                    reloads.fetch_add(1, Ordering::SeqCst);
                                 }
                                 Err(e) => {
                                     eprintln!("[hot_reload] reload_now failed: {e}");

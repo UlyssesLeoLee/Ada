@@ -95,25 +95,27 @@ fn watcher_reloads_after_policy_mutation() {
     // Preserve trailing newline so editors don't reject it.
     write_policy(&policy_path, &(body + "\n"));
 
+    // Sanity: the mutation must actually change the file, otherwise the
+    // whole test would pass for the wrong reason.
+    let on_disk = std::fs::read_to_string(&policy_path).expect("reread policy csv");
+    assert!(
+        !on_disk.starts_with("p, role:owner, canvas, write"),
+        "mutation did not remove the owner/write policy line"
+    );
+
+    let before = hr.reload_count();
+
     // Poll for the watcher to fire and rebuild the enforcer.
+    //
+    // We assert on `reload_count`, not on the enforcement verdict: the
+    // default `hand-rolled` evaluator resolves every caller to
+    // Role::Owner and short-circuits Owner to allow, so a policy delta
+    // is deliberately invisible through `enforce()` in that build. The
+    // reload counter is evaluator-independent and is also the signal
+    // the admin endpoint surfaces, so this genuinely tests the watcher.
     let start = Instant::now();
     let timeout = Duration::from_secs(5);
-    let elapsed = wait_for(
-        || {
-            let e = hr.current();
-            let allowed_now = e
-                .enforce(
-                    "role:owner",
-                    "canvas:abc",
-                    Action::Write,
-                    &Attrs::new("tenant-a"),
-                    None,
-                )
-                .expect("post-mutation enforce");
-            !allowed_now
-        },
-        timeout,
-    );
+    let elapsed = wait_for(|| hr.reload_count() > before, timeout);
 
     let elapsed = elapsed.unwrap_or_else(|| {
         stop_flag.store(true, Ordering::SeqCst);
@@ -124,36 +126,46 @@ fn watcher_reloads_after_policy_mutation() {
         )
     });
 
-    // Verify the policy_state on the new enforcer is also coherent.
-    let e = hr.current();
-    let denied = !e
-        .enforce(
-            "role:owner",
-            "canvas:abc",
-            Action::Write,
-            &Attrs::new("tenant-a"),
-            None,
-        )
-        .expect("final enforce");
     assert!(
-        denied,
-        "after watcher reload: role:owner write must be denied (line removed)"
+        hr.reload_count() > before,
+        "reload counter must advance after a watcher-triggered rebuild"
     );
-    // And the unrelated read line should still pass.
-    let allowed_read = e
-        .enforce_typed(
-            "role:owner",
-            ResourceType::Canvas,
-            "canvas:abc",
-            Action::Read,
-            &Attrs::new("tenant-a"),
-            None,
-        )
-        .expect("read ok");
-    assert!(
-        allowed_read,
-        "read policy line was untouched; must still pass"
-    );
+
+    // The enforcement verdict only flips when the real casbin evaluator
+    // is compiled in; under `hand-rolled` the Owner short-circuit makes
+    // it structurally unobservable (see the note above).
+    #[cfg(feature = "casbin")]
+    {
+        let e = hr.current();
+        let denied = !e
+            .enforce(
+                "role:owner",
+                "canvas:abc",
+                Action::Write,
+                &Attrs::new("tenant-a"),
+                None,
+            )
+            .expect("final enforce");
+        assert!(
+            denied,
+            "after watcher reload: role:owner write must be denied (line removed)"
+        );
+        // And the unrelated read line should still pass.
+        let allowed_read = e
+            .enforce_typed(
+                "role:owner",
+                ResourceType::Canvas,
+                "canvas:abc",
+                Action::Read,
+                &Attrs::new("tenant-a"),
+                None,
+            )
+            .expect("read ok");
+        assert!(
+            allowed_read,
+            "read policy line was untouched; must still pass"
+        );
+    }
 
     // Suppress unused warnings — these are here to keep the
     // collaborator + m11 imports live for future expansion.
@@ -180,8 +192,14 @@ fn reload_now_is_synchronous_and_idempotent() {
         overlays: Vec::new(),
     };
     let hr = HotReload::new(&set).expect("hot reload");
+    let before = hr.reload_count();
     hr.reload_now().expect("reload_now #1");
     hr.reload_now().expect("reload_now #2");
+    assert_eq!(
+        hr.reload_count(),
+        before + 2,
+        "each reload_now must bump the reload counter exactly once"
+    );
     let e = hr.current();
     let allowed = e
         .enforce(

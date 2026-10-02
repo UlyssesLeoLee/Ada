@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn is_empty_reflects_state() {
         let mut h = EditHistory::new();
-        assert!(h.is_empty());
+        assert_eq!(h.undo_len(), 0);
         h.push(EditOp::RemoveNode {
             id: NodeId(Uuid::new_v4()),
         });

@@ -24,7 +24,7 @@ fn record_snapshot_clear_lifecycle() {
     let snap = r.snapshot();
     assert_eq!(snap.len(), 2);
     r.clear();
-    assert!(r.is_empty());
+    assert_eq!(r.len(), 0);
 }
 
 #[test]
