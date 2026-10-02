@@ -79,6 +79,15 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo clippy -p ada-rbac-casbin --features hand-rolled --all-targets -- -D warnings
 
+      # ada-telemetry's `prometheus` feature is opt-in and not in
+      # `default = ["otlp"]`, so nothing else in this workflow compiles it.
+      # It had silently rotted to the point where it no longer built at
+      # all: a missing import plus a call written against an older
+      # `metrics-exporter-prometheus` API. Checking it here is what stops
+      # the same thing happening again.
+      - name: cargo check (telemetry prometheus feature)
+        run: cargo check -p ada-telemetry --features prometheus --locked
+
   # ----------------------------------------------------------------------
   # Supply-chain security gate.
   # Runs after a clean test pass; fails the build on known-vulnerable deps.
