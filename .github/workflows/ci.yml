@@ -12,6 +12,20 @@ on:
         type: boolean
         required: false
         default: false
+      # Gates the `mobile-assets` job. This input did not exist: the job
+      # was gated on `inputs.render == 'true'` while only `snapshots` was
+      # declared, so `inputs.render` was always null and the job never ran
+      # on any trigger, including a manual dispatch. It is the only thing
+      # that renders the icon set from brand/icon-source.svg and the only
+      # thing that parses docs/commercial/apple-app-privacy.json and
+      # google-play-data-safety.json -- both are required for store
+      # submission, and a malformed one fails review rather than the
+      # build. Declared here so the job is reachable.
+      render:
+        description: "Regenerate the mobile icon set and validate the store submission JSON"
+        type: boolean
+        required: false
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
