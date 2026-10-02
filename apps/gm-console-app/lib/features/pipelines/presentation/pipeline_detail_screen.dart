@@ -80,7 +80,8 @@ class PipelineDetailScreen extends ConsumerWidget {
                         height: 16,
                         width: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2, color: Colors.white),
+                      )
                     : const Icon(Icons.refresh),
                 label: const Text('Retry pipeline'),
               ),
@@ -89,7 +90,8 @@ class PipelineDetailScreen extends ConsumerWidget {
                 Text(
                   retry.error.toString(),
                   style: TextStyle(
-                      color: Theme.of(context).colorScheme.error),
+                      color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
               ],
             ],

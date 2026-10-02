@@ -12,7 +12,8 @@ void main() {
       ProviderScope(
         overrides: [
           pipelinesProvider.overrideWith(
-              (ref) async => const <Pipeline>[]),
+            (ref) async => const <Pipeline>[],
+          ),
         ],
         child: const MaterialApp(home: PipelinesScreen()),
       ),
@@ -24,8 +25,10 @@ void main() {
     expect(find.text('Pipelines'), findsOneWidget);
     expect(find.text('No pipelines yet'), findsOneWidget);
     expect(
-        find.text(
-            'When your team adds a pipeline, it will show up here.'),
-        findsOneWidget);
+      find.text(
+        'When your team adds a pipeline, it will show up here.',
+      ),
+      findsOneWidget,
+    );
   });
 }

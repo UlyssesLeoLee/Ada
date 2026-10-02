@@ -1,10 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/api_client.dart';
-import '../../api/endpoints/auth_api.dart';
-import '../../core/secure_storage.dart';
-import '../../state/build_info_providers.dart';
-import '../../state/locale_controller.dart';
+import '../../../api/api_client.dart'
+import '../../../api/endpoints/auth_api.dart'
+import '../../../core/secure_storage.dart'
+import '../../../state/build_info_providers.dart'
+import '../../../state/locale_controller.dart'
 
 const String kAuthTokenStorageKey = 'auth_token';
 

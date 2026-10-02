@@ -36,8 +36,10 @@ void main() {
     await tester.enterText(passwordField, 'short');
     await tester.tap(submit);
     await tester.pump();
-    expect(find.text('Password must be at least 6 characters'),
-        findsOneWidget);
+    expect(
+      find.text('Password must be at least 6 characters'),
+      findsOneWidget,
+    );
 
     // Fix password → form passes validation (no error texts remain).
     await tester.enterText(passwordField, 'correct-horse-battery-staple');
@@ -46,7 +48,9 @@ void main() {
     expect(find.text('Email is required'), findsNothing);
     expect(find.text('Password is required'), findsNothing);
     expect(find.text('Enter a valid email'), findsNothing);
-    expect(find.text('Password must be at least 6 characters'),
-        findsNothing);
+    expect(
+      find.text('Password must be at least 6 characters'),
+      findsNothing,
+    );
   });
 }

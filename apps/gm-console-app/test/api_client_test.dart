@@ -32,8 +32,10 @@ void main() {
   const config =
       ApiConfig(baseUrl: 'https://example.test/api', flavor: 'test');
 
-  ApiClient build(FutureOr<http.Response> Function(http.BaseRequest) handler,
-      {String? token}) {
+  ApiClient build(
+    FutureOr<http.Response> Function(http.BaseRequest) handler, {
+    String? token,
+  }) {
     return ApiClient(
       config: config,
       httpClient: _StubHttpClient(handler),
@@ -44,26 +46,36 @@ void main() {
   group('ApiClient error mapping', () {
     test('maps 401 to ApiUnauthorizedException', () async {
       final client = build(
-        (_) => http.Response(jsonEncode({'error': 'no token'}), 401,
-            headers: {'content-type': 'application/json'}),
+        (_) => http.Response(
+          jsonEncode({'error': 'no token'}),
+          401,
+          headers: {'content-type': 'application/json'},
+        ),
       );
       expect(
         () => client.getJson('/v1/tenants'),
-        throwsA(isA<ApiUnauthorizedException>()
-            .having((e) => e.statusCode, 'statusCode', 401)
-            .having((e) => e.message, 'message', contains('no token'))),
+        throwsA(
+          isA<ApiUnauthorizedException>()
+              .having((e) => e.statusCode, 'statusCode', 401)
+              .having((e) => e.message, 'message', contains('no token')),
+        ),
       );
     });
 
     test('maps 404 to ApiNotFoundException', () async {
       final client = build(
-        (_) => http.Response('not here', 404,
-            headers: {'content-type': 'text/plain'}),
+        (_) => http.Response(
+          'not here',
+          404,
+          headers: {'content-type': 'text/plain'},
+        ),
       );
       expect(
         () => client.getJson('/v1/pipelines/missing'),
-        throwsA(isA<ApiNotFoundException>()
-            .having((e) => e.statusCode, 'statusCode', 404)),
+        throwsA(
+          isA<ApiNotFoundException>()
+              .having((e) => e.statusCode, 'statusCode', 404),
+        ),
       );
     });
 
@@ -73,8 +85,10 @@ void main() {
       );
       expect(
         () => client.getJson('/v1/audit'),
-        throwsA(isA<ApiServerException>()
-            .having((e) => e.statusCode, 'statusCode', 500)),
+        throwsA(
+          isA<ApiServerException>()
+              .having((e) => e.statusCode, 'statusCode', 500),
+        ),
       );
     });
 
@@ -104,8 +118,3 @@ void main() {
     });
   });
 }
-
-/// Stub placeholder retained for any future custom-failure subclasses.
-/// Currently unused; real [SocketException] from `dart:io` covers the
-/// transport-failure test above.
-class _Unused {}
