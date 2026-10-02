@@ -89,6 +89,111 @@ jobs:
         run: cargo check -p ada-telemetry --features prometheus --locked
 
   # ----------------------------------------------------------------------
+  # Feature-coverage gate.
+  #
+  # Any cargo feature outside a crate's `default` set is code that no
+  # ordinary `cargo build/test/clippy --workspace` will ever compile. That
+  # class of code rots silently, and this project has now been bitten by it
+  # three separate times:
+  #
+  #   - ada-telemetry's `prometheus` feature had rotted until it no longer
+  #     compiled at all (fixed in 439c322, now gated by the step above).
+  #   - ada-m12-canvas-editor had nine features that nothing had ever
+  #     built. One of them, `crdt`, gates the entire collaborative-editing
+  #     core (src/crdt.rs, ~1100 lines) behind both an inner
+  #     `#![cfg(feature = "crdt")]` and lib.rs, and a purpose-built
+  #     three-client convergence test in tests/crdt_sync.rs was sitting
+  #     behind a `required-features` key that no job ever supplied.
+  #   - The crate's own comments cite a "5-gate WASM CI" including
+  #     `wasm-pack build`. `wasm-pack` has never appeared anywhere under
+  #     .github/ in this repository's history, and no workflow installs
+  #     the wasm32-unknown-unknown target. The WASM path the crate
+  #     description advertises ("Compiles to WASM") has never been built
+  #     by any machine.
+  #
+  # This job is the anti-rot gate. `--no-default-features` is deliberately
+  # NOT used: several features assume the default `server` module is
+  # present, and dropping it would test a configuration nobody ships.
+  # ----------------------------------------------------------------------
+  feature-matrix:
+    name: feature matrix (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    needs: rust
+    strategy:
+      # Never cancel siblings: one broken feature must not hide the state
+      # of the other ten.
+      fail-fast: false
+      matrix:
+        feature:
+          - crdt
+          - legacy-array
+          - legacy-nested
+          - legacy-lww
+          - bevy
+          - bevy_egui
+          - wasm
+          - wasm-crdt
+          - wasm-test
+          - full
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo check (ada-m12-canvas-editor --features ${{ matrix.feature }})
+        run: cargo check -p ada-m12-canvas-editor --features ${{ matrix.feature }} --all-targets --locked
+
+      # `crdt_sync` is a required-features test target, so `cargo check
+      # --all-targets` above only proves it compiles. Running it is the
+      # only thing that proves the convergence guarantee still holds.
+      - name: cargo test (crdt convergence)
+        if: matrix.feature == 'crdt'
+        run: cargo test -p ada-m12-canvas-editor --features crdt --test crdt_sync --locked
+
+  # ----------------------------------------------------------------------
+  # WebAssembly target gate.
+  #
+  # ada-m12-canvas-editor's description says "Compiles to WASM", its
+  # manifest sets `crate-type = ["cdylib", "rlib"]` specifically so
+  # `wasm-pack build` can emit a .wasm, and its dependency comments
+  # describe splitting tokio's `rt-multi-thread` behind
+  # `cfg(not(target_arch = "wasm32"))` "so `--target wasm32-unknown-unknown`
+  # compiles directly". All of that is a description of a build that no
+  # machine in this repository's history has ever performed: no workflow
+  # referenced wasm-pack or wasm32, and the toolchain installed only the
+  # host target.
+  #
+  # `wasm-crdt` is the forward path (it implies `wasm` plus `crdt`), so it
+  # is the configuration that actually needs to hold. `full` is
+  # deliberately not included: it implies `bevy`, which is a native ECS
+  # integration and is not part of the WASM bundle.
+  # ----------------------------------------------------------------------
+  wasm32:
+    name: wasm32 build
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo check (wasm32-unknown-unknown)
+        run: cargo check -p ada-m12-canvas-editor --target wasm32-unknown-unknown --features wasm-crdt --locked
+
+  # ----------------------------------------------------------------------
   # Supply-chain security gate.
   # Runs after a clean test pass; fails the build on known-vulnerable deps.
   # ----------------------------------------------------------------------
