@@ -110,6 +110,12 @@ struct Package {
     features: Vec<String>,
     /// The contents of `default = [...]`.
     defaults: BTreeSet<String>,
+    /// `required-features` of each `[[bin]]` / `[[test]]` / `[[bench]]` /
+    /// `[[example]]` target, as (target kind, features). Cargo refuses to
+    /// build such a target unless the features are enabled, which makes
+    /// it the sharpest version of the same trap: the target is not
+    /// "under-tested", it is never compiled.
+    target_required_features: Vec<(String, Vec<String>)>,
 }
 
 fn read_package(dir: &Path) -> Package {
@@ -120,6 +126,7 @@ fn read_package(dir: &Path) -> Package {
     let mut name = String::new();
     let mut features = Vec::new();
     let mut defaults = BTreeSet::new();
+    let mut target_required_features = Vec::new();
 
     for line in text.lines() {
         let t = line.trim();
@@ -151,11 +158,20 @@ fn read_package(dir: &Path) -> Package {
             if feature_key == "default" {
                 defaults = all_quoted(value).into_iter().collect();
             }
+        } else if matches!(section.as_str(), "bin" | "test" | "bench" | "example")
+            && key == "required-features"
+        {
+            target_required_features.push((section.clone(), all_quoted(value)));
         }
     }
 
     assert!(!name.is_empty(), "no [package] name in {}", dir.display());
-    Package { name, features, defaults }
+    Package {
+        name,
+        features,
+        defaults,
+        target_required_features,
+    }
 }
 
 fn workspace_members(root: &Path) -> Vec<PathBuf> {
@@ -375,6 +391,54 @@ fn every_non_default_feature_is_built_by_a_lane_that_includes_test_targets() {
          Fix by adding a lane that names the crate, the feature and --all-targets. \
          A `cargo check`/`cargo build` lane is not enough: it builds the library \
          only and skips cfg(test) code and feature-gated test targets.",
+        uncovered.join(", ")
+    );
+}
+
+#[test]
+fn every_required_features_target_is_built_by_some_lane() {
+    // `required-features` is the sharpest form of the same trap. Cargo
+    // refuses to build the target at all unless the features are on, so a
+    // target whose features no lane supplies is not "under-tested" — it
+    // is never compiled. Both instances in this workspace were already
+    // covered (`ada-remediation`'s `[[bin]]` on `bin`, the m12
+    // `crdt_sync` `[[test]]` on `crdt`), so this gate is about the third
+    // one someone adds next.
+    let root = repo_root();
+    let lanes = cargo_lanes(&root);
+
+    let mut found_any = false;
+    let mut uncovered: Vec<String> = Vec::new();
+    for dir in workspace_members(&root) {
+        let pkg = read_package(&dir);
+        for (kind, required) in &pkg.target_required_features {
+            if required.is_empty() {
+                continue;
+            }
+            found_any = true;
+            for feature in required {
+                let covered = lanes.iter().any(|lane| {
+                    lane.crate_name.as_deref() == Some(pkg.name.as_str())
+                        && lane.features.iter().any(|f| f == feature)
+                });
+                if !covered {
+                    uncovered.push(format!("{}/{kind} target needs {feature}", pkg.name));
+                }
+            }
+        }
+    }
+
+    assert!(
+        found_any,
+        "no [[bin]]/[[test]]/[[bench]]/[[example]] in the workspace declares \
+         required-features; if that is genuinely true the parser is broken \
+         (ada-remediation's [[bin]] requires `bin`)"
+    );
+    assert!(
+        uncovered.is_empty(),
+        "these targets are never built because no CI lane supplies their \
+         required features: {}\nA target behind required-features is not \
+         under-tested, it is not compiled at all.",
         uncovered.join(", ")
     );
 }
