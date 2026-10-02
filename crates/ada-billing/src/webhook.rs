@@ -314,7 +314,11 @@ mod tests {
         let body = serde_json::to_vec(&evt(
             "evt_1",
             "customer.subscription.updated",
-            "tenant-1",
+            // Must be a parseable UUID: `handle` converts the metadata
+            // tenant into a `TenantId` via `Uuid::parse_str` and returns
+            // `MalformedEnvelope` otherwise, which would fail the
+            // `.expect("first")` below for the wrong reason.
+            "018f0000-0000-4000-8000-000000000001",
             "sub_1",
         ))
         .unwrap();
