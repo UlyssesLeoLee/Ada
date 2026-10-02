@@ -97,6 +97,12 @@ fn watcher_reloads_after_policy_mutation() {
         .filter(|l| !l.starts_with("p, role:owner, canvas, write"))
         .collect::<Vec<_>>()
         .join("\n");
+    // Sample the counter BEFORE touching the file. The watcher's notify
+    // event can land within microseconds of the write, so a sample taken
+    // afterwards can already include the very reload we are waiting for
+    // and the poll would then never observe a delta. Sampling first
+    // makes the causal window exactly "the write we are about to make".
+    let before = hr.reload_count();
     // Preserve trailing newline so editors don't reject it.
     write_policy(&policy_path, &(body + "\n"));
 
@@ -107,8 +113,6 @@ fn watcher_reloads_after_policy_mutation() {
         !on_disk.starts_with("p, role:owner, canvas, write"),
         "mutation did not remove the owner/write policy line"
     );
-
-    let before = hr.reload_count();
 
     // Poll for the watcher to fire and rebuild the enforcer.
     //

@@ -378,6 +378,14 @@ mod tests {
         // (no metrics recorded yet); both cases are valid.
         if !snapshot.is_empty() {
             for line in snapshot.lines() {
+                // The exporter writes a blank line after every metric
+                // family (`output.write_all(b"\n")` in
+                // metrics-exporter-prometheus' `render_to_write`), and
+                // Prometheus' own text parser skips blank lines. They are
+                // separators, not metric lines, so they carry no value.
+                if line.trim().is_empty() {
+                    continue;
+                }
                 if line.starts_with('#') {
                     continue;
                 }
