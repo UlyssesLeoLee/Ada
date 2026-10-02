@@ -42,8 +42,46 @@ path = "tests/integration.rs"
 name = "reconcile_smoke"
 path = "tests/reconcile_smoke.rs"
 
+[features]
+# Passthrough to the other RBAC evaluator. Does not change anything in
+# this crate's source; it exists so the authorization tests can run
+# against both evaluators.
+#
+# Why this matters: `ada-rbac-casbin` compiles exactly one of
+# `casbin_impl` or `hand_rolled` behind a `cfg`, and the two have
+# disagreed before -- about the resource type and about whether
+# `Delete` requires the ownership flag. `cargo test --workspace` builds
+# the default (casbin) side, and the existing CI step for
+# `hand-rolled` only runs that crate's own tests. So the gateway's
+# `/api/v1/canvases/*` authorization path was never executed against the
+# hand-rolled evaluator, even though the gateway is where a subject ->
+# role mistake would actually let a request through. This feature is
+# what makes that combination buildable.
+rbac-hand-rolled = ["ada-rbac-casbin/hand-rolled"]
+
 [dependencies]
 ada-core = { path = "../ada-core", version = "0.1.0" }
+# The security boundary. `ada-identity` supplies the opaque-session
+# store the bearer token is checked against; `ada-rbac-casbin` answers
+# the authorization question. Before this the crate depended on
+# neither, so `/api/*` had no credential check at all and the
+# authorization logic that lives in these two crates protected nothing
+# -- nothing called them.
+#
+# Deliberately *not* a JWT verifier. ada-identity has no asymmetric
+# crypto dependency, so `verify_jwt_stub` fails closed for every input
+# including well-formed ones. Sessions are opaque server-side tokens
+# (SessionStore::mint -> lookup), which needs no new crypto and gives
+# immediate revocation. The stateless-JWT path is future work and must
+# not be faked by decoding a token.
+ada-identity = { path = "../ada-identity", version = "0.1.0" }
+ada-rbac-casbin = { path = "../ada-rbac-casbin", version = "0.1.0" }
+# Not optional and not transitive: `Enforcer::enforce_typed` takes
+# `ada_m11_rbac_collab::ResourceType` and `Action` in its *public*
+# signature, so a caller has to name those types. Reaching them through
+# the public API of a dependency that merely re-exports them would mean
+# the gateway's authorization vocabulary could change under it.
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
 axum = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower = "0.5"

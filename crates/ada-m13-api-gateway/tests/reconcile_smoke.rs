@@ -44,7 +44,11 @@ fn node_with_id(id: NodeId, label: &str, x: i32, y: i32) -> CanvasNode {
 /// cleanly to catch a feature-gating regression.
 #[test]
 fn appstate_builds_without_reconcile_payload() {
-    let state = AppState::new("ada-gateway-recon", Arc::new(MemoryHealthCheck::new()));
+    // `AppState::new` is fallible because it builds the RBAC enforcer:
+    // a pod whose policy set does not validate must refuse to start
+    // rather than serve with an enforcer that decides arbitrarily.
+    let state = AppState::new("ada-gateway-recon", Arc::new(MemoryHealthCheck::new()))
+        .expect("bundled policy set must validate");
     let _router = ada_m13_api_gateway::build_router(state);
 }
 

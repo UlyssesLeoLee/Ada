@@ -1,20 +1,42 @@
 //! v0.5.0 real casbin 2.x adapter.
 //!
 //! The production implementation behind the [`crate::Enforcer`]
-//! facade. The synchronous public API bridges into casbin's async
-//! `Enforcer::new` / `add_grouping_policy` via a dedicated tokio
-//! runtime handle — see [`run_casbin_blocking`].
+//! facade.
 //!
-//! The casbin evaluator is built around `policies/model.conf` (RBAC
-//! matcher) and `policies/base_policy.csv` (rules). The role ladder
-//! `Owner > Admin > Editor > Executor > Viewer` is wired via
-//! `add_grouping_policy` in [`build_enforcer`].
+//! ## Why there is still a runtime bridge at all
+//!
+//! `casbin::Enforcer::enforce` is **synchronous** — it is only
+//! `Enforcer::new` (which reads the model and the policy file through
+//! the tokio-flavoured `FileAdapter`) and `add_grouping_policy` that are
+//! `async`. So the hot authorization path needs no runtime whatsoever;
+//! the bridge in [`run_casbin_blocking`] is used exactly twice per
+//! enforcer, at construction.
+//!
+//! ## The defect this shape fixes
+//!
+//! `inner` used to be a `tokio::sync::Mutex`, so `enforce` had to
+//! `block_on` the lock acquisition. `tokio::runtime::Handle::block_on`
+//! **panics** when called from a thread that is already driving a
+//! runtime — "Cannot start a runtime from within a runtime" — so every
+//! authorization made from an async handler (which is all of them, in
+//! the api-gateway) panicked, as did every construction from
+//! `#[tokio::main]`. Nothing caught it: the unit and integration tests
+//! for this crate all call the synchronous API from a synchronous test,
+//! where `Handle::try_current()` fails and the old fallback built its
+//! own one-shot runtime, so the panic branch was never executed. It
+//! surfaced only when the gateway actually called in from `async fn`.
+//!
+//! `inner` is a `parking_lot::Mutex` now, so enforcement locks
+//! synchronously and needs no runtime, and [`run_casbin_blocking`]
+//! runs construction on a thread that owns a runtime of its own —
+//! which works from a synchronous test, a `current_thread` runtime and
+//! a multi-thread runtime alike.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use casbin::{CoreApi, DefaultModel, Enforcer as CasbinEnforcer, FileAdapter, MgmtApi};
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 
 use ada_m11_rbac_collab::{Action, CollaborationMap, ResourceType, Role};
 
@@ -36,7 +58,10 @@ const ROLE_LADDER: &[(Role, Role)] = &[
 ///
 /// `casbin::Enforcer::enforce` is synchronous; only construction is
 /// async. We keep a single casbin handle behind `Arc<Mutex<...>>` so
-/// hot reloads can swap it atomically.
+/// hot reloads can swap it atomically. The mutex is `parking_lot`'s, not
+/// `tokio::sync`'s: enforcement happens inside `async fn` request
+/// handlers, and awaiting a tokio lock from a synchronous public API
+/// would require `block_on`, which panics on a runtime thread.
 #[derive(Clone)]
 pub struct RealEnforcer {
     inner: Arc<Mutex<CasbinEnforcer>>,
@@ -149,7 +174,7 @@ impl RealEnforcer {
         if requires_ownership(action) && !attrs.is_owner {
             return Ok(false);
         }
-        let guard = run_casbin_blocking(self.inner.lock());
+        let guard = self.inner.lock();
         let is_owner_token = if attrs.is_owner { "true" } else { "false" };
         let tuple = (
             user_id,
@@ -176,64 +201,99 @@ impl RealEnforcer {
 /// mirroring the m11 privilege-descending graph so a request with
 /// `r.sub = "role:owner"` satisfies any policy line `p.sub = "*"` or
 /// any role in its inheritance chain.
+///
+/// The whole construction is one future rather than one future per
+/// `add_grouping_policy` call, so it crosses the runtime boundary once
+/// instead of `1 + ROLE_LADDER.len()` times.
 fn build_enforcer(model_path: &Path, policy_path: &Path) -> Result<CasbinEnforcer> {
     let policy_str = policy_path
         .to_str()
         .ok_or_else(|| RbacCasbinError::ReloadFailed("policy path not utf-8".into()))?
         .to_owned();
 
-    // Read the model file synchronously (file is small) before the
-    // async bridge.
+    // Read the model file synchronously (file is small) before handing
+    // the work to the runtime-owning thread.
     let body = std::fs::read_to_string(model_path).map_err(|e| {
         RbacCasbinError::ReloadFailed(format!("model read {}: {e}", model_path.display()))
     })?;
 
-    let mut enforcer: CasbinEnforcer = run_casbin_blocking(async move {
+    run_casbin_blocking(|| async move {
         let model = DefaultModel::from_str(&body)
             .await
             .map_err(|e| RbacCasbinError::ReloadFailed(format!("model parse: {e}")))?;
         let adapter = FileAdapter::new(policy_str);
-        CasbinEnforcer::new(model, adapter)
+        let mut enforcer = CasbinEnforcer::new(model, adapter)
             .await
-            .map_err(|e| RbacCasbinError::ReloadFailed(format!("casbin Enforcer::new: {e}")))
-    })?;
+            .map_err(|e| RbacCasbinError::ReloadFailed(format!("casbin Enforcer::new: {e}")))?;
 
-    // `add_grouping_policy` takes `&mut self`. casbin's `Enforcer::new`
-    // already returns an Enforcer with `auto_build_role_links` enabled
-    // for the model.g lines that are loaded from the adapter; the role
-    // ladder rows we add here are NOT in the CSV, so we must add them
-    // explicitly.
-    for (high, low) in ROLE_LADDER {
-        let row = vec![
-            format!("role:{}", high.as_str()),
-            format!("role:{}", low.as_str()),
-        ];
-        run_casbin_blocking(async { enforcer.add_grouping_policy(row).await }).map_err(|e| {
-            RbacCasbinError::ReloadFailed(format!(
-                "add_grouping_policy(role:{}, role:{}): {e}",
-                high.as_str(),
-                low.as_str()
-            ))
-        })?;
-    }
-    Ok(enforcer)
+        // `add_grouping_policy` takes `&mut self`. casbin's
+        // `Enforcer::new` already returns an Enforcer with
+        // `auto_build_role_links` enabled for the model.g lines loaded
+        // from the adapter; the role ladder rows we add here are NOT in
+        // the CSV, so we must add them explicitly.
+        for (high, low) in ROLE_LADDER {
+            let row = vec![
+                format!("role:{}", high.as_str()),
+                format!("role:{}", low.as_str()),
+            ];
+            enforcer.add_grouping_policy(row).await.map_err(|e| {
+                RbacCasbinError::ReloadFailed(format!(
+                    "add_grouping_policy(role:{}, role:{}): {e}",
+                    high.as_str(),
+                    low.as_str()
+                ))
+            })?;
+        }
+        Ok(enforcer)
+    })
 }
 
-/// Bridge async -> sync for the casbin handle.
+/// Run an async casbin operation to completion from a synchronous caller.
 ///
-/// We try to reuse a current tokio runtime handle when present (so
-/// the api-gateway, which is async, can still call the sync
-/// constructors without "runtime within runtime" panics). When
-/// called from a synchronous context (tests, the admin CLI) we
-/// build a one-shot runtime.
-pub(crate) fn run_casbin_blocking<F, T>(future: F) -> T
+/// Takes a *factory* rather than a future so the future is constructed
+/// on the thread that owns the runtime, not on the caller's.
+///
+/// ## Why a thread and not `Handle::block_on`
+///
+/// The previous implementation did this:
+///
+/// ```text
+/// match Handle::try_current() {
+///     Ok(h)  => h.block_on(future),          // panics on a runtime thread
+///     Err(_) => Runtime::new().block_on(future),   // only correct outside a runtime
+/// }
+/// ```
+///
+/// Both arms are wrong for a caller that is already inside a runtime,
+/// which is the api-gateway and nothing else: the first panics outright
+/// ("Cannot start a runtime from within a runtime") and the second is
+/// unreachable, because `try_current()` succeeds there. Spawning a
+/// thread with a runtime of its own sidesteps the question — the
+/// runtime is on a thread that was never a runtime worker.
+///
+/// `current_thread` is deliberate. The work is model parsing, a policy
+/// file read and five in-memory grouping-policy inserts; there is
+/// nothing here worth a work-stealing pool, and a current-thread
+/// runtime cannot be re-entered from inside itself.
+pub(crate) fn run_casbin_blocking<F, Fut, T>(make: F) -> T
 where
-    F: std::future::Future<Output = T>,
+    // `F` crosses the thread boundary; `Fut` does not, because it is
+    // constructed on the far side by calling `make()` there. That is the
+    // reason the parameter is a factory and not the future itself.
+    F: FnOnce() -> Fut + Send,
+    Fut: std::future::Future<Output = T>,
+    T: Send,
 {
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle.block_on(future),
-        Err(_) => tokio::runtime::Runtime::new()
-            .expect("tokio runtime")
-            .block_on(future),
-    }
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("casbin worker runtime")
+                    .block_on(make())
+            })
+            .join()
+            .expect("casbin worker thread panicked")
+    })
 }

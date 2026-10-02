@@ -42,7 +42,7 @@ pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(25);
 /// through a oneshot, which is what lets the timeout start when the
 /// signal arrives rather than when the server does.
 pub async fn serve(bind: SocketAddr, name: &str) -> Result<()> {
-    let state = AppState::new(name, Arc::new(MemoryHealthCheck::new()));
+    let state = AppState::new(name, Arc::new(MemoryHealthCheck::new()))?;
     let app = build_router(state).layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(bind)

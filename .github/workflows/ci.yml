@@ -91,6 +91,19 @@ jobs:
       - name: cargo clippy (rbac hand-rolled evaluator)
         run: cargo clippy -p ada-rbac-casbin --features hand-rolled --all-targets -- -D warnings
 
+      # The gateway's `/api/v1/canvases/*` routes are the only place a
+      # subject -> role mistake turns into a request that is actually
+      # allowed through, so their tests are worth running against both
+      # evaluators. `cargo test --workspace` only ever builds the default
+      # (casbin) one, and the step above only runs ada-rbac-casbin's own
+      # tests -- so until this step existed the gateway's authorization
+      # path had never been executed against the hand-rolled evaluator.
+      - name: cargo test (gateway vs hand-rolled evaluator)
+        run: cargo test -p ada-m13-api-gateway --features rbac-hand-rolled --locked
+
+      - name: cargo clippy (gateway vs hand-rolled evaluator)
+        run: cargo clippy -p ada-m13-api-gateway --features rbac-hand-rolled --all-targets -- -D warnings
+
       # ada-telemetry's `prometheus` feature is opt-in and not in
       # `default = ["otlp"]`, so nothing else in this workflow compiles it.
       # It had silently rotted to the point where it no longer built at

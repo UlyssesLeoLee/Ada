@@ -347,7 +347,10 @@ name = "ada-m13-api-gateway"
 version = "0.1.0"
 dependencies = [
  "ada-core",
+ "ada-identity",
+ "ada-m11-rbac-collab",
  "ada-m12-canvas-editor",
+ "ada-rbac-casbin",
  "async-trait",
  "axum",
  "http-body-util",

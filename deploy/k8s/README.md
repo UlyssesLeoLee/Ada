@@ -35,29 +35,58 @@ deployed service returned **502 BAD_GATEWAY**. The failure is silent in
 the sense that nothing in the build or the manifests fails — a
 reference to a service that does not exist is not a YAML error.
 
-## What is still missing: authentication
+## Authentication and authorization
 
-**A green deployment here is not a secured one.** As of this commit the
-gateway mounts four routes and none of them require a credential:
+`/health`, `/health/live` and `/health/ready` are unauthenticated, and
+that is deliberate: a kubelet probe cannot carry a bearer token, and a
+probe that 401s takes the pod out of service while the API is healthy.
 
-| Route | Auth required |
-|---|---|
-| `GET /health` | no |
-| `GET /health/live` | no |
-| `GET /health/ready` | no |
-| `GET /api/v1/ping` | no |
+Everything under `/api` requires `Authorization: Bearer <token>`:
 
-`ada-identity`, `ada-rbac-casbin` and `ada-billing` are **not**
-dependencies of `ada-m13-api-gateway`. Nothing validates the token
-`gm-console` forwards, and nothing derives a tenant from it. Wiring
-those crates in as middleware is the next step and is tracked in the
-`fix/ci-workflow-parse-errors` branch history.
+| Route | Auth | Authorization |
+|---|---|---|
+| `GET /health` | no | — |
+| `GET /health/live` | no | — |
+| `GET /health/ready` | no | — |
+| `GET /api/v1/ping` | bearer | none (smoke endpoint) |
+| `GET /api/v1/whoami` | bearer | none (echoes the principal) |
+| `GET /api/v1/canvases/:id` | bearer | `Read` on `canvas` |
+| `POST /api/v1/canvases/:id/run` | bearer | `Execute` on `canvas` |
 
-The crate's own `src/lib.rs` describes itself as the "minimum skeleton"
-and places the middleware chain in a later phase, so this is declared
-missing work rather than a broken implementation — but the deployment
-made it invisible, because a gateway that is never reached cannot be
-observed to lack auth.
+An unmatched path is a **404**, not a 401 — see the note on `fallback`
+in `crates/ada-m13-api-gateway/src/router.rs` for why that distinction
+is enforced by a test.
+
+### The token is an opaque server-side session, not a JWT
+
+`ada-identity` has no asymmetric crypto dependency, so
+`mint_jwt` and `verify_jwt_stub` both fail closed for **every** input.
+A verifier that merely *decodes* a token would let a caller mint their
+own `roles` and their own `tenant_id`, and `tenant_id` is the isolation
+key for the whole multi-tenant model. So the gateway uses
+`ada_identity::session::SessionStore` instead: `mint` → opaque token →
+`lookup` → `Session { user_id, tenant_id, roles, expires_at }`, with
+immediate revocation and no new crypto dependency. Stateless
+verification is future work and must not be faked by decoding.
+
+### The tenant is never taken from a header
+
+`gm-console` forwards the browser's `x-tenant-id` verbatim. The
+gateway ignores it for every decision. The tenant comes from the
+server-side session, so a client asserting a tenant it does not own
+changes nothing. This is pinned by two tests — one on `/whoami`, one
+on a business route — because a single test on the echo endpoint would
+not show that the business path is also safe.
+
+### A fresh pod answers 401 to everything
+
+`SessionStore` is process-local and in-memory, and **there is no login
+flow**, so nothing ever mints a session. Every `/api` request is a 401
+until a login endpoint exists. That is the correct posture — a backend
+that authorizes nothing yet must not pretend to authorize everyone — but
+it does mean this manifests are not yet a working product. The
+remaining gap is a login flow, and `SessionStore`'s in-memory state
+does not survive a restart.
 
 ## Prerequisites
 

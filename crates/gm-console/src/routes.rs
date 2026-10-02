@@ -143,7 +143,15 @@ const MAX_PROXY_BODY: usize = 16 * 1024 * 1024;
 
 /// Reverse-proxy: rewrites `/api/<rest>` → `<upstream>/<rest>` and forwards the request body.
 ///
-/// Pure forward implementation — auth, rate limit and observability live in api-gateway.
+/// Pure forward implementation — auth, authorization and observability live in
+/// api-gateway. That is no longer aspirational: the gateway mounts its whole
+/// `/api` subtree behind a bearer-token layer, and its tenant comes from the
+/// server-side session rather than from the `x-tenant-id` header forwarded
+/// below. Rate limiting is still not implemented on either side.
+///
+/// Nothing here may start trusting `x-tenant-id` (or any other client header)
+/// for a decision. It is forwarded verbatim so the gateway can log what the
+/// client claimed; it is not a credential.
 async fn proxy(State(cfg): State<SharedState>, uri: Uri, req: Request) -> Result<Response> {
     // Strip the `/api` prefix; preserve everything else (path + query).
     let path_and_query = uri
