@@ -1,0 +1,29 @@
+# Build context for the service images in deploy/docker/.
+#
+# Without this, `COPY . .` drags the host's Cargo target directory (many GB
+# on a developer machine, and a different set of hashes than the container
+# will produce anyway) plus .git and the local .worktrees scratch lanes into
+# every image layer. The cache mount in the Dockerfile keeps the useful part
+# of the build cache without needing any of it in the context.
+
+target/
+**/target/
+worktrees/
+.worktrees/
+
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Not inputs to any image: the deploy manifests are applied from the repo,
+# and the gates that read them run on the host, not in the build.
+deploy/k8s/
+docs/
+*.md
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

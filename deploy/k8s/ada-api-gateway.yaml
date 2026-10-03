@@ -51,6 +51,18 @@ spec:
       labels:
         app: ada-api-gateway
     spec:
+      # Matches ada-remediation.yaml exactly, so all three Deployments in
+      # this directory state the same posture. UID 65532 is the `ada` user
+      # the three Dockerfiles in deploy/docker/ create with an explicit
+      # uid, rather than whatever `useradd --system` happens to allocate --
+      # a build-order-dependent UID would make this manifest non-deterministic.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ada-api-gateway
           image: ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
@@ -79,6 +91,29 @@ spec:
           # crates/ada-m13-api-gateway/src/server.rs, or the kubelet
           # SIGKILLs the process before the drain finishes.
           terminationGracePeriodSeconds: 30
+          # Same posture as deploy/k8s/ada-remediation.yaml, which already
+          # had it. This manifest and gm-console.yaml had no
+          # `securityContext` at all, which Trivy flagged as KSV014 (HIGH)
+          # in the `security scan` job -- the first time that step ever ran
+          # to completion, because cargo-deny had been failing first.
+          #
+          # readOnlyRootFilesystem needs somewhere writable: the process
+          # writes nothing, but /tmp is where any library that wants a
+          # scratch file (or a crash handler that wants a core) will try, and
+          # a read-only root turns that into a hard failure at the worst
+          # moment. An emptyDir at /tmp is the same pattern remediation uses.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits:   { cpu: 500m, memory: 256Mi }

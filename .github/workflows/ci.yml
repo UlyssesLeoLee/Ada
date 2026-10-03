@@ -298,6 +298,95 @@ jobs:
         run: cargo test -p ada-m12-canvas-editor --features crdt --test crdt_sync --locked
 
   # ----------------------------------------------------------------------
+  # Container image gate.
+  #
+  # The three Deployments in deploy/k8s/ referenced
+  # `ghcr.io/ulyssesleolee/*` images that nothing in this repository could
+  # produce, because there was no Dockerfile anywhere. `cargo build`,
+  # `cargo test` and `kubectl apply` cannot notice that: the manifests
+  # validate, the code tests, and the cluster simply never receives an
+  # image. This job builds each one and then starts it.
+  #
+  # The smoke step is the point. A Dockerfile that builds is not the same
+  # as an image that runs: the binary name, the port, the env var the
+  # service refuses to start without, and the health path the orchestrator
+  # probes are four separate ways to ship a container that CrashLoopBackOffs
+  # with no build error -- the class of bug the remediation manifest already
+  # had once, probing /healthz on a service that serves /health.
+  #
+  # `load: true` and no registry: this gates the build, it does not publish.
+  # Publishing is a release-time decision with credentials attached.
+  # ----------------------------------------------------------------------
+  images:
+    name: image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gm-console
+            dockerfile: deploy/docker/gm-console.Dockerfile
+            port: 8080
+            health: /healthz
+          - service: ada-api-gateway
+            dockerfile: deploy/docker/ada-api-gateway.Dockerfile
+            port: 8080
+            health: /health/ready
+          - service: ada-remediation
+            dockerfile: deploy/docker/ada-remediation.Dockerfile
+            port: 9100
+            health: /health
+            # main.rs reads this with `.context(..)`, so the service exits
+            # non-zero at startup without it. Passing a dummy is what lets
+            # the health endpoint be reachable; no webhook is ever called.
+            env: REMEDIATION_WEBHOOK_SECRET=ci-smoke-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: ci/${{ matrix.service }}:local
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: The image runs and serves its probe path
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_args=()
+          if [ -n "${{ matrix.env }}" ]; then
+            # One `-e KEY=VALUE` per matrix entry, split on whitespace.
+            read -r -a pairs <<< "${{ matrix.env }}"
+            for pair in "${pairs[@]}"; do env_args+=(-e "$pair"); done
+          fi
+          cid=$(docker run -d --name smoke \
+            "${env_args[@]}" \
+            -p 127.0.0.1:${{ matrix.port }}:${{ matrix.port }} \
+            ci/${{ matrix.service }}:local)
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
+          code=000
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "http://127.0.0.1:${{ matrix.port }}${{ matrix.health }}" || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::${{ matrix.service }} did not serve ${{ matrix.health }} (last status $code)" >&2
+            exit 1
+          fi
+          echo "ok: ${{ matrix.service }} served ${{ matrix.health }} on ${{ matrix.port }}"
+
+  # ----------------------------------------------------------------------
   # WebAssembly target gate.
   #
   # ada-m12-canvas-editor's description says "Compiles to WASM", its
@@ -321,7 +410,6 @@ jobs:
     needs: rust
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
