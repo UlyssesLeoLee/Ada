@@ -337,10 +337,16 @@ jobs:
             dockerfile: deploy/docker/ada-remediation.Dockerfile
             port: 9100
             health: /health
-            # main.rs reads this with `.context(..)`, so the service exits
-            # non-zero at startup without it. Passing a dummy is what lets
+            # main.rs reads both with `.context(..)`, so the service exits
+            # non-zero at startup without them. Passing dummies is what lets
             # the health endpoint be reachable; no webhook is ever called.
-            env: REMEDIATION_WEBHOOK_SECRET=ci-smoke-not-a-real-secret
+            # REMEDIATION_TRIGGER_SECRET guards the manual
+            # /remediation/trigger endpoint and is required just as
+            # strictly as the webhook secret -- the first run of this job
+            # only discovered that because the container refused to start.
+            env: >-
+              REMEDIATION_WEBHOOK_SECRET=ci-smoke-not-a-real-secret
+              REMEDIATION_TRIGGER_SECRET=ci-smoke-not-a-real-secret
     steps:
       - uses: actions/checkout@v4
 
