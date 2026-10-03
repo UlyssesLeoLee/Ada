@@ -86,14 +86,32 @@ jobs:
       # catch that, because per-file apply skips the kustomization
       # entirely and a multi-document YAML file is legal.
       #
-      # ubuntu-latest ships kubectl, so this is free. The semantic checks
-      # on the same file -- no duplicate keys, no selector-injecting
-      # label transformer, no per-service values in the shared one -- are
-      # in `crates/ada-core/tests/kustomization.rs` and need no tooling, so
-      # they run on every `cargo test` including on a contributor's
-      # machine with no cluster.
+      # `shell: bash` is load-bearing, not a preference. This job runs on a
+      # windows/ubuntu matrix, and the default shell on the Windows leg is
+      # pwsh, which parses `> /dev/null` as the *path* `D:\dev\null` and
+      # fails the step on a perfectly good tree -- the render was never
+      # even attempted. Both matrix legs ship kubectl, so there was no
+      # reason for the step to be Unix-only.
+      #
+      # The render goes to a real file rather than the null device, so the
+      # step can assert the document is non-empty. A redirect to /dev/null
+      # passes just as happily on an empty document, which is the failure
+      # this step exists to catch.
+      #
+      # The semantic checks on the same file -- no duplicate keys, no
+      # selector-injecting label transformer, no per-service values in the
+      # shared one -- are in `crates/ada-core/tests/kustomization.rs` and
+      # need no tooling, so they run on every `cargo test` including on a
+      # contributor's machine with no cluster.
       - name: kubectl kustomize (deploy/k8s must render)
-        run: kubectl kustomize deploy/k8s/ > /dev/null
+        shell: bash
+        run: |
+          kubectl kustomize deploy/k8s/ > kustomize-render.yaml
+          if [ ! -s kustomize-render.yaml ]; then
+            echo "::error::kustomize rendered an empty document" >&2
+            exit 1
+          fi
+          echo "rendered $(wc -l < kustomize-render.yaml) lines"
 
       # ada-rbac-casbin ships two mutually exclusive evaluators. casbin
       # 2.x is the default on every platform; the hand-rolled evaluator
