@@ -162,7 +162,9 @@ impl WasmCanvas {
     pub fn add_edge(&self, from_str: &str, to_str: &str) -> Result<(), JsError> {
         let from = parse_id(from_str)?;
         let to = parse_id(to_str)?;
-        self.inner.add_edge(Edge::new(from, to)).map_err(|e| into_js(&e))
+        self.inner
+            .add_edge(Edge::new(from, to))
+            .map_err(|e| into_js(&e))
     }
 
     /// Check the version matches `expected`. Used by the JS side for

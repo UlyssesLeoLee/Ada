@@ -1782,10 +1782,7 @@ mod tests {
     fn yrs_seed_collides_on_the_high_half() {
         let low = 0x1111_1111_2222_3333_4444_5555_6666_7777u128;
         let a = ClientId::from_uuid(uuid::Uuid::from_u128(low), "a".into());
-        let b = ClientId::from_uuid(
-            uuid::Uuid::from_u128(low | (0xAAAA_u128 << 64)),
-            "b".into(),
-        );
+        let b = ClientId::from_uuid(uuid::Uuid::from_u128(low | (0xAAAA_u128 << 64)), "b".into());
         assert_eq!(
             a.yrs_seed(),
             b.yrs_seed(),

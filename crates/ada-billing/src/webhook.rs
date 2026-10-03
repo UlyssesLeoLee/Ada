@@ -505,10 +505,7 @@ mod tests {
                 stripe_portal_return_url: None,
                 stripe_base_url: "https://api.stripe.com/v1".into(),
             });
-            let h = Arc::new(WebhookHandler::new(
-                cfg,
-                Arc::new(IdempotencyStore::new()),
-            ));
+            let h = Arc::new(WebhookHandler::new(cfg, Arc::new(IdempotencyStore::new())));
             let sink = Arc::new(CountingSink(AtomicUsize::new(0)));
             let barrier = Arc::new(Barrier::new(THREADS));
             let body = serde_json::to_vec(&evt(

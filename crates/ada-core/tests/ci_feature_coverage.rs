@@ -531,7 +531,10 @@ fn the_lane_parser_finds_the_lanes_this_gate_relies_on() {
         .collect();
     for expected in [
         ("ada-mock", vec!["server".to_string()]),
-        ("ada-telemetry", vec!["prometheus".to_string(), "testing".to_string()]),
+        (
+            "ada-telemetry",
+            vec!["prometheus".to_string(), "testing".to_string()],
+        ),
         ("ada-remediation", vec!["bin".to_string()]),
         ("ada-rbac-casbin", vec!["hand-rolled".to_string()]),
         ("ada-m13-api-gateway", vec!["rbac-hand-rolled".to_string()]),

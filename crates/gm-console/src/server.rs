@@ -1,7 +1,7 @@
 //! gm-console server bootstrap.
 
-use std::{net::SocketAddr, sync::Arc};
 use axum::Router;
+use std::{net::SocketAddr, sync::Arc};
 use tower_http::{
     compression::CompressionLayer,
     cors::{AllowOrigin, CorsLayer},

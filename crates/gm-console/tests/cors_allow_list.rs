@@ -78,7 +78,10 @@ async fn preflight(origins: Vec<String>, origin: &str) -> (StatusCode, HeaderMap
         .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
         .body(Body::empty())
         .expect("valid preflight request");
-    let response = app_with(origins).oneshot(request).await.expect("app responds");
+    let response = app_with(origins)
+        .oneshot(request)
+        .await
+        .expect("app responds");
     (response.status(), response.headers().clone())
 }
 
@@ -95,8 +98,7 @@ async fn every_configured_origin_is_allowed() {
     // loop answered the last origin for every request, so ALLOWED_A came
     // back as the localhost origin and failed.
     for origin in [ALLOWED_A, ALLOWED_B] {
-        let (status, headers) =
-            preflight(vec![ALLOWED_A.into(), ALLOWED_B.into()], origin).await;
+        let (status, headers) = preflight(vec![ALLOWED_A.into(), ALLOWED_B.into()], origin).await;
         assert!(
             status.is_success(),
             "preflight for {origin} should succeed, got {status}"

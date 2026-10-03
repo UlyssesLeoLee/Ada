@@ -271,8 +271,11 @@ async fn a_captured_signature_replayed_with_a_fresh_timestamp_is_rejected() {
     let body = disk_alert_webhook_body();
     let captured_at = ada_remediation::auth::now_unix_secs();
     let captured_ts = captured_at.to_string();
-    let captured_sig =
-        ada_remediation::auth::sign_at(E2E_WEBHOOK_SECRET.as_bytes(), captured_ts.as_bytes(), &body);
+    let captured_sig = ada_remediation::auth::sign_at(
+        E2E_WEBHOOK_SECRET.as_bytes(),
+        captured_ts.as_bytes(),
+        &body,
+    );
 
     // The honest request is accepted.
     let ok = app
