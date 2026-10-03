@@ -31,7 +31,12 @@ thiserror = "1"
 anyhow = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-rust-embed = "8"
+# `rust-embed = "8"` used to live here. Nothing in the crate references
+# `rust_embed` or `RustEmbed` -- not in src/, not in tests/ -- and the
+# static handler in routes.rs reads GM_CONSOLE_STATIC_DIR off disk at
+# request time, which is the opposite of embedding. It was a dead
+# dependency: compiled into every gm-console build, including the images,
+# and never called.
 mime_guess = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 bytes = "1"
