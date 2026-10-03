@@ -57,12 +57,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     Text('gm-console',
                         style: theme.textTheme.headlineMedium
                             ?.copyWith(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center),
+                        textAlign: TextAlign.center,),
                     const SizedBox(height: 8),
                     Text('Sign in to your workspace',
                         style: theme.textTheme.bodyMedium
                             ?.copyWith(color: theme.disabledColor),
-                        textAlign: TextAlign.center),
+                        textAlign: TextAlign.center,),
                     const SizedBox(height: 32),
                     TextFormField(
                       key: const Key('login.email'),
@@ -107,7 +107,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               width: 18,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white),
+                                  color: Colors.white,),
                             )
                           : const Text('Sign in'),
                     ),

@@ -28,7 +28,7 @@ class AuthApi {
     final body = await _client.postJson('/api/v1/auth/login', body: {
       'email': email,
       'password': password,
-    });
+    },);
     final token = body['token'] as String?;
     if (token == null || token.isEmpty) {
       throw const ApiUnauthorizedException(

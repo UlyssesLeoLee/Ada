@@ -23,7 +23,7 @@ class ApiBadRequestException extends ApiException {
 /// HTTP 401 — credentials missing or rejected. Triggers re-auth flow.
 class ApiUnauthorizedException extends ApiException {
   const ApiUnauthorizedException(super.message,
-      {super.statusCode, super.cause});
+      {super.statusCode, super.cause,});
 }
 
 /// HTTP 403 — authenticated but not allowed.
@@ -68,23 +68,23 @@ ApiException mapHttpStatusToApiException(
       return ApiBadRequestException(message, statusCode: statusCode, cause: cause);
     case 401:
       return ApiUnauthorizedException(message,
-          statusCode: statusCode, cause: cause);
+          statusCode: statusCode, cause: cause,);
     case 403:
       return ApiForbiddenException(message,
-          statusCode: statusCode, cause: cause);
+          statusCode: statusCode, cause: cause,);
     case 404:
       return ApiNotFoundException(message,
-          statusCode: statusCode, cause: cause);
+          statusCode: statusCode, cause: cause,);
     default:
       if (statusCode >= 400 && statusCode < 500) {
         return ApiUnknownException(message,
-            statusCode: statusCode, cause: cause);
+            statusCode: statusCode, cause: cause,);
       }
       if (statusCode >= 500) {
         return ApiServerException(message,
-            statusCode: statusCode, cause: cause);
+            statusCode: statusCode, cause: cause,);
       }
       return ApiUnknownException(message,
-          statusCode: statusCode, cause: cause);
+          statusCode: statusCode, cause: cause,);
   }
 }
