@@ -76,6 +76,15 @@ spec:
               value: "0.0.0.0:8080"
             - name: RUST_LOG
               value: "info,ada_m13_api_gateway=debug"
+            # The binary's compiled-in casbin policy path is
+            # env!("CARGO_MANIFEST_DIR")/policies, which does not exist
+            # in the image. Without this the pod exits before it binds
+            # with "policy reload failed: policy file not found", and
+            # without this manifest the same crash happens in every
+            # deployment. Must match the path the image copies the
+            # policy files to in deploy/docker/ada-api-gateway.Dockerfile.
+            - name: ADA_RBAC_POLICY_DIR
+              value: "/etc/ada-rbac/policies"
           # /health/live is the liveness probe target: it is the only
           # handler that cannot depend on a backing service, so a
           # dependency outage must not cause a restart loop.

@@ -33,6 +33,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --release --locked -p ada-m13-api-gateway --bin ada-api-gateway \
  && cp /src/target/release/ada-api-gateway /usr/local/bin/ada-api-gateway
 
+# The casbin model and policy. The binary's compiled-in default is
+# `env!("CARGO_MANIFEST_DIR")/policies`, which inside this build stage is
+# /src/crates/ada-rbac-casbin/policies -- a path that does not exist in the
+# runtime image. Without this copy and the env var below, the gateway
+# exits before it binds:
+#
+#   fatal: internal error: build rbac enforcer: policy reload failed:
+#   policy file not found: /src/crates/ada-rbac-casbin/policies/model.conf
+#
+# Both files are small text config, so baking them in is right: they are
+# part of the authorization model, not runtime state.
+COPY crates/ada-rbac-casbin/policies/ /etc/ada-rbac/policies/
+
 # --------------------------------------------------------------- runtime ----
 FROM debian:bookworm-slim AS runtime
 
@@ -61,6 +74,7 @@ USER ada
 WORKDIR /home/ada
 
 ENV ADA_GATEWAY_BIND=0.0.0.0:8080 \
+    ADA_RBAC_POLICY_DIR=/etc/ada-rbac/policies \
     RUST_LOG=info \
     RUST_BACKTRACE=1
 
