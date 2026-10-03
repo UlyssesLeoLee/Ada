@@ -450,13 +450,44 @@ jobs:
             if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then exit 1; fi
           done
 
-      - name: CORS preflight smoke
+      # The old step ran one preflight and printed its status code without
+      # checking it, so it could not fail. It also could not have caught the
+      # CORS bug: tower-http answers *every* preflight with 200, even for an
+      # origin nobody configured, because a browser is what blocks the real
+      # request -- not the server. `build_cors` was collapsing the
+      # allow-list to its last entry, which meant the production origin was
+      # never allowed and an unconfigured origin was handed that same fixed
+      # header. The response header is therefore the only thing worth
+      # asserting, and both directions of the allow-list have to be covered:
+      # a check that only confirms the allowed origins would still pass
+      # against `AllowOrigin::any()`.
+      - name: CORS allow-list smoke
         run: |
-          curl -s -o /dev/null -w '%{http_code}\n' \
-            -X OPTIONS \
-            -H 'Origin: https://gm-console.kanvas.dev' \
-            -H 'Access-Control-Request-Method: GET' \
-            http://127.0.0.1:8080/api/v1/pipelines
+          set -euo pipefail
+          check() {
+            origin="$1"; expect="$2"
+            acao=$(curl -s -D - -o /dev/null -X OPTIONS \
+              -H "Origin: $origin" \
+              -H 'Access-Control-Request-Method: GET' \
+              http://127.0.0.1:8080/api/v1/pipelines \
+              | tr -d '\r' \
+              | awk 'tolower($1)=="access-control-allow-origin:"{print $2}')
+            if [ "$expect" = "allow" ]; then
+              if [ "$acao" != "$origin" ]; then
+                echo "FAIL: configured origin $origin was not allowed (got '${acao:-<none>}')" >&2
+                exit 1
+              fi
+            else
+              if [ -n "$acao" ]; then
+                echo "FAIL: unconfigured origin $origin was granted access ($acao)" >&2
+                exit 1
+              fi
+            fi
+            echo "ok: $origin -> ${acao:-<none>}"
+          }
+          check 'https://gm-console.kanvas.dev' allow
+          check 'https://localhost:3000' allow
+          check 'https://evil.example' deny
 
       - name: Stop server
         run: |
