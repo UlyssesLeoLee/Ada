@@ -54,20 +54,30 @@ async fn upstream_handler(req: Request) -> Response {
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
-                format!(r#"{{"echoed":{},"bytes":{}}}"#, 
+                format!(
+                    r#"{{"echoed":{},"bytes":{}}}"#,
                     String::from_utf8_lossy(&body),
-                    body.len()),
+                    body.len()
+                ),
             )
                 .into_response()
         }
-        other => (StatusCode::INTERNAL_SERVER_ERROR, format!("unexpected: {other}"))
+        other => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("unexpected: {other}"),
+        )
             .into_response(),
     }
 }
 
 async fn spawn_upstream() -> (SocketAddr, Arc<AtomicUsize>) {
     let hits = Arc::new(AtomicUsize::new(0));
-    let app = Router::new().fallback(get(upstream_handler).post(upstream_handler).put(upstream_handler))
+    let app = Router::new()
+        .fallback(
+            get(upstream_handler)
+                .post(upstream_handler)
+                .put(upstream_handler),
+        )
         .layer(axum::Extension(hits.clone()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -91,7 +101,11 @@ fn build_app(upstream: SocketAddr) -> axum::Router {
 }
 
 /// Helper: send a request through the gm-console router, return status + body.
-async fn send(app: axum::Router, method: &str, path: &str) -> (StatusCode, Bytes, axum::http::HeaderMap) {
+async fn send(
+    app: axum::Router,
+    method: &str,
+    path: &str,
+) -> (StatusCode, Bytes, axum::http::HeaderMap) {
     let builder = Request::builder().method(method).uri(path);
     let req = builder.body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -140,7 +154,11 @@ async fn case_healthz_local() {
     let (status, body, headers) = send(app.clone(), "GET", "/healthz").await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(hits.load(Ordering::SeqCst), 0, "/healthz must not hit upstream");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "/healthz must not hit upstream"
+    );
     let s = std::str::from_utf8(&body).unwrap();
     assert!(s.contains("\"status\":\"ok\""), "body: {s}");
     assert!(s.contains("\"service\":\"gm-console\""), "body: {s}");
@@ -157,7 +175,11 @@ async fn case_terms_local() {
     let (status, body, headers) = send(app.clone(), "GET", "/terms").await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(hits.load(Ordering::SeqCst), 0, "/terms must not hit upstream");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "/terms must not hit upstream"
+    );
     let s = std::str::from_utf8(&body).unwrap();
     assert!(s.contains("Terms of Service"), "body: {s}");
     assert!(s.contains("AGPL"), "body: {s}");

@@ -21,8 +21,13 @@
 //! [`PrometheusHandle`]: https://docs.rs/metrics-exporter-prometheus/0.18/metrics_exporter_prometheus/struct.PrometheusHandle.html
 
 use crate::config::TelemetryConfig;
+// `TelemetryError` is referenced by the `prometheus` arm of
+// `install_recorder` below. It used to be imported only under the
+// non-prometheus cfg, which meant the entire `prometheus` feature had
+// never compiled. No CI job enables it and `default = ["otlp"]`, so the
+// breakage was invisible.
 #[cfg(feature = "prometheus")]
-use crate::error::Result;
+use crate::error::{Result, TelemetryError};
 
 /// Build the `ada.` prefixed canonical metric name from a
 /// `(layer, component, metric)` tuple.
@@ -120,19 +125,21 @@ pub fn install_recorder(cfg: &TelemetryConfig) -> Result<(MetricsGuard, MetricsH
         })?;
 
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new().with_http_listener(addr);
-    let (recorder, handle) =
-        builder
-            .install_recorder()
-            .map_err(|e| TelemetryError::PrometheusBind {
-                addr: cfg.prometheus_addr.clone(),
-                source: std::io::Error::other(e.to_string()),
-            })?;
-    // Suppress the "unused" lint for the recorder; keeping
-    // it alive for the same lifetime as the handle is the
-    // documented contract.
-    let _ = recorder;
+    // `install_recorder` returns only the handle. It builds the recorder
+    // internally and installs it into the `metrics` crate's global
+    // recorder slot, where it lives for the rest of the process. This
+    // code was written against an older release of the crate, which
+    // returned a `(PrometheusRecorder, PrometheusHandle)` pair -- the
+    // destructuring below no longer matched the real signature, so the
+    // whole `prometheus` feature had never compiled.
+    let handle = builder
+        .install_recorder()
+        .map_err(|e| TelemetryError::PrometheusBind {
+            addr: cfg.prometheus_addr.clone(),
+            source: std::io::Error::other(e.to_string()),
+        })?;
     Ok((
-        MetricsGuard { _active: true },
+        MetricsGuard { active: true },
         MetricsHandle {
             inner: HandleInner::Prometheus(handle),
         },
@@ -149,7 +156,7 @@ pub fn install_recorder(_cfg: &TelemetryConfig) -> (MetricsGuard, MetricsHandle)
 /// and the type is a zero-sized marker.
 pub struct MetricsGuard {
     #[cfg(feature = "prometheus")]
-    _active: bool,
+    active: bool,
 }
 
 impl MetricsGuard {
@@ -160,7 +167,7 @@ impl MetricsGuard {
     pub const fn inactive() -> Self {
         Self {
             #[cfg(feature = "prometheus")]
-            _active: false,
+            active: false,
         }
     }
 
@@ -169,7 +176,7 @@ impl MetricsGuard {
     pub const fn is_active(&self) -> bool {
         #[cfg(feature = "prometheus")]
         {
-            self._active
+            self.active
         }
         #[cfg(not(feature = "prometheus"))]
         {
@@ -180,14 +187,15 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        // The `metrics` crate installs the recorder in a
-        // thread-local; the Prometheus builder shuts its
-        // HTTP listener down when the recorder is dropped.
-        // We don't currently hold a reference to the
-        // builder itself, so this is a best-effort no-op;
-        // process exit handles the actual cleanup. A future
-        // v0.3.0 will own the builder and call `.shutdown()`
-        // here.
+        // The guard owns no recorder. `PrometheusBuilder::install_recorder`
+        // installs the exporter into the `metrics` crate's *global*
+        // recorder slot and returns only a handle, so the listener is
+        // shut down by process teardown rather than by dropping this
+        // guard. `is_active()` reports whether installation succeeded,
+        // which is the only thing this type can truthfully answer.
+        //
+        // Note the `metrics` crate's global recorder is process-wide, so
+        // a second `install_recorder` call fails rather than replacing it.
     }
 }
 
@@ -253,7 +261,7 @@ mod tests {
     fn metrics_guard_debug_includes_active_flag() {
         let g = MetricsGuard {
             #[cfg(feature = "prometheus")]
-            _active: false,
+            active: false,
         };
         let s = format!("{g:?}");
         assert!(s.contains("active"));

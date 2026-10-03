@@ -44,7 +44,11 @@ fn node_with_id(id: NodeId, label: &str, x: i32, y: i32) -> CanvasNode {
 /// cleanly to catch a feature-gating regression.
 #[test]
 fn appstate_builds_without_reconcile_payload() {
-    let state = AppState::new("ada-gateway-recon", Arc::new(MemoryHealthCheck::new()));
+    // `AppState::new` is fallible because it builds the RBAC enforcer:
+    // a pod whose policy set does not validate must refuse to start
+    // rather than serve with an enforcer that decides arbitrarily.
+    let state = AppState::new("ada-gateway-recon", Arc::new(MemoryHealthCheck::new()))
+        .expect("bundled policy set must validate");
     let _router = ada_m13_api_gateway::build_router(state);
 }
 
@@ -67,7 +71,7 @@ fn reconcile_endpoint_accepts_client_version() {
     // new_version = max(1, 0) + 1 = 2
     assert_eq!(r.new_version, 2);
     // Server's node was already in server, not a "client win".
-    assert!(r.server_wins.is_empty());
+    assert_eq!(r.server_wins.len(), 0);
     // Client's node was a "client win".
     assert_eq!(r.client_wins, vec![cn]);
     // Merged canvas has both nodes.
@@ -94,7 +98,7 @@ fn reconcile_endpoint_conflict_marks_server_wins() {
 
     assert!(r.had_conflict);
     assert_eq!(r.server_wins, vec![sn]);
-    assert!(r.client_wins.is_empty());
+    assert_eq!(r.client_wins.len(), 0);
 
     // Server's version of the node is in the merged canvas.
     let merged_node = r.merged.get_node(sn).expect("node in merged");

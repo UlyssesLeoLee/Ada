@@ -124,7 +124,7 @@ mod tests {
         let id = m.add(r).expect("add");
         assert_eq!(m.list().len(), 1);
         m.remove(id).expect("remove");
-        assert!(m.list().is_empty());
+        assert_eq!(m.list().len(), 0);
     }
 
     #[test]
@@ -181,8 +181,8 @@ mod tests {
         m.add(r).expect("add");
         assert_eq!(m.match_event("module.registered").len(), 1);
         assert_eq!(m.match_event("module.removed").len(), 1);
-        assert!(m.match_event("module.x.y").is_empty());
-        assert!(m.match_event("other.registered").is_empty());
+        assert_eq!(m.match_event("module.x.y").len(), 0);
+        assert_eq!(m.match_event("other.registered").len(), 0);
     }
 
     #[test]
@@ -192,7 +192,7 @@ mod tests {
         m.add(r).expect("add");
         assert_eq!(m.match_event("module.registered").len(), 1);
         assert_eq!(m.match_event("module.x.y").len(), 1);
-        assert!(m.match_event("other").is_empty());
+        assert_eq!(m.match_event("other").len(), 0);
     }
 
     #[test]
@@ -201,7 +201,7 @@ mod tests {
         let r = ev("e1", "module.*");
         let id = m.add(r).expect("add");
         m.set_enabled(id, false).expect("disable");
-        assert!(m.match_event("module.registered").is_empty());
+        assert_eq!(m.match_event("module.registered").len(), 0);
     }
 
     #[test]
@@ -210,6 +210,6 @@ mod tests {
         let r = TriggerRule::new("c1", TriggerKind::Manual, "", Action::new("x", json!({})))
             .expect("ok");
         m.add(r).expect("add");
-        assert!(m.match_event("anything").is_empty());
+        assert_eq!(m.match_event("anything").len(), 0);
     }
 }

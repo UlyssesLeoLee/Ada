@@ -85,6 +85,30 @@ U-01 ~ U-10 全部用例的入口点
   - 资源是否属于该租户？
 - **数据传输**：所有通信走 HTTPS/WSS（TLS 1.2+），多租户 SaaS 环境强制 HSTS 头，证书由公信 CA 签发并自动轮换
 
+#### 実装状況（JWT からの意図的な逸脱）
+
+上記 2.3 の設計目標（JWT Token）は**まだ実装されていない**。現在の
+`ada-m13-api-gateway` は **opaque サーバサイドセッション**を使う：
+
+| | 設計目標（2.3） | 現実装 |
+|---|---|---|
+| 資格情報 | JWT Token（`tenant_id` / `user_id` / `roles` を含む） | `ada_identity::session::SessionStore` が発行する不透明トークン |
+| 検証 | 署名検証 | サーバサイド `lookup`（失効が即時反映される） |
+| テナントの出典 | Token の `tenant_id` | **サーバサイドセッション**。クライアントの `x-tenant-id` は判断材料に一切使わない |
+
+**JWT を「復号するだけ」の検証지로代用してはならない。** `ada-identity` には非対称
+暗号の依存がなく、`mint_jwt` と `verify_jwt_stub` は整形済みを含む**すべての**入力に対して
+`JwtSigningUnavailable` を返す。復号のみの検証子を置くと、利用者が自分の `roles` と
+`tenant_id` を自分で署名した相当のものを持ち込めるが、`tenant_id` はマルチテナント
+分離のキーそのものである。Opaque セッションは新しい暗号依存を増やさず（即時失効も得て）
+この穴を閉じた。
+
+**未実装**：ログインフロー。`SessionStore` はプロセス内メモリなので、起動直後は空であり、
+`/api/*` はすべて 401 を返す。これは意図した fail-closed の姿勢であり、「まだ誰も
+認可していないのに全員を認可したふりをする」gateway を避けるためである。同時に、
+`deploy/k8s` の manifest を適用しただけでは**動作する製品にならない**という
+運用上の限界でもある。
+
 ### 2.4 错误处理总入口
 
 所有模块内部 `Error`（[api/error-codes.md §3](../api/error-codes.md) 列出索引）经 API Gateway 层的统一 `From<XxxError> for ApiError` 实现转换为对外 HTTP Error Code（[api/error-codes.md §2](../api/error-codes.md)），避免各 handler 手写重复的映射逻辑。

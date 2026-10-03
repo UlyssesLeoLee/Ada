@@ -1,7 +1,7 @@
 //! 错误类型 — 整个 mock crate 共用一个 `MockError`.
 //!
 //! 设计原则:
-//! - **Send + Sync + 'static** — 在测试 thread::spawn / rayon 并行下都可用.
+//! - **Send + Sync + 'static** — 在测试 `thread::spawn` / rayon 并行下都可用.
 //! - **不依赖 workspace 业务错误** — `ada-m09-exporter::ExporterError` 之类的我们不
 //!   重新导出, 让 sample mock 保持"纯本地"特征.
 //! - **`thiserror` 派生** — 与 ada-core / ada-telemetry 风格一致.

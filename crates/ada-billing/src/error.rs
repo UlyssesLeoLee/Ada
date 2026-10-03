@@ -88,9 +88,15 @@ mod tests {
         );
         // Invalid signature / payload / envelope must NOT include any
         // body / header content.
-        assert!(BillingError::InvalidSignature.to_string().contains("invalid stripe signature"));
-        assert!(BillingError::InvalidPayload.to_string().contains("invalid webhook payload"));
-        assert!(BillingError::MalformedEnvelope.to_string().contains("malformed webhook envelope"));
+        assert!(BillingError::InvalidSignature
+            .to_string()
+            .contains("invalid stripe signature"));
+        assert!(BillingError::InvalidPayload
+            .to_string()
+            .contains("invalid webhook payload"));
+        assert!(BillingError::MalformedEnvelope
+            .to_string()
+            .contains("malformed webhook envelope"));
     }
 
     #[test]

@@ -18,6 +18,7 @@
 
 #![cfg(feature = "bevy")]
 
+use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
 
 use bevy_ecs::prelude::*;
@@ -46,7 +47,13 @@ use crate::bevy_plugin::{CanvasNodeComp, CanvasPositionComp, CanvasResource};
 pub fn sync_canvas_system(
     canvas: Option<Res<CanvasResource>>,
     mut commands: Commands,
-    mut existing: Local<HashMap<crate::node::NodeId, Entity>>,
+    // The hasher is named rather than left to `HashMap`'s default so this
+    // signature is not implicitly `SipHash`. A Bevy system parameter has to
+    // be one concrete type — `Local<T>` needs `T: FromWorld`, so the hasher
+    // cannot be a generic parameter here the way
+    // `clippy::implicit_hasher` would otherwise suggest — and stating it is
+    // what makes that constraint visible.
+    mut existing: Local<HashMap<crate::node::NodeId, Entity, RandomState>>,
 ) {
     let Some(canvas) = canvas else { return };
 

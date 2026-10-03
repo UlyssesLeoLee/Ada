@@ -38,7 +38,7 @@ impl Attrs {
 
     #[must_use]
     pub fn with_request_ip(mut self, ip: StdIpAddr) -> Self {
-        self.request_ip = Some(IpAddr::from(ip));
+        self.request_ip = Some(ip);
         self
     }
 }

@@ -18,18 +18,23 @@ name = "ada_identity"
 path = "src/lib.rs"
 
 # v0.4.0 ships the skeleton crate (RFC + state-machine shapes). The
-# real wire-format deps (openidconnect, samael, webauthn-rs, totp-rs)
-# are deferred to v0.5.0 when the api-gateway's auth middleware is
-# wired to a real IdP. See README.md §"Out of scope".
+# real wire-format deps (openidconnect, samael, webauthn-rs) are
+# deferred to v0.5.0 when the api-gateway's auth middleware is wired
+# to a real IdP. See README.md §"Out of scope".
 #
-# Until then the skeleton uses in-house crypto primitives (SHA-256,
-# base32, base64url) and the `reqwest` HTTP client is replaced with
-# the api-gateway's middleware for outbound calls.
+# TOTP is the exception: it is NOT deferred. `totp` implements RFC 6238
+# directly on `hmac` + `sha1`/`sha2` so that the verifier is the
+# RFC-correct one rather than a placeholder (see tests/rfc6238_vectors.rs).
+# `totp-rs` is not pulled in; the in-house implementation is small and
+# testable against the published vectors.
+#
+# The remaining skeleton modules use in-house crypto primitives
+# (SHA-256, base32, base64url) and the `reqwest` HTTP client is
+# replaced with the api-gateway's middleware for outbound calls.
 
 [dependencies]
-ada-core = { path = "../ada-core" }
-ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab" }
-
+ada-core = { path = "../ada-core", version = "0.1.0" }
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
@@ -41,6 +46,11 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = { version = "0.22", features = ["default"] }
 rand = "0.8"
 sha2 = "0.10"
+# RFC 6238 TOTP: HMAC-SHA1 is the RFC 4226/6238 default and what
+# authenticator apps expect. Not optional — the correct verifier must
+# be the only code path, never a fallback.
+hmac = "0.12"
+sha1 = "0.10"
 hex = "0.4"
 url = "2"
 

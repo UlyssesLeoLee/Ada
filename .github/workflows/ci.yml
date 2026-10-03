@@ -12,6 +12,20 @@ on:
         type: boolean
         required: false
         default: false
+      # Gates the `mobile-assets` job. This input did not exist: the job
+      # was gated on `inputs.render == 'true'` while only `snapshots` was
+      # declared, so `inputs.render` was always null and the job never ran
+      # on any trigger, including a manual dispatch. It is the only thing
+      # that renders the icon set from brand/icon-source.svg and the only
+      # thing that parses docs/commercial/apple-app-privacy.json and
+      # google-play-data-safety.json -- both are required for store
+      # submission, and a malformed one fails review rather than the
+      # build. Declared here so the job is reachable.
+      render:
+        description: "Regenerate the mobile icon set and validate the store submission JSON"
+        type: boolean
+        required: false
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,9 +47,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/[email protected]
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchains: 1.98
+          toolchain: 1.98
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -63,6 +77,357 @@ jobs:
       - name: cargo test (workspace, no slow e2e)
         run: cargo test --workspace --locked --exclude gm-console
 
+      # The kustomization must render. `deploy/k8s/kustomization.yaml` had
+      # a second `---` after its comment block, which made the first YAML
+      # document empty; kustomize reads the first document, so the
+      # `kubectl apply -k deploy/k8s/` documented in the README and in the
+      # file's own header failed with `error: kustomization.yaml is empty`.
+      # Nothing in `cargo build`, `cargo test` or `kubectl apply -f` can
+      # catch that, because per-file apply skips the kustomization
+      # entirely and a multi-document YAML file is legal.
+      #
+      # `shell: bash` is load-bearing, not a preference. This job runs on a
+      # windows/ubuntu matrix, and the default shell on the Windows leg is
+      # pwsh, which parses `> /dev/null` as the *path* `D:\dev\null` and
+      # fails the step on a perfectly good tree -- the render was never
+      # even attempted. Both matrix legs ship kubectl, so there was no
+      # reason for the step to be Unix-only.
+      #
+      # The render goes to a real file rather than the null device, so the
+      # step can assert the document is non-empty. A redirect to /dev/null
+      # passes just as happily on an empty document, which is the failure
+      # this step exists to catch.
+      #
+      # The semantic checks on the same file -- no duplicate keys, no
+      # selector-injecting label transformer, no per-service values in the
+      # shared one -- are in `crates/ada-core/tests/kustomization.rs` and
+      # need no tooling, so they run on every `cargo test` including on a
+      # contributor's machine with no cluster.
+      - name: kubectl kustomize (deploy/k8s must render)
+        shell: bash
+        run: |
+          kubectl kustomize deploy/k8s/ > kustomize-render.yaml
+          if [ ! -s kustomize-render.yaml ]; then
+            echo "::error::kustomize rendered an empty document" >&2
+            exit 1
+          fi
+          echo "rendered $(wc -l < kustomize-render.yaml) lines"
+
+      # ada-rbac-casbin ships two mutually exclusive evaluators. casbin
+      # 2.x is the default on every platform; the hand-rolled evaluator
+      # is opt-in via `--features hand-rolled`. The default build below
+      # already exercises casbin, so this step exists to cover the other
+      # half of the matrix on every OS -- these two evaluators once
+      # disagreed about the resource type and about whether Delete
+      # requires the ownership flag, and only the hand-rolled side was
+      # reachable from a Windows runner.
+      - name: cargo test (rbac hand-rolled evaluator)
+        run: cargo test -p ada-rbac-casbin --features hand-rolled --locked
+
+      - name: cargo clippy (rbac hand-rolled evaluator)
+        run: cargo clippy -p ada-rbac-casbin --features hand-rolled --all-targets -- -D warnings
+
+      # The gateway's `/api/v1/canvases/*` routes are the only place a
+      # subject -> role mistake turns into a request that is actually
+      # allowed through, so their tests are worth running against both
+      # evaluators. `cargo test --workspace` only ever builds the default
+      # (casbin) one, and the step above only runs ada-rbac-casbin's own
+      # tests -- so until this step existed the gateway's authorization
+      # path had never been executed against the hand-rolled evaluator.
+      - name: cargo test (gateway vs hand-rolled evaluator)
+        run: cargo test -p ada-m13-api-gateway --features rbac-hand-rolled --locked
+
+      - name: cargo clippy (gateway vs hand-rolled evaluator)
+        run: cargo clippy -p ada-m13-api-gateway --features rbac-hand-rolled --all-targets -- -D warnings
+
+      # ada-telemetry's `prometheus` feature is opt-in and not in
+      # `default = ["otlp"]`, so nothing else in this workflow compiles it.
+      # It had silently rotted to the point where it no longer built at
+      # all: a missing import plus a call written against an older
+      # `metrics-exporter-prometheus` API.
+      #
+      # This lane used to be `cargo check -p ada-telemetry --features
+      # prometheus`, which was not enough. `src/testing.rs` is declared
+      # `#[cfg(any(feature = "testing", test))]`, so a plain `cargo check`
+      # (no `test` cfg, no `testing` feature) does not compile the module
+      # AT ALL -- and `cargo test --workspace` never enables `prometheus`,
+      # so it compiles the module with every item inside stubbed out. The
+      # intersection, prometheus ON *and* the module ON, was built by
+      # nothing, leaving `TestHandle` and `test_recorder` free to rot
+      # behind a comment claiming they were covered.
+      #
+      # Proved with a type error planted in `TestHandle::render`:
+      # this lane went RED (E0308) while both the old `cargo check` and
+      # `cargo test --workspace` stayed GREEN. `--all-targets` brings in
+      # the test target (`cfg(test)`); `testing` brings in the lib build
+      # a downstream crate would actually link against.
+      - name: cargo test (telemetry prometheus feature)
+        run: cargo test -p ada-telemetry --features prometheus,testing --locked
+
+      - name: cargo clippy (telemetry prometheus feature)
+        run: cargo clippy -p ada-telemetry --features prometheus,testing --all-targets --locked -- -D warnings
+
+      # ada-mock's `server` feature holds the FakeOtlpServer TcpListener
+      # module -- the crate's HTTP/OTLP capture layer, and the only
+      # thing here that can prove an exporter's push request shape. It is
+      # `default = []` and no job passed `--features server`, so it was
+      # never compiled, never linted, never run.
+      #
+      # The failure mode here is subtler than a missing `--features`
+      # flag: the integration test that exercises the server is itself
+      # `#[cfg(feature = "server")]` (tests/sample_mock_usage.rs), so
+      # `cargo clippy --workspace --all-targets` compiles the file and
+      # lints nothing in it. Turning the feature on immediately surfaced
+      # 3 lints in the module and 6 more in that test.
+      - name: cargo test (mock server capture)
+        run: cargo test -p ada-mock --features server --locked
+
+      - name: cargo clippy (mock server capture)
+        run: cargo clippy -p ada-mock --features server --all-targets --locked -- -D warnings
+
+      # ada-remediation's binary is the payload of the k8s Deployment in
+      # deploy/k8s/ada-remediation.yaml (replicas: 2, port 9100, an
+      # HMAC-authenticated webhook and a NetworkPolicy). Its `[[bin]]`
+      # carries `required-features = ["bin"]` and `default = []`, and no
+      # job in this repository passed `--features bin`, so the whole
+      # service -- its env handling, graceful shutdown and runbook
+      # execution -- was never compiled by anything. `release.yml` builds
+      # gm-console only, and there is no Dockerfile, so the image that
+      # manifest references has no reproducible build path either. This
+      # step is the part of that gap that CI can close on its own.
+      - name: cargo build (remediation binary)
+        run: cargo build -p ada-remediation --features bin --locked
+
+      # Without `--features bin`, `src/main.rs` does not exist as a
+      # target at all, so its unit tests are not part of
+      # `cargo test --workspace` either. This is what runs them.
+      - name: cargo test (remediation binary)
+        run: cargo test -p ada-remediation --features bin --locked
+
+      - name: cargo clippy (remediation binary)
+        run: cargo clippy -p ada-remediation --features bin --all-targets -- -D warnings
+
+  # ----------------------------------------------------------------------
+  # Feature-coverage gate.
+  #
+  # Any cargo feature outside a crate's `default` set is code that no
+  # ordinary `cargo build/test/clippy --workspace` will ever compile. That
+  # class of code rots silently, and this project has now been bitten by it
+  # three separate times:
+  #
+  #   - ada-telemetry's `prometheus` feature had rotted until it no longer
+  #     compiled at all (fixed in 439c322, now gated by the step above).
+  #   - ada-m12-canvas-editor had nine features that nothing had ever
+  #     built. One of them, `crdt`, gates the entire collaborative-editing
+  #     core (src/crdt.rs, ~1100 lines) behind both an inner
+  #     `#![cfg(feature = "crdt")]` and lib.rs, and a purpose-built
+  #     three-client convergence test in tests/crdt_sync.rs was sitting
+  #     behind a `required-features` key that no job ever supplied.
+  #   - The crate's own comments cite a "5-gate WASM CI" including
+  #     `wasm-pack build`. `wasm-pack` has never appeared anywhere under
+  #     .github/ in this repository's history, and no workflow installs
+  #     the wasm32-unknown-unknown target. The WASM path the crate
+  #     description advertises ("Compiles to WASM") has never been built
+  #     by any machine.
+  #
+  # This job is the anti-rot gate. `--no-default-features` is deliberately
+  # NOT used: several features assume the default `server` module is
+  # present, and dropping it would test a configuration nobody ships.
+  # ----------------------------------------------------------------------
+  feature-matrix:
+    name: feature matrix (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    needs: rust
+    strategy:
+      # Never cancel siblings: one broken feature must not hide the state
+      # of the other ten.
+      fail-fast: false
+      matrix:
+        feature:
+          - crdt
+          - legacy-array
+          - legacy-nested
+          - legacy-lww
+          - bevy
+          - bevy_egui
+          - wasm
+          - wasm-crdt
+          - wasm-test
+          - full
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo check (ada-m12-canvas-editor --features ${{ matrix.feature }})
+        run: cargo check -p ada-m12-canvas-editor --features ${{ matrix.feature }} --all-targets --locked
+
+      # Lint the crate in a configuration that actually includes the code
+      # that matters. The workspace clippy job runs default features, where
+      # `crdt.rs` (1860 lines) is behind `#[cfg(feature = "crdt")]` and is
+      # not compiled at all, and the check step above only proves things
+      # compile. So for a long time nothing linted the canonical CRDT
+      # implementation, and it had accumulated real lints in its non-test
+      # code that no job could see.
+      #
+      # `full` is `["wasm", "bevy"]` and does NOT imply `crdt`, so both are
+      # named here. Run once, on the `full` matrix entry, rather than
+      # repeating an identical lint per feature.
+      #
+      # The two `legacy-*` features are deliberately absent. They are
+      # `#[deprecated]` modules whose *own* test code therefore trips
+      # `deprecated` itself, so `-D warnings` is unsatisfiable there by
+      # construction — no code change can fix it. Both are scheduled for
+      # removal in v0.8.0; the `cargo check` matrix above still proves they
+      # compile in the meantime.
+      - name: cargo clippy (ada-m12-canvas-editor, crdt + bevy + wasm)
+        if: matrix.feature == 'full'
+        run: cargo clippy -p ada-m12-canvas-editor --features full,crdt --all-targets --locked -- -D warnings
+
+      # `crdt_sync` is a required-features test target, so `cargo check
+      # --all-targets` above only proves it compiles. Running it is the
+      # only thing that proves the convergence guarantee still holds.
+      - name: cargo test (crdt convergence)
+        if: matrix.feature == 'crdt'
+        run: cargo test -p ada-m12-canvas-editor --features crdt --test crdt_sync --locked
+
+  # ----------------------------------------------------------------------
+  # Container image gate.
+  #
+  # The three Deployments in deploy/k8s/ referenced
+  # `ghcr.io/ulyssesleolee/*` images that nothing in this repository could
+  # produce, because there was no Dockerfile anywhere. `cargo build`,
+  # `cargo test` and `kubectl apply` cannot notice that: the manifests
+  # validate, the code tests, and the cluster simply never receives an
+  # image. This job builds each one and then starts it.
+  #
+  # The smoke step is the point. A Dockerfile that builds is not the same
+  # as an image that runs: the binary name, the port, the env var the
+  # service refuses to start without, and the health path the orchestrator
+  # probes are four separate ways to ship a container that CrashLoopBackOffs
+  # with no build error -- the class of bug the remediation manifest already
+  # had once, probing /healthz on a service that serves /health.
+  #
+  # `load: true` and no registry: this gates the build, it does not publish.
+  # Publishing is a release-time decision with credentials attached.
+  # ----------------------------------------------------------------------
+  images:
+    name: image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gm-console
+            dockerfile: deploy/docker/gm-console.Dockerfile
+            port: 8080
+            health: /healthz
+          - service: ada-api-gateway
+            dockerfile: deploy/docker/ada-api-gateway.Dockerfile
+            port: 8080
+            health: /health/ready
+          - service: ada-remediation
+            dockerfile: deploy/docker/ada-remediation.Dockerfile
+            port: 9100
+            health: /health
+            # main.rs reads both with `.context(..)`, so the service exits
+            # non-zero at startup without them. Passing dummies is what lets
+            # the health endpoint be reachable; no webhook is ever called.
+            # REMEDIATION_TRIGGER_SECRET guards the manual
+            # /remediation/trigger endpoint and is required just as
+            # strictly as the webhook secret -- the first run of this job
+            # only discovered that because the container refused to start.
+            env: >-
+              REMEDIATION_WEBHOOK_SECRET=ci-smoke-not-a-real-secret
+              REMEDIATION_TRIGGER_SECRET=ci-smoke-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: ci/${{ matrix.service }}:local
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: The image runs and serves its probe path
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_args=()
+          if [ -n "${{ matrix.env }}" ]; then
+            # One `-e KEY=VALUE` per matrix entry, split on whitespace.
+            read -r -a pairs <<< "${{ matrix.env }}"
+            for pair in "${pairs[@]}"; do env_args+=(-e "$pair"); done
+          fi
+          cid=$(docker run -d --name smoke \
+            "${env_args[@]}" \
+            -p 127.0.0.1:${{ matrix.port }}:${{ matrix.port }} \
+            ci/${{ matrix.service }}:local)
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
+          code=000
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "http://127.0.0.1:${{ matrix.port }}${{ matrix.health }}" || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::${{ matrix.service }} did not serve ${{ matrix.health }} (last status $code)" >&2
+            exit 1
+          fi
+          echo "ok: ${{ matrix.service }} served ${{ matrix.health }} on ${{ matrix.port }}"
+
+  # ----------------------------------------------------------------------
+  # WebAssembly target gate.
+  #
+  # ada-m12-canvas-editor's description says "Compiles to WASM", its
+  # manifest sets `crate-type = ["cdylib", "rlib"]` specifically so
+  # `wasm-pack build` can emit a .wasm, and its dependency comments
+  # describe splitting tokio's `rt-multi-thread` behind
+  # `cfg(not(target_arch = "wasm32"))` "so `--target wasm32-unknown-unknown`
+  # compiles directly". All of that is a description of a build that no
+  # machine in this repository's history has ever performed: no workflow
+  # referenced wasm-pack or wasm32, and the toolchain installed only the
+  # host target.
+  #
+  # `wasm-crdt` is the forward path (it implies `wasm` plus `crdt`), so it
+  # is the configuration that actually needs to hold. `full` is
+  # deliberately not included: it implies `bevy`, which is a native ECS
+  # integration and is not part of the WASM bundle.
+  # ----------------------------------------------------------------------
+  wasm32:
+    name: wasm32 build
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo check (wasm32-unknown-unknown)
+        run: cargo check -p ada-m12-canvas-editor --target wasm32-unknown-unknown --features wasm-crdt --locked
+
   # ----------------------------------------------------------------------
   # Supply-chain security gate.
   # Runs after a clean test pass; fails the build on known-vulnerable deps.
@@ -75,9 +440,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/[email protected]
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchains: 1.98
+          toolchain: 1.98
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -88,7 +453,11 @@ jobs:
           cargo deny check advisories bans sources licenses
 
       - name: Trivy fs scan (fail on CRITICAL only)
-        uses: aquasecurity/trivy-action@0.24.0
+        # Pinned by commit SHA: this is the supply-chain gate, so the
+        # action must not be movable under us. The tag is `v0.24.0`
+        # (note the leading `v`); the previous `@0.24.0` referenced a ref
+        # that does not exist and the job failed to start.
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
         with:
           scan-type: fs
           scan-ref: .
@@ -97,7 +466,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy config scan (k8s manifests)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
         with:
           scan-type: config
           scan-ref: deploy/k8s
@@ -115,11 +484,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Flutter (stable, no pub fetch)
+      - name: Read pinned Flutter version
+        id: flutter-pin
+        # `.flutter-version` is the single source of truth for the SDK.
+        # It is read into `flutter-version` rather than passed as
+        # `flutter-version-file`: the action's precedence between
+        # `channel` and `flutter-version-file` silently ignored the pin,
+        # so CI drifted onto whatever stable was current and the repo's
+        # declared 3.24.5 was fiction. Passing the version explicitly is
+        # unambiguous.
+        run: |
+          v="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
+          test -n "$v" || { echo "::error::.flutter-version is empty"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Pinned Flutter $v"
+
+      - name: Install Flutter (pinned, no pub fetch)
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version-file: apps/gm-console-app/.flutter-version
+          flutter-version: ${{ steps.flutter-pin.outputs.version }}
+
+      - name: Verify the installed SDK matches the pin
+        # A pin that is not checked is not a pin. This fails loudly if the
+        # action ever stops honouring `flutter-version`.
+        #
+        # `flutter --version --machine` prints pretty-printed JSON, so the
+        # key is `"frameworkVersion": "3.24.5"` with a space after the
+        # colon. The previous `grep -o '"frameworkVersion":"[^"]*"'`
+        # matched nothing, `got` came back empty, and the comparison below
+        # was `test "" = "3.24.5"` -- a gate that reports drift on every
+        # run and could never report agreement. `tr -d ' \n'` compacts the
+        # document first, and the empty result is now rejected outright
+        # rather than being silently unequal.
+        run: |
+          want="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
+          got="$(flutter --version --machine | tr -d ' \n' | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4)"
+          echo "pinned=$want installed=${got:-<none>}"
+          if [ -z "$got" ]; then
+            echo "::error::could not read frameworkVersion from 'flutter --version --machine'" >&2
+            exit 1
+          fi
+          test "$got" = "$want" || {
+            echo "::error::Flutter SDK drift: pinned $want but installed $got"
+            exit 1
+          }
 
       - name: flutter pub get
         working-directory: apps/gm-console-app
@@ -166,13 +575,44 @@ jobs:
             if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then exit 1; fi
           done
 
-      - name: CORS preflight smoke
+      # The old step ran one preflight and printed its status code without
+      # checking it, so it could not fail. It also could not have caught the
+      # CORS bug: tower-http answers *every* preflight with 200, even for an
+      # origin nobody configured, because a browser is what blocks the real
+      # request -- not the server. `build_cors` was collapsing the
+      # allow-list to its last entry, which meant the production origin was
+      # never allowed and an unconfigured origin was handed that same fixed
+      # header. The response header is therefore the only thing worth
+      # asserting, and both directions of the allow-list have to be covered:
+      # a check that only confirms the allowed origins would still pass
+      # against `AllowOrigin::any()`.
+      - name: CORS allow-list smoke
         run: |
-          curl -s -o /dev/null -w '%{http_code}\n' \
-            -X OPTIONS \
-            -H 'Origin: https://gm-console.kanvas.dev' \
-            -H 'Access-Control-Request-Method: GET' \
-            http://127.0.0.1:8080/api/v1/pipelines
+          set -euo pipefail
+          check() {
+            origin="$1"; expect="$2"
+            acao=$(curl -s -D - -o /dev/null -X OPTIONS \
+              -H "Origin: $origin" \
+              -H 'Access-Control-Request-Method: GET' \
+              http://127.0.0.1:8080/api/v1/pipelines \
+              | tr -d '\r' \
+              | awk 'tolower($1)=="access-control-allow-origin:"{print $2}')
+            if [ "$expect" = "allow" ]; then
+              if [ "$acao" != "$origin" ]; then
+                echo "FAIL: configured origin $origin was not allowed (got '${acao:-<none>}')" >&2
+                exit 1
+              fi
+            else
+              if [ -n "$acao" ]; then
+                echo "FAIL: unconfigured origin $origin was granted access ($acao)" >&2
+                exit 1
+              fi
+            fi
+            echo "ok: $origin -> ${acao:-<none>}"
+          }
+          check 'https://gm-console.kanvas.dev' allow
+          check 'https://localhost:3000' allow
+          check 'https://evil.example' deny
 
       - name: Stop server
         run: |

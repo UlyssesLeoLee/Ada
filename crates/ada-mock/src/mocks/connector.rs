@@ -1,4 +1,4 @@
-//! StubConnector — 业务 ada-m01 acquisition 的"形状相似"克隆.
+//! `StubConnector` — 业务 ada-m01 acquisition 的"形状相似"克隆.
 //!
 //! 业务版本有 `FileConnector / StdinConnector / HttpConnector` 三个具体
 //! 实现, 这里合并为单一 `StubConnector` + `StubKind` 枚举, 便于测试
@@ -58,12 +58,14 @@ impl StubConnector {
     }
 
     /// 链式: 预置一批 record.
+    #[must_use]
     pub fn with_records(mut self, records: Vec<Record>) -> Self {
         self.records = records;
         self
     }
 
     /// 链式: 让前 N 次 `read_all` 报 `Err`, 之后正常 — 用于重试/退避测试.
+    #[must_use]
     pub fn with_transient_failures(mut self, n: usize) -> Self {
         self.fail_times = n;
         self
@@ -77,7 +79,10 @@ impl StubConnector {
     pub fn read_all(&mut self) -> Result<Vec<Record>, String> {
         if self.fail_times > 0 {
             self.fail_times -= 1;
-            return Err(format!("simulated transient failure (remaining={})", self.fail_times));
+            return Err(format!(
+                "simulated transient failure (remaining={})",
+                self.fail_times
+            ));
         }
         // cursor 仅用于"已读"指示; mock 不真正消费, 但提供 count 便于断言.
         let batch = self.records[self.cursor..].to_vec();
@@ -111,8 +116,7 @@ mod tests {
 
     #[test]
     fn read_all_returns_preset_records() {
-        let mut c = StubConnector::new(StubKind::Http)
-            .with_records(vec![rec("a", 1), rec("b", 2)]);
+        let mut c = StubConnector::new(StubKind::Http).with_records(vec![rec("a", 1), rec("b", 2)]);
         let got = c.read_all().expect("ok");
         assert_eq!(got.len(), 2);
         assert_eq!(c.read_count(), 2);

@@ -41,20 +41,32 @@
 //! # Wire format
 //!
 //! The client computes a hex-encoded signature over the
-//! raw body bytes:
+//! timestamp and the raw body bytes, 0x00-separated:
 //!
 //! ```text
-//! signature = hex(blake3_keyed_hash(derive_key(secret), body))
+//! signature = hex(blake3_keyed_hash(derive_key(secret),
+//!                                    timestamp || 0x00 || body))
 //! ```
 //!
 //! and sends two headers:
 //!
-//! - `X-Webhook-Signature: <64-hex-chars>` — the
-//!   signature itself (blake3 produces 32 bytes → 64
+//! - `X-Webhook-Signature: <64-hex-chars>` -- the
+//!   signature itself (blake3 produces 32 bytes, so 64
 //!   hex chars).
-//! - `X-Webhook-Timestamp: <unix-seconds>` — the
+//! - `X-Webhook-Timestamp: <unix-seconds>` -- the
 //!   client's wall-clock at request time, used for
-//!   replay protection (see below).
+//!   replay protection (see below) and **covered by
+//!   the signature**.
+//!
+//! The timestamp being signed is not a detail. Signing the
+//! body alone makes a captured `(body, signature)` pair a
+//! permanent bearer credential: the replay window compares
+//! the *supplied* header against the server's clock, so an
+//! attacker simply attaches a current timestamp and the
+//! window never expires for them. That is exactly the shape
+//! this format had before
+//! `a_captured_request_cannot_be_replayed_with_a_refreshed_timestamp`
+//! was written.
 //!
 //! # Key derivation
 //!
@@ -249,28 +261,44 @@ const fn hex_nibble(b: u8) -> Option<u8> {
     }
 }
 
-/// Compute the hex-encoded signature of `payload` using
-/// `secret`. The signing algorithm is `blake3-keyed`
-/// with a key derived from the secret — see the
-/// module docs for the full rationale. The function
-/// is the client-side mirror of [`verify_signature`]:
-/// every byte of the input contributes to the output.
+/// Sign `timestamp` together with `payload`.
+///
+/// This is the only signing entry point. There is deliberately no
+/// body-only variant: the timestamp has to be inside the signed
+/// material, and a public helper that produced a signature without it
+/// would be a way to reintroduce the defect this function's existence
+/// is meant to prevent.
+///
+/// When the timestamp was excluded, a captured `(body, signature)`
+/// pair could be replayed forever: the attacker simply attached a fresh
+/// `X-Webhook-Timestamp`, because the window check compares the
+/// *supplied* value against the server's clock, so supplying a current
+/// one always satisfies it. The 5-minute replay window protected
+/// nothing. See
+/// `a_captured_request_cannot_be_replayed_with_a_refreshed_timestamp`.
+///
+/// The separator is `0x00`, which cannot appear in a decimal timestamp,
+/// so `(ts="1", body="2…")` and `(ts="12", body="…")` cannot be
+/// confused by concatenation alone.
 #[must_use]
-pub fn sign(secret: &[u8], payload: &[u8]) -> String {
+pub fn sign_at(secret: &[u8], timestamp: &[u8], payload: &[u8]) -> String {
     let key = derive_key(secret);
-    let hash = blake3::keyed_hash(&key, payload);
-    hex_encode(hash.as_bytes())
+    let mut signed = Vec::with_capacity(timestamp.len() + 1 + payload.len());
+    signed.extend_from_slice(timestamp);
+    signed.push(0x00);
+    signed.extend_from_slice(payload);
+    hex_encode(blake3::keyed_hash(&key, &signed).as_bytes())
 }
 
 /// Constant-time verification of a hex signature.
 /// Returns `true` only if `signature_hex` is exactly
 /// the hex encoding of `blake3-keyed(derive_key(secret),
-/// payload)`. Length mismatches and decode failures
-/// short-circuit to `false` without leaking timing
+/// timestamp || 0x00 || payload)`. Length mismatches and decode
+/// failures short-circuit to `false` without leaking timing
 /// information about *which* check failed.
 #[must_use]
-pub fn verify(secret: &[u8], payload: &[u8], signature_hex: &str) -> bool {
-    let expected = sign(secret, payload);
+pub fn verify(secret: &[u8], timestamp: &[u8], payload: &[u8], signature_hex: &str) -> bool {
+    let expected = sign_at(secret, timestamp, payload);
     // constant_time_eq requires equal-length inputs.
     // Comparing lengths first is a constant-time
     // operation (we read both lengths), so it does
@@ -405,7 +433,7 @@ impl AuthState {
         if delta > REPLAY_WINDOW_SECS {
             return Err(AuthError::Expired);
         }
-        if verify(secret, body, signature) {
+        if verify(secret, timestamp_str.as_bytes(), body, signature) {
             Ok(())
         } else {
             Err(AuthError::InvalidSignature)
@@ -489,18 +517,19 @@ mod tests {
     }
 
     // ----------------------------------------------------------------------
-    // v0.7.1 HMAC over the body (blake3 keyed-hash)
+    // v0.7.1 signature over `timestamp || 0x00 || body` (blake3 keyed-hash)
     // ----------------------------------------------------------------------
 
     const SECRET: &[u8] = b"super-secret-webhook-key";
     const PAYLOAD: &[u8] = b"{\"alerts\":[]}";
+    const TS: &str = "1700000000";
 
     #[test]
-    fn hmac_sign_produces_deterministic_hex() {
-        let a = sign(SECRET, PAYLOAD);
-        let b = sign(SECRET, PAYLOAD);
-        assert_eq!(a, b, "sign must be deterministic for fixed inputs");
-        // blake3 outputs 32 bytes → 64 hex chars.
+    fn sign_at_produces_deterministic_hex() {
+        let a = sign_at(SECRET, TS.as_bytes(), PAYLOAD);
+        let b = sign_at(SECRET, TS.as_bytes(), PAYLOAD);
+        assert_eq!(a, b, "sign_at must be deterministic for fixed inputs");
+        // blake3 outputs 32 bytes -> 64 hex chars.
         assert_eq!(a.len(), 64);
         // All chars must be lowercase hex.
         assert!(a
@@ -509,76 +538,173 @@ mod tests {
     }
 
     #[test]
-    fn hmac_verify_accepts_valid_signature() {
-        let sig = sign(SECRET, PAYLOAD);
-        assert!(verify(SECRET, PAYLOAD, &sig));
+    fn verify_accepts_a_valid_signature() {
+        let sig = sign_at(SECRET, TS.as_bytes(), PAYLOAD);
+        assert!(verify(SECRET, TS.as_bytes(), PAYLOAD, &sig));
     }
 
     #[test]
-    fn hmac_verify_rejects_tampered_payload() {
-        let sig = sign(SECRET, PAYLOAD);
+    fn verify_rejects_tampered_payload() {
+        let sig = sign_at(SECRET, TS.as_bytes(), PAYLOAD);
         // Flip a single byte in the payload.
         let mut tampered = PAYLOAD.to_vec();
         tampered[0] ^= 0x01;
         assert!(
-            !verify(SECRET, &tampered, &sig),
+            !verify(SECRET, TS.as_bytes(), &tampered, &sig),
             "verify must reject a payload that differs by one byte"
         );
     }
 
     #[test]
-    fn hmac_verify_rejects_wrong_secret() {
-        let sig = sign(SECRET, PAYLOAD);
+    fn verify_rejects_wrong_secret() {
+        let sig = sign_at(SECRET, TS.as_bytes(), PAYLOAD);
         assert!(
-            !verify(b"a-different-secret-32bytes-aaa", PAYLOAD, &sig),
+            !verify(
+                b"a-different-secret-32bytes-aaa",
+                TS.as_bytes(),
+                PAYLOAD,
+                &sig
+            ),
             "verify must reject a signature produced with a different secret"
         );
     }
 
     #[test]
-    fn hmac_verify_rejects_malformed_signature() {
-        // Truncated signature, wrong length, garbage chars.
-        assert!(!verify(SECRET, PAYLOAD, ""));
-        assert!(!verify(SECRET, PAYLOAD, "abcd"));
-        assert!(!verify(SECRET, PAYLOAD, "zzzz"));
-        assert!(!verify(SECRET, PAYLOAD, &"a".repeat(64)));
+    fn verify_rejects_malformed_signature() {
+        // Empty, wrong length, garbage chars, right length but wrong.
+        assert!(!verify(SECRET, TS.as_bytes(), PAYLOAD, ""));
+        assert!(!verify(SECRET, TS.as_bytes(), PAYLOAD, "abcd"));
+        assert!(!verify(SECRET, TS.as_bytes(), PAYLOAD, "zzzz"));
+        assert!(!verify(SECRET, TS.as_bytes(), PAYLOAD, &"a".repeat(64)));
+    }
+
+    /// The separator stops `(ts, body)` from being confused by
+    /// concatenation alone: without it, signing `"1" + "23..."` and
+    /// signing `"12" + "3..."` would produce the same signed bytes.
+    #[test]
+    fn the_timestamp_and_body_cannot_be_confused_by_concatenation() {
+        let sig = sign_at(SECRET, b"1", b"23");
+        assert!(
+            !verify(SECRET, b"12", b"3", &sig),
+            "a shifted timestamp/body split must not validate"
+        );
+        assert!(verify(SECRET, b"1", b"23", &sig));
+    }
+
+    /// The replay window is only meaningful if the timestamp is
+    /// covered by the signature.
+    ///
+    /// A captured `(body, signature)` pair is a bearer credential
+    /// forever unless something in the signature changes between
+    /// requests. The only thing that changes is the timestamp, so if the
+    /// timestamp is not signed, an attacker who captures one request
+    /// replays it by sending the same body and signature with a fresh
+    /// `X-Webhook-Timestamp` -- and the 5-minute window never expires
+    /// for them, because they supply the value it is compared against.
+    ///
+    /// This test fails on the pre-fix implementation, where `sign` took
+    /// only the payload and so verified for every timestamp, forever.
+    #[test]
+    fn a_signature_is_bound_to_its_timestamp() {
+        let sig = sign_at(SECRET, TS.as_bytes(), PAYLOAD);
+        let other = "1700000001";
+        assert!(
+            !verify(SECRET, other.as_bytes(), PAYLOAD, &sig),
+            "the timestamp must be part of the signed material, or a \
+             captured signature can be replayed indefinitely by supplying a \
+             fresh X-Webhook-Timestamp"
+        );
+        // The original pairing still validates, so this changes what is
+        // covered rather than breaking signing.
+        assert!(verify(SECRET, TS.as_bytes(), PAYLOAD, &sig));
+    }
+
+    /// End-to-end through the entry point the HTTP handler uses, which
+    /// is where the window check and the signature check meet.
+    #[test]
+    fn a_captured_request_cannot_be_replayed_with_a_refreshed_timestamp() {
+        let auth = AuthState::enabled(SECRET);
+        let captured_at = 1_700_000_000i64;
+        let sig = sign_at(SECRET, captured_at.to_string().as_bytes(), PAYLOAD);
+
+        // Honest sender, inside the window: accepted.
+        assert_eq!(
+            auth.verify_request(
+                Some(&sig),
+                Some(&captured_at.to_string()),
+                PAYLOAD,
+                captured_at
+            ),
+            Ok(())
+        );
+
+        // The attacker replays an hour later and refreshes the header.
+        // The window check compares against the *supplied* value, so it
+        // passes; only a signature that covers the timestamp can stop
+        // this.
+        let later = captured_at + 3600;
+        assert_eq!(
+            auth.verify_request(Some(&sig), Some(&later.to_string()), PAYLOAD, later),
+            Err(AuthError::InvalidSignature),
+            "a captured signature replayed with a fresh timestamp must be \
+             rejected, or the replay window protects nothing"
+        );
     }
 
     // ----------------------------------------------------------------------
-    // v0.7.1 replay protection (X-Webhook-Timestamp)
+    // v0.7.1 replay window (X-Webhook-Timestamp)
     // ----------------------------------------------------------------------
 
     fn auth() -> AuthState {
         AuthState::enabled(SECRET)
     }
 
+    /// A signature is valid for the window relative to **its own**
+    /// timestamp, not any timestamp the caller supplies.
+    ///
+    /// The previous version of this test reused one signature across
+    /// three different timestamps. It passed, and it looked like replay
+    /// protection was covered -- but under the body-only signature every
+    /// timestamp produced the same bytes, so what it actually tested was
+    /// the window comparison and nothing else. That is how an unbounded
+    /// replay window survived a test named after replay protection. Each
+    /// case here signs for its own timestamp.
     #[test]
-    fn hmac_replay_rejected_via_timestamp() {
-        // Now = 1_000_000. The request is 10 minutes
-        // in the past — outside the 5-minute window.
+    fn the_window_is_measured_against_the_signed_timestamp() {
         let now = 1_000_000i64;
         let body = b"{}";
-        let sig = sign(SECRET, body);
+
+        // Ten minutes in the past: outside the 5-minute window.
         let stale = now - (REPLAY_WINDOW_SECS + 1);
-        let r = auth().verify_request(Some(&sig), Some(&stale.to_string()), body, now);
-        assert_eq!(r, Err(AuthError::Expired));
+        let sig = sign_at(SECRET, stale.to_string().as_bytes(), body);
+        assert_eq!(
+            auth().verify_request(Some(&sig), Some(&stale.to_string()), body, now),
+            Err(AuthError::Expired)
+        );
 
         // Far-future timestamp is also rejected.
         let future = now + (REPLAY_WINDOW_SECS + 1);
-        let r = auth().verify_request(Some(&sig), Some(&future.to_string()), body, now);
-        assert_eq!(r, Err(AuthError::Expired));
+        let sig = sign_at(SECRET, future.to_string().as_bytes(), body);
+        assert_eq!(
+            auth().verify_request(Some(&sig), Some(&future.to_string()), body, now),
+            Err(AuthError::Expired)
+        );
 
         // Within the window: accepted.
         let fresh = now - 60;
-        let r = auth().verify_request(Some(&sig), Some(&fresh.to_string()), body, now);
-        assert_eq!(r, Ok(()));
+        let sig = sign_at(SECRET, fresh.to_string().as_bytes(), body);
+        assert_eq!(
+            auth().verify_request(Some(&sig), Some(&fresh.to_string()), body, now),
+            Ok(())
+        );
     }
 
     #[test]
     fn hmac_missing_headers_produce_specific_errors() {
         let body = b"{}";
-        let sig = sign(SECRET, body);
         let now = now_unix_secs();
+        let ts = now.to_string();
+        let sig = sign_at(SECRET, ts.as_bytes(), body);
 
         // Missing signature → MissingSignature.
         let r = auth().verify_request(None, Some(&now.to_string()), body, now);

@@ -146,16 +146,16 @@ mod tests {
         h.push(EditOp::RemoveNode {
             id: NodeId(Uuid::new_v4()),
         });
-        assert!(h.redo.is_empty(), "expected redo to be cleared");
+        assert_eq!(h.redo.len(), 0, "expected redo to be cleared");
     }
 
     #[test]
     fn is_empty_reflects_state() {
         let mut h = EditHistory::new();
-        assert!(h.is_empty());
+        assert_eq!(h.undo_len(), 0);
         h.push(EditOp::RemoveNode {
             id: NodeId(Uuid::new_v4()),
         });
-        assert!(!h.is_empty());
+        assert_ne!(h.undo_len(), 0);
     }
 }

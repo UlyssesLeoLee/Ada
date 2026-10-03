@@ -4,7 +4,7 @@
 //! **不接入**: 本 crate 不被任何业务 crate 通过 `dev-dependencies` 引入 (见 `docs/tds/00-README.md` §0.3 决策记录).
 //! **四层能力** (与 `docs/tds/00-README.md` §1 一致):
 //!   1. **Mock 资源** — 连接器/事件总线/调度器的 in-memory 实现 (`mocks::*`).
-//!   2. **HTTP/Tracing 拦截** — `FakeOtlpServer` 风格的本地 TcpListener 双端 (`server::FakeOtlpServer`, 需 `server` feature).
+//!   2. **HTTP/Tracing 拦截** — `FakeOtlpServer` 风格的本地 `TcpListener` 双端 (`server::FakeOtlpServer`, 需 `server` feature).
 //!   3. **黄金集 fixture** — 静态 JSON/NDJSON/CRDT 数据, 用于回归 (`fixtures::golden`).
 //!   4. **TDS + 报告** — `docs/tds/` 模板, `scripts/` 报告脚本.
 //!
@@ -18,9 +18,9 @@
 //! cargo test -p ada-mock --all-features
 //! ```
 //!
-//! ## module_switch 接入 (per ULYS-190 §4.4 stage7, 2026-09-26 13:30 JST)
+//! ## `module_switch` 接入 (per ULYS-190 §4.4 stage7, 2026-09-26 13:30 JST)
 //!
-//! 本 stage7 commit 补 L1 cluster_switch + L2 plugin_switch + L3 module_switch
+//! 本 stage7 commit 补 L1 `cluster_switch` + L2 `plugin_switch` + L3 `module_switch`
 //! (反向 ULYS-190 §4.6 G-MS-01 「L2/L3 永久跳过」 决策, per D-Boy 2026-09-26 04:11 JST
 //! reply "完成到stage7的内容, ada也需要的"). 跨项目範式对齐 per G-MS-04.
 //!
@@ -28,7 +28,7 @@
 //! - **mocks** (3m): `event_bus` / `scheduler` / `connector` (3 in-memory 资源)
 //! - **server** (1m): `fake_otlp_server` (feature-gated, per `server` feature)
 //! - **fixtures** (2m): `golden` / `loader` (静态数据 + 加载器)
-//! - **builders** (1m): `builders` (EventBuilder/JobBuilder/fixed_now/fresh_id)
+//! - **builders** (1m): `builders` (`EventBuilder`/`JobBuilder`/`fixed_now`/`fresh_id`)
 //! - **tds** (3m): `tds_event_bus` / `tds_scheduler` / `tds_fake_otlp` (3 TDS docs)
 //!
 //! ### 跨语言 dispatch 用法 (跟 RGS `tools/rgs-flash-mock/` 範式一致)
@@ -39,7 +39,7 @@
 //! # ✅ 5 plugins / 10 modules JSON
 //! ```
 //!
-//! ### 跨项目累計 (per §4.4 stage1+2+3+4+5+6+7, **7/7 项目 module_switch 落地**)
+//! ### 跨项目累計 (per §4.4 stage1+2+3+4+5+6+7, **7/7 项目 `module_switch` 落地**)
 //! | 项目 | Plugin | Module | 範式 |
 //! |---|---|---|---|
 //! | IM1.0 | 5 | 28 | PR #24 |
@@ -47,7 +47,7 @@
 //! | Star | 7 | 7 | PR #151 |
 //! | RGS | 5 | 12 | PR #51 |
 //! | IDE1.0 | N | 8 | stage5 |
-//! | GitGit | N | 7 | stage6 |
+//! | `GitGit` | N | 7 | stage6 |
 //! | **Ada** | **5** | **10** | **stage7 (本 commit, reverse of §4.6 G-MS-01)** |
 //!
 //! ### 落地边界 (per cluster.enabled=false 預設)
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn version_not_empty() {
-        assert!(!MOCK_VERSION.is_empty());
+        assert_ne!(MOCK_VERSION, "");
     }
 
     #[test]

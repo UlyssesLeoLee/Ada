@@ -134,7 +134,7 @@ mod tests {
         let m = manifest();
         let id = h.install(m).await.expect("install");
         h.uninstall(id).await.expect("uninstall");
-        assert!(h.list().await.expect("list").is_empty());
+        assert_eq!(h.list().await.expect("list").len(), 0);
     }
 
     #[tokio::test]

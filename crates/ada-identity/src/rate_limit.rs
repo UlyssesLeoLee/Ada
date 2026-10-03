@@ -17,11 +17,11 @@ pub struct TokenBucket {
 impl TokenBucket {
     #[must_use]
     pub fn new(capacity: u32, refill_per_min: u32) -> Self {
-        let rps = refill_per_min as f64 / 60.0;
+        let rps = f64::from(refill_per_min) / 60.0;
         Self {
             capacity,
             refill_per_sec: rps,
-            tokens: Mutex::new(capacity as f64),
+            tokens: Mutex::new(f64::from(capacity)),
             last_refill: Mutex::new(Instant::now()),
         }
     }
@@ -32,7 +32,7 @@ impl TokenBucket {
         let mut last = self.last_refill.lock();
         let mut tokens = self.tokens.lock();
         let elapsed = now.duration_since(*last).as_secs_f64();
-        *tokens = (*tokens + elapsed * self.refill_per_sec).min(self.capacity as f64);
+        *tokens = (*tokens + elapsed * self.refill_per_sec).min(f64::from(self.capacity));
         *last = now;
         if *tokens >= 1.0 {
             *tokens -= 1.0;

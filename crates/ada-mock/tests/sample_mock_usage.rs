@@ -6,7 +6,7 @@
 //!
 //! 场景: "scheduler 入队 3 个 job, 中途通过 event bus 收到 cancel 事件,
 //! 第 2 个 job 转 Cancelled, 剩余两个进入 Running 直到 Succeeded, 同时
-//! 把指标通过 FakeOtlpServer 推出去, 由测试断言推送 body 形状."
+//! 把指标通过 `FakeOtlpServer` 推出去, 由测试断言推送 body 形状."
 
 use ada_mock::builders::{EventBuilder, GoldenEnvelope, JobBuilder};
 use ada_mock::fixtures::{golden_event, load_envelope, load_ndjson, FixturePath};
@@ -15,10 +15,8 @@ use ada_mock::mocks::{InMemoryEventBus, InMemoryScheduler, JobState, StubConnect
 #[test]
 fn four_layer_smoke() {
     // ----- 1) fixture 加载黄金集 (能力层 3) -----
-    let envelope: GoldenEnvelope = load_envelope(&FixturePath::relative(
-        "events_basic.envelope.json",
-    ))
-    .expect("load envelope");
+    let envelope: GoldenEnvelope =
+        load_envelope(&FixturePath::relative("events_basic.envelope.json")).expect("load envelope");
     assert_eq!(envelope.schema_version, 1);
     assert_eq!(envelope.events.len(), 3);
 
@@ -33,7 +31,9 @@ fn four_layer_smoke() {
 
     // 入队 3 个 job
     let j1 = JobBuilder::new("ingest").enqueue(&mut sched).expect("j1");
-    let j2 = JobBuilder::new("transform").enqueue(&mut sched).expect("j2");
+    let j2 = JobBuilder::new("transform")
+        .enqueue(&mut sched)
+        .expect("j2");
     let j3 = JobBuilder::new("export").enqueue(&mut sched).expect("j3");
     assert_eq!(sched.in_flight(), 3);
 
@@ -62,16 +62,15 @@ fn four_layer_smoke() {
     assert_eq!(sched.in_flight(), 1);
 
     // ----- 5) StubConnector 一次性读全部 -----
-    let mut c = StubConnector::new(StubKind::Http)
-        .with_records(
-            records
-                .iter()
-                .map(|v| ada_mock::mocks::Record {
-                    id: v["id"].as_str().unwrap().to_string(),
-                    payload: v["payload"].clone(),
-                })
-                .collect(),
-        );
+    let mut c = StubConnector::new(StubKind::Http).with_records(
+        records
+            .iter()
+            .map(|v| ada_mock::mocks::Record {
+                id: v["id"].as_str().unwrap().to_string(),
+                payload: v["payload"].clone(),
+            })
+            .collect(),
+    );
     let got = c.read_all().expect("read");
     assert_eq!(got.len(), 3);
     assert_eq!(c.read_count(), 3);
@@ -86,14 +85,13 @@ fn four_layer_smoke() {
 #[test]
 fn four_layer_with_otlp_capture() {
     use ada_mock::server::FakeOtlpServer;
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpStream};
 
     let srv = FakeOtlpServer::start().expect("start otlp mock");
     let addr = srv.addr;
 
     // 同步 TCP 客户端, 模拟 OTLP/HTTP push
-    use std::io::{Read, Write};
-    use std::net::{Shutdown, TcpStream};
-
     let mut s = TcpStream::connect(addr).expect("connect");
     let body = serde_json::to_vec(&golden_event("ada.metric.tick", 7)).unwrap();
     let head = format!(

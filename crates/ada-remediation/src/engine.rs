@@ -373,7 +373,7 @@ mod tests {
     fn evaluate_ignores_resolved_alerts() {
         let engine = RemediationEngine::with_runbooks(vec![disk_action()]);
         let alert = AlertEvent::new("DiskSpaceFillingFast").with_status(AlertStatus::Resolved);
-        assert!(engine.evaluate(&alert).is_empty());
+        assert_eq!(engine.evaluate(&alert).len(), 0);
     }
 
     #[test]

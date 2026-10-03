@@ -74,7 +74,19 @@ impl IntoResponse for ApiError {
                 "message": self.to_string(),
             }
         }));
-        (status, body).into_response()
+        let mut resp = (status, body).into_response();
+        // A 401 without a challenge is a malformed 401: RFC 7235 §3.1
+        // requires the server to advertise the scheme it wants, and a
+        // client that follows the spec retries with a credential rather
+        // than showing the user a bare error. The gateway only ever
+        // accepts `Bearer`, so that is the only challenge emitted.
+        if status == StatusCode::UNAUTHORIZED {
+            resp.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer"),
+            );
+        }
+        resp
     }
 }
 
@@ -125,5 +137,39 @@ mod tests {
     fn into_response_returns_status() {
         let resp = ApiError::Unauthorized("nope".into()).into_response();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// A 401 has to carry the challenge, or a spec-following client
+    /// never learns which credential to send. Asserted here rather than
+    /// left implicit: the header is one line and silently dropping it
+    /// regresses every unauthenticated response at once.
+    #[test]
+    fn a_401_carries_the_bearer_challenge() {
+        let resp = ApiError::Unauthorized("nope".into()).into_response();
+        let challenge = resp
+            .headers()
+            .get("www-authenticate")
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(challenge, Some("Bearer"));
+    }
+
+    /// The challenge belongs to 401 only. Leaking it onto a 404 or a
+    /// 500 tells the client to retry a request that will never be
+    /// authenticated.
+    #[test]
+    fn a_non_401_carries_no_challenge() {
+        for e in [
+            ApiError::NotFound("x".into()),
+            ApiError::BadRequest("x".into()),
+            ApiError::ServiceUnavailable("x".into()),
+            ApiError::Internal("x".into()),
+        ] {
+            let resp = e.into_response();
+            assert!(
+                resp.headers().get("www-authenticate").is_none(),
+                "{} must not advertise a challenge",
+                resp.status()
+            );
+        }
     }
 }

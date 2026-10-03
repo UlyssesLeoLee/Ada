@@ -1,4 +1,4 @@
-//! WebAuthn RP (FIDO2). Registration + authentication ceremony.
+//! `WebAuthn` RP (FIDO2). Registration + authentication ceremony.
 //!
 //! v0.4.0 skeleton: state-machine + RFC shapes only. Real wire-format
 //! signing / verification via `webauthn-rs = "0.5"` (the 0.6 line is

@@ -9,12 +9,25 @@
 //! `AdminApi`) is preserved unchanged from v0.4.0; only the internal
 //! implementation moved.
 //!
-//! ## Features
+//! ## Evaluator selection
 //!
-//! - Default: real `casbin` 2.x adapter + `notify` watcher.
-//! - `hand-rolled`: pin the v0.4.0 hand-rolled evaluator (no
-//!   `casbin`/`notify` runtime cost, but no model.conf + CSV
-//!   policy fidelity).
+//! Which evaluator is compiled is a two-way function of the
+//! `hand-rolled` feature (full matrix in `Cargo.toml`):
+//!
+//! - `hand-rolled` on any target — the v0.4.0 evaluator.
+//! - Feature off, any target — the real `casbin` 2.x adapter plus the
+//!   `notify` watcher. This is the default on every platform.
+//!
+//! There is no "no evaluator compiled in" configuration. One used to
+//! exist for targets that were neither Linux nor macOS, on the stated
+//! grounds that casbin needs `openssl-sys`. That premise was false, and
+//! the configuration's real effect was to make the production evaluator
+//! unbuildable on Windows — where it was therefore never compiled, and
+//! never tested, while the only CI leg that could have compiled it had
+//! not started a single job in 24 consecutive runs.
+//!
+//! The public API (`Enforcer`, `Attrs`, `PolicySet`, `HotReload`,
+//! `AdminApi`) is identical in all three configurations.
 //!
 //! See `docs/commercial/auth-billing-arch.md` §4 for the binding
 //! contract this crate implements.
@@ -30,6 +43,7 @@ pub mod casbin_impl;
 
 pub mod admin;
 pub mod attrs;
+pub mod contract;
 pub mod enforcer;
 pub mod error;
 pub mod hot_reload;

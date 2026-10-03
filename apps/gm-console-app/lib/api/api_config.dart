@@ -15,9 +15,10 @@ class ApiConfig {
   });
 
   /// Default API base URL. Override with `--dart-define=GM_API_BASE=...`.
-  static const String defaultBaseUrl =
-      String.fromEnvironment('GM_API_BASE',
-          defaultValue: 'https://gm-console.kanvas.dev/api');
+  static const String defaultBaseUrl = String.fromEnvironment(
+    'GM_API_BASE',
+    defaultValue: 'https://gm-console.kanvas.dev/api',
+  );
 
   /// Build flavor (`dev`, `staging`, `release`). Override with
   /// `--dart-define=GM_BUILD_FLAVOR=...`.

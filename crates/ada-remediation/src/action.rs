@@ -97,9 +97,34 @@ impl Trigger {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActionStep {
-    /// Run a shell command. The process inherits nothing
-    /// from the engine process by default (`std::process::Command`
+    /// Run a command. The process inherits nothing from the
+    /// engine process by default (`std::process::Command`
     /// does not copy env unless explicitly asked).
+    ///
+    /// # `cmd` and `args` are operator-supplied and must stay that way
+    ///
+    /// Everything in this variant comes from the runbook file, which is
+    /// trusted configuration. **No alert-derived value is ever substituted
+    /// into `cmd` or `args`, and this variant must stay that way.**
+    ///
+    /// That is the whole security boundary of this service, and it rests on
+    /// two things that are easy to break by accident:
+    ///
+    /// * Alert labels are attacker-influenced. An `HttpCall` or
+    ///   `NotifySlack` may safely interpolate them — the worst a crafted
+    ///   label can do there is send a strange URL or message. Interpolating
+    ///   them into `cmd`/`args` is arbitrary code execution, because the
+    ///   receiver of a webhook controls the label values.
+    /// * Even with a template renderer available, direct exec is the only
+    ///   form used. `{{ $labels.x }}` expanding to `; rm -rf /` is inert
+    ///   here only because nothing is ever handed to a shell.
+    ///
+    /// `crates/ada-core/tests/remediation_command_boundary.rs` fails if
+    /// this arm ever calls `render_template`, or if the executor starts
+    /// routing through a shell. "It would be convenient to parameterise the
+    /// command with the alert's service name" is exactly the change that
+    /// turns this into a remote code execution bug, so it is worth knowing
+    /// that the door is nailed shut deliberately.
     RunCommand {
         cmd: String,
         #[serde(default)]

@@ -1494,8 +1494,8 @@ mod tests {
         }
         let snap_a = get_element(&doc_a, NodeId(shared_id)).expect("a present");
         let snap_b = get_element(&doc_b, NodeId(shared_id)).expect("b present");
-        assert!(snap_a.ports.is_empty(), "a: port should be removed");
-        assert!(snap_b.ports.is_empty(), "b: port should be removed");
+        assert_eq!(snap_a.ports.len(), 0, "a: port should be removed");
+        assert_eq!(snap_b.ports.len(), 0, "b: port should be removed");
     }
 
     /// v0.7.0: `update_element` with a new port list on one
@@ -1712,8 +1712,8 @@ mod tests {
         );
         // And the state vector should not be empty (it has
         // at least the one client entry from the insert).
-        assert!(!sv_a.is_empty());
-        assert!(!sv_b.is_empty());
+        assert_ne!(sv_a.len(), 0);
+        assert_ne!(sv_b.len(), 0);
     }
 
     /// Sanity: malformed update bytes produce a `BackendError`

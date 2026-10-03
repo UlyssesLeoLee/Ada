@@ -31,12 +31,12 @@ class PipelineDetailScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(20),
             children: [
               Text(pipeline.name,
-                  style: Theme.of(context).textTheme.headlineSmall),
+                  style: Theme.of(context).textTheme.headlineSmall,),
               const SizedBox(height: 12),
               StatusPill(status: pipeline.status),
               const SizedBox(height: 24),
               Text('Last run',
-                  style: Theme.of(context).textTheme.titleMedium),
+                  style: Theme.of(context).textTheme.titleMedium,),
               const SizedBox(height: 8),
               Card(
                 child: Padding(
@@ -47,10 +47,10 @@ class PipelineDetailScreen extends ConsumerWidget {
                       Text('Run id: ${last?.id ?? '—'}'),
                       const SizedBox(height: 4),
                       Text(
-                          'Started: ${last?.startedAt?.toLocal() ?? '—'}'),
+                          'Started: ${last?.startedAt?.toLocal() ?? '—'}',),
                       const SizedBox(height: 4),
                       Text(
-                          'Finished: ${last?.finishedAt?.toLocal() ?? '—'}'),
+                          'Finished: ${last?.finishedAt?.toLocal() ?? '—'}',),
                       const SizedBox(height: 4),
                       Text('Commit: ${last?.commitSha ?? '—'}'),
                     ],
@@ -71,7 +71,7 @@ class PipelineDetailScreen extends ConsumerWidget {
                           SnackBar(
                             content: Text(ok
                                 ? 'Retry requested'
-                                : 'Retry failed'),
+                                : 'Retry failed',),
                           ),
                         );
                       },
@@ -80,7 +80,8 @@ class PipelineDetailScreen extends ConsumerWidget {
                         height: 16,
                         width: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2, color: Colors.white,),
+                      )
                     : const Icon(Icons.refresh),
                 label: const Text('Retry pipeline'),
               ),
@@ -89,7 +90,8 @@ class PipelineDetailScreen extends ConsumerWidget {
                 Text(
                   retry.error.toString(),
                   style: TextStyle(
-                      color: Theme.of(context).colorScheme.error),
+                      color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
               ],
             ],

@@ -26,11 +26,12 @@ path = "tests/sample_mock_usage.rs"
 
 [features]
 default = []
-# `server` pulls in the TcpListener-based FakeOtlpServer module
-# and the `time` dep. Off by default so `cargo build` stays cheap
-# for consumers that only need pure-data helpers (mocks,
-# fixtures, builders).
-server = ["dep:time"]
+# `server` enables the `FakeOtlpServer` TcpListener module and its
+# integration test. It pulls in no extra dependency: the module is
+# `std::net` + `std::thread` only, by design (see src/server/mod.rs).
+# Off by default so `cargo build` stays cheap for consumers that only
+# need pure-data helpers (mocks, fixtures, builders).
+server = []
 
 [dependencies]
 # In-memory primitives only — no tokio, no async runtime, no HTTP
@@ -46,17 +47,19 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # ACI 跨项目 emitter (per ULYS-191 §4.3.4 brief v0.1)
 aci-emitter = { workspace = true }
 
-# `time` is only used by the `server` feature (FakeOtlpServer
-# payload builder stamps RFC3339 timestamps). Marked optional so
-# the default build path stays small. Cargo 1.85+ requires this
-# pattern instead of `[target.'cfg(feature=...)'.dependencies]`.
-time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+# No `time` dependency: this file previously declared an optional
+# `time = "0.3"` behind `server`, justified as "FakeOtlpServer payload
+# builder stamps RFC3339 timestamps". There is no payload builder --
+# the module has no RFC3339 code at all -- and a crate-wide search
+# found zero references to the `time` crate, so `server` was forcing
+# a second, redundant date/time library (the crate already depends on
+# `chrono`) into the build graph for nothing. RFC3339 formatting, if
+# the capture layer ever needs it, belongs on `chrono`.
 
 [dev-dependencies]
 # Only the workspace's `ada-core` types — the rest of the workspace
 # is intentionally NOT pulled in. This crate is a standalone
 # reference, not a dev-dep target.
-ada-core = { path = "../ada-core" }
-
+ada-core = { path = "../ada-core", version = "0.1.0" }
 [lints]
 workspace = true

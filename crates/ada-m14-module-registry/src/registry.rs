@@ -559,7 +559,7 @@ mod tests {
         let names: Vec<&str> = listed.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, vec!["a", "b", "c"]);
         assert_eq!(r.len(), 3);
-        assert!(!r.is_empty());
+        assert_ne!(r.len(), 0);
     }
 
     #[tokio::test]
@@ -610,8 +610,7 @@ mod tests {
     #[tokio::test]
     async fn empty_registry_is_empty() {
         let r = ModuleRegistry::new();
-        assert!(r.is_empty());
         assert_eq!(r.len(), 0);
-        assert!(r.list().is_empty());
+        assert_eq!(r.list().len(), 0);
     }
 }

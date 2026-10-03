@@ -1,0 +1,159 @@
+---
+# ada-api-gateway — the backend gm-console proxies to.
+#
+# WHY THIS FILE EXISTS
+#
+# `gm-console.yaml` sets `GM_CONSOLE_UPSTREAM=http://ada-api-gateway:8080`.
+# Until this manifest was added, no Service by that name existed anywhere
+# in this repository: the only two Services in deploy/k8s were
+# `gm-console` and `ada-remediation`. The string `ada-api-gateway`
+# appeared solely as an env value, never as a Service. DNS resolution for
+# it therefore failed inside the cluster and every `/api/*` request
+# through the only deployed service returned 502 BAD_GATEWAY.
+#
+# The Service name is load-bearing. If it drifts from the host half of
+# GM_CONSOLE_UPSTREAM, the failure mode changes from a visible 502 to a
+# connection refusal, which is much harder to diagnose from outside. A
+# unit test in crates/ada-m13-api-gateway/src/main.rs pins the binary's
+# default bind to match this file's containerPort, and this comment is
+# the other half of that pairing.
+#
+# The binary is named `ada-api-gateway` rather than after its package
+# (`ada-m13-api-gateway`) for the same reason: the [[bin]] name is the
+# image's entrypoint and must match the Service.
+#
+# WHAT THIS SERVICE IS NOT
+#
+# This manifest makes the deployed topology coherent. It does NOT make
+# the API authenticated. As of this commit the gateway mounts four
+# routes — /health, /health/live, /health/ready, /api/v1/ping — and none
+# of them require a credential. ada-identity, ada-rbac-casbin and
+# ada-billing are still not dependencies of this crate, and gm-console
+# still forwards the client's `authorization` and `x-tenant-id` headers
+# verbatim. Wiring the authentication and authorization middleware is
+# tracked as the next step; do not read a green deployment as a secured
+# one.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ada-api-gateway
+  labels:
+    app: ada-api-gateway
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ada-api-gateway
+  template:
+    metadata:
+      labels:
+        app: ada-api-gateway
+    spec:
+      # Matches ada-remediation.yaml exactly, so all three Deployments in
+      # this directory state the same posture. UID 65532 is the `ada` user
+      # the three Dockerfiles in deploy/docker/ create with an explicit
+      # uid, rather than whatever `useradd --system` happens to allocate --
+      # a build-order-dependent UID would make this manifest non-deterministic.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ada-api-gateway
+          image: ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # Must stay identical to the default in
+            # crates/ada-m13-api-gateway/src/main.rs.
+            - name: ADA_GATEWAY_BIND
+              value: "0.0.0.0:8080"
+            - name: RUST_LOG
+              value: "info,ada_m13_api_gateway=debug"
+            # The binary's compiled-in casbin policy path is
+            # env!("CARGO_MANIFEST_DIR")/policies, which does not exist
+            # in the image. Without this the pod exits before it binds
+            # with "policy reload failed: policy file not found", and
+            # without this manifest the same crash happens in every
+            # deployment. Must match the path the image copies the
+            # policy files to in deploy/docker/ada-api-gateway.Dockerfile.
+            - name: ADA_RBAC_POLICY_DIR
+              value: "/etc/ada-rbac/policies"
+          # /health/live is the liveness probe target: it is the only
+          # handler that cannot depend on a backing service, so a
+          # dependency outage must not cause a restart loop.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          # Must exceed SHUTDOWN_GRACE (25s) in
+          # crates/ada-m13-api-gateway/src/server.rs, or the kubelet
+          # SIGKILLs the process before the drain finishes.
+          terminationGracePeriodSeconds: 30
+          # Same posture as deploy/k8s/ada-remediation.yaml, which already
+          # had it. This manifest and gm-console.yaml had no
+          # `securityContext` at all, which Trivy flagged as KSV014 (HIGH)
+          # in the `security scan` job -- the first time that step ever ran
+          # to completion, because cargo-deny had been failing first.
+          #
+          # readOnlyRootFilesystem needs somewhere writable: the process
+          # writes nothing, but /tmp is where any library that wants a
+          # scratch file (or a crash handler that wants a core) will try, and
+          # a read-only root turns that into a hard failure at the worst
+          # moment. An emptyDir at /tmp is the same pattern remediation uses.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ada-api-gateway
+  labels:
+    app: ada-api-gateway
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: ada-api-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# Keep one pod serving during voluntary disruptions (node drains,
+# upgrades). minAvailable=1 is safe with 2 replicas.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ada-api-gateway
+  labels:
+    app: ada-api-gateway
+    tier: backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ada-api-gateway

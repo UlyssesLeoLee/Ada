@@ -237,7 +237,7 @@ mod tests {
         c.add_edge(Edge::new(a, b)).expect("edge");
         assert_eq!(c.edges().len(), 1);
         c.remove_node(a).expect("remove");
-        assert!(c.edges().is_empty());
+        assert_eq!(c.edges().len(), 0);
     }
 
     #[test]

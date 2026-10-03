@@ -25,6 +25,19 @@ pub enum IdentityError {
     #[error("jwt signing failed")]
     JwtSigning,
 
+    /// RS256 signing is not implemented in this build, so `mint_jwt` and
+    /// `verify_jwt_stub` both fail closed with this variant instead of
+    /// producing or accepting a token whose signature segment is empty.
+    ///
+    /// This is deliberately distinct from [`IdentityError::JwtSigning`]
+    /// (a signer that ran and failed) and from
+    /// [`IdentityError::JwtVerification`] (a signature that was checked
+    /// and did not match). A caller triaging this variant needs to know
+    /// that the fix is "wire up a real signer", not "retry" and not
+    /// "check the JWKS".
+    #[error("jwt signing not implemented")]
+    JwtSigningUnavailable,
+
     #[error("jwt verification failed")]
     JwtVerification,
 
@@ -36,4 +49,20 @@ pub enum IdentityError {
 
     #[error("recovery code already used")]
     RecoveryRedeemed,
+
+    /// The session store is at its configured ceiling and no expired
+    /// entry could be reclaimed to make room.
+    ///
+    /// Reported instead of evicting a live session on purpose. Silently
+    /// logging a signed-in user out to protect the process is the worse
+    /// of the two failures: it is invisible, it is not attributable,
+    /// and it produces a support ticket that reads "I got logged out"
+    /// with no way to correlate it to load. Refusing the new session
+    /// fails loudly, at login, and the store drains on its own as
+    /// sessions reach their expiry.
+    ///
+    /// The number is a *ceiling*, not a target — see
+    /// [`crate::session::SessionStore::with_max_sessions`].
+    #[error("session store is full ({0} sessions)")]
+    SessionStoreFull(usize),
 }

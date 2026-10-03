@@ -1,4 +1,4 @@
-//! InMemoryScheduler — 业务 ada-m04 orchestration 的"形状相似"克隆.
+//! `InMemoryScheduler` — 业务 ada-m04 orchestration 的"形状相似"克隆.
 //!
 //! 状态机: `Pending -> Queued -> Running -> (Succeeded | Failed | Cancelled)`.
 //! 容量限制: 模拟业务版的 `Scheduler::with_capacity`.
@@ -54,7 +54,7 @@ pub struct ScheduledJob {
 struct Inner {
     capacity: usize,
     jobs: Vec<ScheduledJob>,
-    /// 简化: 把"pending + queued"都视为 in_flight, 实际业务版区分两者.
+    /// 简化: 把"pending + queued"都视为 `in_flight`, 实际业务版区分两者.
     in_flight: usize,
     /// FIFO 取数顺序 — 业务版用 priority + age, 这里仅 age.
     insertion: VecDeque<Uuid>,
@@ -84,7 +84,7 @@ impl InMemoryScheduler {
     }
 
     /// 入队. `forced_id` = None 时分配新 UUID; `initial_state` 通常是
-    /// `Pending` 或 `Queued` (Pending 表示尚未分配 in_flight 槽位).
+    /// `Pending` 或 `Queued` (Pending 表示尚未分配 `in_flight` 槽位).
     pub fn enqueue(
         &self,
         kind: impl Into<String>,
@@ -104,7 +104,10 @@ impl InMemoryScheduler {
         }
 
         if g.in_flight >= g.capacity
-            && matches!(initial_state, JobState::Pending | JobState::Queued | JobState::Running)
+            && matches!(
+                initial_state,
+                JobState::Pending | JobState::Queued | JobState::Running
+            )
         {
             return Err(SchedulerError::QueueFull(g.capacity));
         }
@@ -114,8 +117,10 @@ impl InMemoryScheduler {
             kind,
             state: initial_state,
         };
-        if !matches!(initial_state, JobState::Succeeded | JobState::Failed | JobState::Cancelled)
-        {
+        if !matches!(
+            initial_state,
+            JobState::Succeeded | JobState::Failed | JobState::Cancelled
+        ) {
             g.in_flight += 1;
         }
         g.jobs.push(job.clone());
@@ -174,20 +179,19 @@ impl InMemoryScheduler {
 }
 
 fn is_terminal(s: JobState) -> bool {
-    matches!(s, JobState::Succeeded | JobState::Failed | JobState::Cancelled)
+    matches!(
+        s,
+        JobState::Succeeded | JobState::Failed | JobState::Cancelled
+    )
 }
 
 fn assert_legal(from: JobState, to: JobState) -> Result<(), SchedulerError> {
-    use JobState::*;
+    use JobState::{Cancelled, Failed, Pending, Queued, Running, Succeeded};
     let ok = matches!(
         (from, to),
-        (Pending, Queued)
-            | (Pending, Cancelled)
-            | (Queued, Running)
-            | (Queued, Cancelled)
-            | (Running, Succeeded)
-            | (Running, Failed)
-            | (Running, Cancelled)
+        (Pending, Queued | Cancelled)
+            | (Queued, Running | Cancelled)
+            | (Running, Succeeded | Failed | Cancelled)
     );
     if ok {
         Ok(())

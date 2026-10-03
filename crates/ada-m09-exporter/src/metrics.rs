@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn registry_record_and_snapshot() {
         let r = MetricRegistry::new();
-        assert!(r.is_empty());
+        assert_eq!(r.len(), 0);
         r.record(Metric::now("a", MetricKind::Counter, 1.0, HashMap::new()));
         r.record(Metric::now("b", MetricKind::Gauge, 2.0, HashMap::new()));
         assert_eq!(r.len(), 2);
@@ -234,7 +234,7 @@ mod tests {
     fn registry_drops_invalid_metrics() {
         let r = MetricRegistry::new();
         r.record(Metric::now("", MetricKind::Counter, 1.0, HashMap::new()));
-        assert!(r.is_empty());
+        assert_eq!(r.len(), 0);
     }
 
     #[test]
@@ -243,6 +243,6 @@ mod tests {
         r.record(Metric::now("a", MetricKind::Counter, 1.0, HashMap::new()));
         assert_eq!(r.len(), 1);
         r.clear();
-        assert!(r.is_empty());
+        assert_eq!(r.len(), 0);
     }
 }

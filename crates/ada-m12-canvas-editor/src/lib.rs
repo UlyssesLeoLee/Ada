@@ -95,6 +95,31 @@ pub mod crdt_legacy_array;
 /// without ripping out v0.7.0 callers mid-cycle.
 /// **v0.7.1 deprecation notice**: this module is
 /// `#[deprecated]` and will be removed in **v0.8.0**.
+///
+/// # Do not keep this file in sync with `crdt.rs`
+///
+/// This file is a **frozen, verbatim copy** of `crdt.rs` as of
+/// v0.7.0: every one of its meaningful lines also appears in `crdt.rs`,
+/// and the only lines it lacks are three tests `crdt.rs` has since
+/// gained. Measured, not assumed: 1510 of 1510 meaningful lines
+/// contained.
+///
+/// That is intentional. The point of a transition backup is to be a
+/// snapshot of the old schema, not a second copy that tracks the new
+/// one — so the two are *supposed* to drift apart, and this file is not
+/// meant to receive fixes applied to `crdt.rs`.
+///
+/// The failure mode to avoid is the helpful one: someone finds the two
+/// files near-identical, concludes they should be kept in step, and
+/// copies `crdt.rs` over. That silently upgrades the v0.7.0 backup to
+/// whatever v0.7.2 looks like today, which is the one thing the backup
+/// must not be, and it does so without any test failing — the copy is
+/// valid Rust and valid Yrs.
+///
+/// If you need a bug fixed in the v0.7.0 schema, fix it here too, and
+/// say in the commit that the frozen snapshot changed. If you do not
+/// need to, leave it alone. When v0.8.0 arrives, delete the file and
+/// this note with it.
 #[cfg(feature = "legacy-nested")]
 #[deprecated(
     since = "0.7.1",
@@ -226,12 +251,12 @@ mod tests {
 
     #[test]
     fn version_not_empty() {
-        assert!(!VERSION.is_empty());
+        assert_ne!(VERSION, "");
     }
 
     #[test]
     fn name_not_empty() {
-        assert!(!NAME.is_empty());
+        assert_ne!(NAME, "");
     }
 
     #[test]

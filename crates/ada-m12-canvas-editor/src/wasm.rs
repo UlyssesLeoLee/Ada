@@ -144,7 +144,7 @@ impl WasmCanvas {
     #[wasm_bindgen(js_name = removeNode)]
     pub fn remove_node(&self, id_str: &str) -> Result<(), JsError> {
         let id = parse_id(id_str)?;
-        self.inner.remove_node(id).map_err(into_js)
+        self.inner.remove_node(id).map_err(|e| into_js(&e))
     }
 
     /// Move a node to `(x, y)`. Bumps version.
@@ -153,7 +153,7 @@ impl WasmCanvas {
         let id = parse_id(id_str)?;
         self.inner
             .move_node(id, Position::new(x, y))
-            .map_err(into_js)
+            .map_err(|e| into_js(&e))
     }
 
     /// Add a directed edge from `from_str` to `to_str`. Errors on
@@ -162,14 +162,16 @@ impl WasmCanvas {
     pub fn add_edge(&self, from_str: &str, to_str: &str) -> Result<(), JsError> {
         let from = parse_id(from_str)?;
         let to = parse_id(to_str)?;
-        self.inner.add_edge(Edge::new(from, to)).map_err(into_js)
+        self.inner
+            .add_edge(Edge::new(from, to))
+            .map_err(|e| into_js(&e))
     }
 
     /// Check the version matches `expected`. Used by the JS side for
     /// optimistic concurrency (see §3.6 of M-12 design).
     #[wasm_bindgen(js_name = checkVersion)]
     pub fn check_version(&self, expected: u64) -> Result<(), JsError> {
-        self.inner.check_version(expected).map_err(into_js)
+        self.inner.check_version(expected).map_err(|e| into_js(&e))
     }
 
     /// Serialize the entire canvas to a JSON string.
@@ -220,7 +222,10 @@ fn parse_id(s: &str) -> Result<NodeId, JsError> {
     Ok(NodeId(uuid))
 }
 
-fn into_js(e: CanvasError) -> JsError {
+/// By reference: `into_js` only reads the error to render it, so taking it
+/// by value forced every call site into a closure anyway and told clippy
+/// (correctly) that the move was pointless.
+fn into_js(e: &CanvasError) -> JsError {
     JsError::new(&e.to_string())
 }
 
