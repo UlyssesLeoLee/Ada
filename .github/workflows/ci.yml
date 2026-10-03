@@ -414,10 +414,23 @@ jobs:
       - name: Verify the installed SDK matches the pin
         # A pin that is not checked is not a pin. This fails loudly if the
         # action ever stops honouring `flutter-version`.
+        #
+        # `flutter --version --machine` prints pretty-printed JSON, so the
+        # key is `"frameworkVersion": "3.24.5"` with a space after the
+        # colon. The previous `grep -o '"frameworkVersion":"[^"]*"'`
+        # matched nothing, `got` came back empty, and the comparison below
+        # was `test "" = "3.24.5"` -- a gate that reports drift on every
+        # run and could never report agreement. `tr -d ' \n'` compacts the
+        # document first, and the empty result is now rejected outright
+        # rather than being silently unequal.
         run: |
           want="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
-          got="$(flutter --version --machine | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4)"
-          echo "pinned=$want installed=$got"
+          got="$(flutter --version --machine | tr -d ' \n' | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4)"
+          echo "pinned=$want installed=${got:-<none>}"
+          if [ -z "$got" ]; then
+            echo "::error::could not read frameworkVersion from 'flutter --version --machine'" >&2
+            exit 1
+          fi
           test "$got" = "$want" || {
             echo "::error::Flutter SDK drift: pinned $want but installed $got"
             exit 1
