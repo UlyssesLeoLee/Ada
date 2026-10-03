@@ -1,28 +1,44 @@
 # Build context for the service images in deploy/docker/.
 #
-# Without this, `COPY . .` drags the host's Cargo target directory (many GB
-# on a developer machine, and a different set of hashes than the container
-# will produce anyway) plus .git and the local .worktrees scratch lanes into
-# every image layer. The cache mount in the Dockerfile keeps the useful part
-# of the build cache without needing any of it in the context.
+# Scope rule, learned the hard way: exclude only what is provably huge and
+# provably not a build input. "Probably not needed by the build" is not a
+# safe assumption in this repository.
+#
+# The first version of this file excluded `docs/` and `*.md`. That broke
+# the gm-console image on its very first CI run:
+#
+#   error: couldn't read `crates/gm-console/src/../../../docs/commercial/TERMS.md`
+#   error: couldn't read `crates/gm-console/src/../../../docs/commercial/PRIVACY.md`
+#   error: could not compile `gm-console` (lib) due to 2 previous errors
+#
+# `routes.rs` reaches out of the crate with `include_str!` for six files:
+#
+#   LICENSE                                 (the /license endpoint)
+#   docs/commercial/TERMS.md                (the /terms endpoint)
+#   docs/commercial/PRIVACY.md              (the /privacy endpoint)
+#   apps/gm-console-web/dist/robots.txt
+#   apps/gm-console-web/dist/sitemap.xml
+#   apps/gm-console-web/dist/index.html     (the SPA fallback)
+#
+# A local `cargo build` cannot see any of that, because the files are right
+# there. Only a build from a filtered context fails, which is exactly what
+# the container build is. So: exclude the big, boring, provably-unused
+# things, and leave the rest of the tree alone.
 
+# Build output. Many GB on a developer machine, and a different set of
+# hashes than the container will produce anyway. The build stage uses a
+# cache mount for this, which keeps the useful part of the cache without
+# needing any of it in the context.
 target/
 **/target/
+
+# Local scratch lanes and version-control metadata.
 worktrees/
 .worktrees/
-
 .git/
 .github/
-.gitignore
-.gitattributes
 
-# Not inputs to any image: the deploy manifests are applied from the repo,
-# and the gates that read them run on the host, not in the build.
-deploy/k8s/
-docs/
-*.md
-
-# Editor / OS noise
+# Editor / OS noise.
 .idea/
 .vscode/
 .DS_Store
