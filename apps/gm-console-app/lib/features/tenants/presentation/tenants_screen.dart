@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../widgets/empty_state.dart'
-import '../../../widgets/error_view.dart'
+import '../../../widgets/empty_state.dart';
+import '../../../widgets/error_view.dart';
 import '../application/tenant_providers.dart';
 
 class TenantsScreen extends ConsumerWidget {

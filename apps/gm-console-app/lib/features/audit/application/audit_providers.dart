@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../api/endpoints/audit_api.dart'
+import '../../../api/endpoints/audit_api.dart';
 import '../../auth/data/auth_repository.dart';
 import '../data/audit_event_model.dart';
 
