@@ -280,15 +280,27 @@ jobs:
       # named here. Run once, on the `full` matrix entry, rather than
       # repeating an identical lint per feature.
       #
-      # The two `legacy-*` features are deliberately absent. They are
+      # `legacy-array` and `legacy-nested` are deliberately absent. They are
       # `#[deprecated]` modules whose *own* test code therefore trips
       # `deprecated` itself, so `-D warnings` is unsatisfiable there by
       # construction — no code change can fix it. Both are scheduled for
       # removal in v0.8.0; the `cargo check` matrix above still proves they
       # compile in the meantime.
-      - name: cargo clippy (ada-m12-canvas-editor, crdt + bevy + wasm)
+      #
+      # `legacy-lww` is NOT one of them: it is not `#[deprecated]`, and
+      # `cargo clippy -p ada-m12-canvas-editor --all-targets --features
+      # legacy-lww -- -D warnings` passes today. It was being left out only
+      # because the comment above used to lump all three together, so a
+      # linted-but-clean feature looked excluded for the same unsatisfiable
+      # reason. Verified, not assumed, before adding it here.
+      #
+      # Measured counts, so the next person can tell whether this comment
+      # is still true:
+      #   legacy-array   -> 2 `deprecated` + 5 `unused_import` in the same file
+      #   legacy-nested  -> 6 `deprecated`, all inside its own test module
+      - name: cargo clippy (ada-m12-canvas-editor, crdt + bevy + wasm + legacy-lww)
         if: matrix.feature == 'full'
-        run: cargo clippy -p ada-m12-canvas-editor --features full,crdt --all-targets --locked -- -D warnings
+        run: cargo clippy -p ada-m12-canvas-editor --features full,crdt,legacy-lww --all-targets --locked -- -D warnings
 
       # `crdt_sync` is a required-features test target, so `cargo check
       # --all-targets` above only proves it compiles. Running it is the
