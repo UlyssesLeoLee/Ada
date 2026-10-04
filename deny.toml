@@ -5,7 +5,15 @@
 # Per task brief: bans/licenses/sources/advisories.
 
 [graph]
-all-features = false
+# The whole workspace, every optional dependency included.
+#
+# With `all-features = false` this gate only ever saw the dependency graph
+# reachable from DEFAULT features, so the crates pulled in by
+# ada-telemetry's `prometheus`, ada-mock's `server`, ada-m12's `crdt` and
+# ada-rbac-casbin's `hand-rolled` were built and tested by CI while sitting
+# outside the licence, advisory and source checks entirely. That is the gate
+# being weaker than the thing it gates.
+all-features = true
 
 [advisories]
 version = 2
@@ -14,17 +22,20 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 # Every entry is an `unmaintained` advisory, not a vulnerability: there is
 # no vulnerable code here, only a dependency whose maintainer has gone
-# away. None of the three can be removed, because each is transitive under
-# a dependency the project is not replacing -- yrs, casbin and utoipa are
-# respectively the CRDT engine, the policy evaluator and the OpenAPI macro
-# for the gateway. `deny.toml` fails the build on them otherwise, so the
-# gate cannot go green until they are decided on the record, which is what
-# this list is. Drop an entry when the parent dependency is upgraded past
-# it, or when the advisory is withdrawn.
+# away. None of the five can be removed, because each is transitive under
+# a dependency the project is not replacing -- yrs, casbin, utoipa, egui and
+# bevy_winit are respectively the CRDT engine, the policy evaluator, the
+# OpenAPI macro for the gateway, the immediate-mode UI toolkit behind the
+# canvas editor, and the windowing layer under it. `deny.toml` fails the
+# build on them otherwise, so the gate cannot go green until they are
+# decided on the record, which is what this list is. Drop an entry when the
+# parent dependency is upgraded past it, or when the advisory is withdrawn.
 ignore = [
   { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained; rustsec records 'no safe upgrade is available'. Reached only through utoipa-gen -> utoipa -> ada-m13-api-gateway, and it is a build-time proc-macro, so it contributes no code to the shipped binary. Recheck when utoipa drops it." },
   { id = "RUSTSEC-2026-0215", reason = "smallstr is unmaintained, all versions affected, no fix. Transitive under yrs, the CRDT engine behind ada-m12-canvas-editor's `crdt` feature. No runtime exploit is described; the risk is that a future soundness fix will not be picked up." },
   { id = "RUSTSEC-2026-0249", reason = "smartstring is unmaintained, all versions affected, no fix. Transitive under rhai -> casbin -> ada-rbac-casbin, i.e. the policy engine on the gateway's authorization path. Revisit when casbin replaces its script engine." },
+  { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained. Reached only through accesskit_windows -> accesskit_winit -> bevy_winit -> bevy -> bevy_egui -> ada-m12-canvas-editor, and cargo reports it as a (proc-macro), so it is expanded at build time and contributes no code to any shipped binary. Only visible because the graph now includes all features." },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained, all versions affected, no fix. Chain: ttf-parser <- owned_ttf_parser <- ab_glyph <- epaint <- egui <- ada-m12-canvas-editor, i.e. the font-glyph parsing behind egui's text rendering. Revisit when egui drops ab_glyph or ab_glyph drops ttf-parser." },
 ]
 
 [bans]
@@ -57,6 +68,22 @@ allow = [
   # that already accepts MIT/Apache/BSD. Listed explicitly so the
   # exception is a decision on record rather than a silenced failure.
   "CDLA-Permissive-2.0",
+  # epaint 0.28 declares
+  #   (MIT OR Apache-2.0) AND OFL-1.1 AND LicenseRef-UFL-1.0
+  # The trailing two are the licences on the font files egui embeds for
+  # its default UI typeface, not on any code. OFL-1.1 (SIL Open Font
+  # License) and UFL-1.0 (Ubuntu Font Licence) are both permissive font
+  # licences: they grant use, embedding and redistribution and require
+  # only that the font itself not be sold on its own and that a modified
+  # font not reuse the reserved names. Neither imposes a copyleft or
+  # network-use obligation on the code that draws the glyphs, so they
+  # belong alongside MIT/Apache/BSD in an allow list that already accepts
+  # them. UFL-1.0 is a LicenseRef, so it is not an SPDX id and can only be
+  # allowed by exact string. Only visible because the graph now includes
+  # all features -- epaint arrives via egui <- bevy_egui <-
+  # ada-m12-canvas-editor's bevy_egui feature.
+  "OFL-1.1",
+  "LicenseRef-UFL-1.0",
 ]
 confidence-threshold = 0.8
 
