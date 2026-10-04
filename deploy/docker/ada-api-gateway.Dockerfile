@@ -33,19 +33,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --release --locked -p ada-m13-api-gateway --bin ada-api-gateway \
  && cp /src/target/release/ada-api-gateway /usr/local/bin/ada-api-gateway
 
-# The casbin model and policy. The binary's compiled-in default is
-# `env!("CARGO_MANIFEST_DIR")/policies`, which inside this build stage is
-# /src/crates/ada-rbac-casbin/policies -- a path that does not exist in the
-# runtime image. Without this copy and the env var below, the gateway
-# exits before it binds:
-#
-#   fatal: internal error: build rbac enforcer: policy reload failed:
-#   policy file not found: /src/crates/ada-rbac-casbin/policies/model.conf
-#
-# Both files are small text config, so baking them in is right: they are
-# part of the authorization model, not runtime state.
-COPY crates/ada-rbac-casbin/policies/ /etc/ada-rbac/policies/
-
 # --------------------------------------------------------------- runtime ----
 FROM debian:bookworm-slim AS runtime
 
@@ -69,6 +56,25 @@ RUN groupadd --gid 65532 ada \
  && useradd --uid 65532 --gid 65532 --create-home --home-dir /home/ada --shell /usr/sbin/nologin ada
 
 COPY --from=build /usr/local/bin/ada-api-gateway /usr/local/bin/ada-api-gateway
+
+# The casbin model and policy, in the RUNTIME stage.
+#
+# They were previously copied in the build stage, where they did nothing:
+# the runtime image is assembled from `debian:bookworm-slim` and copies in
+# only the binary, so every layer written to the build stage is discarded.
+# The gateway then started, read the env var set below, and died on a
+# directory that was never in the image:
+#
+#   fatal: internal error: build rbac enforcer: policy reload failed:
+#   policy file not found: /etc/ada-rbac/policies/model.conf
+#
+# A COPY into the wrong stage builds cleanly and fails only at run time.
+#
+# This path is only meaningful because PolicySet::bundled() prefers
+# ADA_RBAC_POLICY_DIR over its compiled-in default. Both files are small text
+# config and part of the authorization model rather than runtime state, so
+# baking them in is correct.
+COPY crates/ada-rbac-casbin/policies/ /etc/ada-rbac/policies/
 
 USER ada
 WORKDIR /home/ada
