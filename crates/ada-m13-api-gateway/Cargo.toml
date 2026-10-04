@@ -17,23 +17,73 @@ publish = false
 name = "ada_m13_api_gateway"
 path = "src/lib.rs"
 
+# Named `ada-api-gateway`, not after the package
+# (`ada-m13-api-gateway`), because the name is load-bearing: it is the
+# Service name in deploy/k8s/ada-api-gateway.yaml and the host half of
+# `GM_CONSOLE_UPSTREAM` in gm-console.yaml. Renaming the binary to match
+# the package would silently break the proxy's upstream resolution.
+[[bin]]
+name = "ada-api-gateway"
+path = "src/main.rs"
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
 
 # M-12 v0.5.0 server-side reconciliation smoke test. Registered
-# explicitly per the B2 lesson: when [lib] has a `path` and
-# tests/*.rs is non-trivial, [[test]] makes the target visible
-# to `cargo test --workspace`. The test pulls m12 with the
-# `server` feature (see [dev-dependencies]).
+# explicitly so it can carry the `ada-m12-canvas-editor` dev-dependency
+# story in one place. Note this is NOT a workaround for any Cargo
+# discovery bug: the "B2 lesson" comment that used to sit here claimed
+# Cargo drops `tests/*.rs` when `[lib]` sets `path`. That is false, and
+# it was disproved by checking six other crates in this workspace that
+# rely on the implicit discovery with an explicit `[lib] path` and
+# declare no `[[test]]` at all — every one of their test files builds.
 [[test]]
 name = "reconcile_smoke"
 path = "tests/reconcile_smoke.rs"
 
+[features]
+# Passthrough to the other RBAC evaluator. Does not change anything in
+# this crate's source; it exists so the authorization tests can run
+# against both evaluators.
+#
+# Why this matters: `ada-rbac-casbin` compiles exactly one of
+# `casbin_impl` or `hand_rolled` behind a `cfg`, and the two have
+# disagreed before -- about the resource type and about whether
+# `Delete` requires the ownership flag. `cargo test --workspace` builds
+# the default (casbin) side, and the existing CI step for
+# `hand-rolled` only runs that crate's own tests. So the gateway's
+# `/api/v1/canvases/*` authorization path was never executed against the
+# hand-rolled evaluator, even though the gateway is where a subject ->
+# role mistake would actually let a request through. This feature is
+# what makes that combination buildable.
+rbac-hand-rolled = ["ada-rbac-casbin/hand-rolled"]
+
 [dependencies]
-ada-core = { path = "../ada-core" }
+ada-core = { path = "../ada-core", version = "0.1.0" }
+# The security boundary. `ada-identity` supplies the opaque-session
+# store the bearer token is checked against; `ada-rbac-casbin` answers
+# the authorization question. Before this the crate depended on
+# neither, so `/api/*` had no credential check at all and the
+# authorization logic that lives in these two crates protected nothing
+# -- nothing called them.
+#
+# Deliberately *not* a JWT verifier. ada-identity has no asymmetric
+# crypto dependency, so `verify_jwt_stub` fails closed for every input
+# including well-formed ones. Sessions are opaque server-side tokens
+# (SessionStore::mint -> lookup), which needs no new crypto and gives
+# immediate revocation. The stateless-JWT path is future work and must
+# not be faked by decoding a token.
+ada-identity = { path = "../ada-identity", version = "0.1.0" }
+ada-rbac-casbin = { path = "../ada-rbac-casbin", version = "0.1.0" }
+# Not optional and not transitive: `Enforcer::enforce_typed` takes
+# `ada_m11_rbac_collab::ResourceType` and `Action` in its *public*
+# signature, so a caller has to name those types. Reaching them through
+# the public API of a dependency that merely re-exports them would mean
+# the gateway's authorization vocabulary could change under it.
+ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower = "0.5"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 utoipa = { version = "4", features = ["axum_extras"] }
@@ -41,6 +91,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
 # Phase 4 distributed-trace support: M-13's outbound
@@ -63,7 +114,6 @@ http-body-util = "0.1"
 # `cargo build` of the lib / bin). The `server` feature gates
 # the `reconcile_canvas_state` API; without it the test file
 # would not compile.
-ada-m12-canvas-editor = { path = "../ada-m12-canvas-editor", features = ["server"] }
-
+ada-m12-canvas-editor = { path = "../ada-m12-canvas-editor", features = ["server"], version = "0.1.0" }
 [lints]
 workspace = true

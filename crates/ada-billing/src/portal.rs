@@ -18,14 +18,54 @@ use crate::error::{BillingError, Result};
 /// A short-lived portal session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortalSession {
+    /// The single-use Stripe-hosted portal URL.
     pub url: String,
+    /// The Stripe customer the session belongs to.
     pub customer_id: CustomerId,
+    /// Unix epoch seconds after which the session is no longer served
+    /// from cache (Stripe's own TTL is 1 h).
     pub expires_at_unix: i64,
 }
 
+/// In-process portal-session cache.
+///
+/// Sessions carry Stripe's own 1 h TTL, and the read path already treats a
+/// lapsed entry as absent — it falls through to issuing a fresh one. So a
+/// lapsed entry is not just stale, it is *unusable*, and keeping it serves
+/// no purpose beyond consuming memory.
 #[derive(Debug, Default)]
 struct PortalCache {
     by_user: RwLock<std::collections::HashMap<String, PortalSession>>,
+}
+
+impl PortalCache {
+    /// Store `session`, first dropping every entry already past its TTL.
+    /// Returns the session so the caller can hand it straight back.
+    ///
+    /// Reclaiming here is safe in a way it would emphatically **not** be
+    /// for [`crate::webhook::IdempotencyStore`], and the difference is
+    /// worth stating because both are in-process tables that someone will
+    /// eventually try to bound the same way:
+    ///
+    /// * A portal session past `expires_at_unix` is already dead. The
+    ///   lookup at the top of `create_session` ignores it, so removing it
+    ///   changes nothing a caller can observe. The worst outcome of being
+    ///   wrong is one extra Stripe API call, which is exactly what that
+    ///   customer would have caused anyway.
+    /// * An idempotency key is *not* dead when its moment passes. It has
+    ///   to outlive Stripe's retry window or a late retry gets processed a
+    ///   second time. Bounding that table needs a retention decision, not
+    ///   a sweep.
+    ///
+    /// Sweeping on the write path only is deliberate: writes are the only
+    /// way this map grows, so sweeping anywhere else would cost a lock
+    /// acquisition and reclaim nothing.
+    fn store(&self, session: PortalSession, now: i64) -> PortalSession {
+        let mut w = self.by_user.write();
+        w.retain(|_, cached| cached.expires_at_unix > now);
+        w.insert(session.customer_id.0.clone(), session.clone());
+        session
+    }
 }
 
 /// Portal service: REST wrapper + tiny in-process cache.
@@ -38,6 +78,8 @@ pub struct PortalService {
 }
 
 impl PortalService {
+    /// Build a portal service with its own 10 s-timeout HTTP client
+    /// and an empty session cache.
     #[must_use]
     pub fn new(cfg: Arc<Config>, customers: CustomerService) -> Self {
         let http = Client::builder()
@@ -61,7 +103,10 @@ impl PortalService {
         email: &str,
     ) -> Result<PortalSession> {
         let customer = self.customers.get_or_create(user_id, email).await?;
-        let cid = customer.stripe_customer_id.clone().ok_or(BillingError::MalformedEnvelope)?;
+        let cid = customer
+            .stripe_customer_id
+            .clone()
+            .ok_or(BillingError::MalformedEnvelope)?;
         let now = chrono::Utc::now().timestamp();
         if let Some(cached) = self.cache.by_user.read().get(&cid.0).cloned() {
             if cached.expires_at_unix > now {
@@ -105,8 +150,10 @@ impl PortalService {
             customer_id: cid,
             expires_at_unix: now + 3600,
         };
-        self.cache.by_user.write().insert(session.customer_id.0.clone(), session.clone());
-        Ok(session)
+        // Storing also reclaims lapsed sessions. The entry this call is
+        // about to write is the only reason the map grew, so this is the
+        // one place a sweep can pay for itself.
+        Ok(self.cache.store(session, now))
     }
 }
 
@@ -116,15 +163,13 @@ mod tests {
     use crate::config::Config;
 
     fn portal_cfg() -> Arc<Config> {
-        Arc::new(
-            Config {
-                stripe_secret_key: "sk_test_dummy".into(),
-                stripe_webhook_secret: "whsec_dummy".into(),
-                stripe_api_version: "2025-08-27.basil".into(),
-                stripe_portal_return_url: Some("https://app.example.com/billing".into()),
-                stripe_base_url: "https://api.stripe.com/v1".into(),
-            },
-        )
+        Arc::new(Config {
+            stripe_secret_key: "sk_test_dummy".into(),
+            stripe_webhook_secret: "whsec_dummy".into(),
+            stripe_api_version: "2025-08-27.basil".into(),
+            stripe_portal_return_url: Some("https://app.example.com/billing".into()),
+            stripe_base_url: "https://api.stripe.com/v1".into(),
+        })
     }
 
     #[test]
@@ -147,5 +192,105 @@ mod tests {
         let registry = Arc::new(crate::customer::CustomerRegistry::new());
         let customers = CustomerService::new(Arc::clone(&cfg), registry);
         let _svc = PortalService::new(cfg, customers);
+    }
+
+    fn session(customer: &str, expires_at: i64) -> PortalSession {
+        PortalSession {
+            url: format!("https://billing.stripe.com/s/{customer}"),
+            customer_id: CustomerId(customer.to_owned()),
+            expires_at_unix: expires_at,
+        }
+    }
+
+    /// Insert WITHOUT sweeping.
+    ///
+    /// This exists to build the state the cache used to accumulate, and it
+    /// has to bypass `store` to do that: `store` reclaims on every write,
+    /// so seeding a lapsed entry through it would sweep the previous one
+    /// away and the fixture would never hold more than one entry. A test
+    /// that says "four entries are held" cannot get there by calling the
+    /// very method that makes fewer than four entries possible.
+    fn seed_lapsed(cache: &PortalCache, customer: &str, expires_at: i64) {
+        cache
+            .by_user
+            .write()
+            .insert(customer.to_owned(), session(customer, expires_at));
+    }
+
+    /// The cache used to insert and never remove, so it grew to one entry
+    /// per customer who had *ever* opened a portal and handed none of it
+    /// back — including the lapsed ones the lookup had already stopped
+    /// honouring.
+    ///
+    /// Asserting the count alone would be too weak: a sweep that dropped
+    /// the *live* entry too would also leave two, so the identities are
+    /// checked as well.
+    #[test]
+    fn storing_a_session_reclaims_the_lapsed_ones() {
+        let cache = PortalCache::default();
+        let now = 1_700_000_000i64;
+
+        seed_lapsed(&cache, "cus_stale_0", now - 1);
+        seed_lapsed(&cache, "cus_stale_1", now - 3_600);
+        seed_lapsed(&cache, "cus_stale_2", now - 10);
+        seed_lapsed(&cache, "cus_live", now + 3_600);
+        assert_eq!(
+            cache.by_user.read().len(),
+            4,
+            "precondition: four entries are held, three of them lapsed"
+        );
+
+        cache.store(session("cus_new", now + 3_600), now);
+
+        assert_eq!(
+            cache.by_user.read().len(),
+            2,
+            "the three lapsed sessions must be reclaimed, leaving the two \
+             live ones"
+        );
+        let w = cache.by_user.read();
+        assert!(
+            w.contains_key("cus_live"),
+            "a session inside its TTL must survive the sweep"
+        );
+        assert!(
+            w.contains_key("cus_new"),
+            "the session just written must be present"
+        );
+        for i in 0..3 {
+            assert!(
+                !w.contains_key(&format!("cus_stale_{i}")),
+                "a lapsed session must not be retained"
+            );
+        }
+    }
+
+    /// A session expiring exactly at `now` is gone; one a second short of
+    /// it is not. The comparison is `>`, and the boundary is the whole
+    /// reason a sweep cannot be coarser than "strictly greater".
+    #[test]
+    fn the_sweep_boundary_is_strict() {
+        let cache = PortalCache::default();
+        let now = 1_700_000_000i64;
+
+        seed_lapsed(&cache, "cus_expiring", now + 1);
+        seed_lapsed(&cache, "cus_gone", now);
+        seed_lapsed(&cache, "cus_fresh", now + 3_600);
+        assert_eq!(
+            cache.by_user.read().len(),
+            3,
+            "precondition: all three are held"
+        );
+
+        cache.store(session("cus_trigger", now + 3_600), now);
+        let w = cache.by_user.read();
+        assert!(
+            w.contains_key("cus_expiring"),
+            "expires_at_unix == now + 1 is still live"
+        );
+        assert!(
+            !w.contains_key("cus_gone"),
+            "expires_at_unix == now is not live; `>` is strict"
+        );
     }
 }

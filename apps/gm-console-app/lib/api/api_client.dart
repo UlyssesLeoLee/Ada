@@ -83,8 +83,10 @@ class ApiClient {
     } on TimeoutException catch (e) {
       throw ApiNetworkException('Request timed out', cause: e);
     } catch (e) {
-      throw ApiNetworkException('Network failure: ${e.runtimeType}',
-          cause: e);
+      throw ApiNetworkException(
+        'Network failure: ${e.runtimeType}',
+        cause: e,
+      );
     }
 
     final decoded = _safeDecode(response.body);
@@ -92,8 +94,9 @@ class ApiClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (decoded == null || decoded is! Map<String, dynamic>) {
         throw const ApiUnknownException(
-            'Expected JSON object body',
-            statusCode: null);
+          'Expected JSON object body',
+          statusCode: null,
+        );
       }
       return decoded;
     }
@@ -113,10 +116,12 @@ class ApiClient {
     final resolved = config.resolve(path);
     final base = Uri.parse(resolved);
     if (query == null || query.isEmpty) return base;
-    return base.replace(queryParameters: {
-      ...base.queryParameters,
-      ...query,
-    });
+    return base.replace(
+      queryParameters: {
+        ...base.queryParameters,
+        ...query,
+      },
+    );
   }
 
   Future<Map<String, String>> _buildHeaders(Object? body) async {

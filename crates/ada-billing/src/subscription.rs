@@ -21,16 +21,27 @@ use crate::plan::Plan;
 /// The seven Stripe subscription states (verbatim).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SubscriptionStatus {
+    /// `active` — the subscription is current and paid.
     Active,
+    /// `past_due` — the last invoice failed; entitlement is still
+    /// honored during the grace period.
     PastDue,
+    /// `canceled` — terminal; no entitlement is honored.
     Canceled,
+    /// `trialing` — inside the free trial window.
     Trialing,
+    /// `incomplete` — the first payment has not succeeded yet; not
+    /// entitled.
     Incomplete,
+    /// `incomplete_expired` — terminal; the first payment never
+    /// completed and the trial lapsed.
     IncompleteExpired,
+    /// `unpaid` — the invoice was written off; not entitled.
     Unpaid,
 }
 
 impl SubscriptionStatus {
+    /// The verbatim Stripe wire string for this state.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -76,10 +87,13 @@ impl core::str::FromStr for SubscriptionStatus {
 }
 
 /// One tenant's current subscription.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Subscription {
+    /// The tenant this subscription belongs to.
     pub tenant_id: TenantId,
+    /// The plan tier this subscription grants.
     pub plan: Plan,
+    /// The current state of the subscription.
     pub status: SubscriptionStatus,
     /// Stripe subscription id (`sub_…`). `None` for the Free plan.
     pub stripe_subscription_id: Option<String>,
@@ -88,6 +102,8 @@ pub struct Subscription {
 }
 
 impl Subscription {
+    /// The implicit Free-plan row for `tenant_id`: active, with no
+    /// Stripe subscription id and no period end.
     #[must_use]
     pub fn free(tenant_id: TenantId) -> Self {
         Self {
@@ -104,31 +120,26 @@ impl Subscription {
 /// is legal; `Err(BillingError::StripeApi(...))` otherwise. We
 /// reuse `StripeApi(409)` for illegal transitions to keep the
 /// variant count narrow.
-pub fn validate_transition(
-    from: SubscriptionStatus,
-    to: SubscriptionStatus,
-) -> Result<()> {
-    use SubscriptionStatus::*;
-    let ok = matches!(
-        (from, to),
-        // The four "in-progress" states can advance into the
-        // terminal/active states.
-        (Incomplete, Active)
-            | (Incomplete, IncompleteExpired)
-            | (Incomplete, Canceled)
-            | (Trialing, Active)
-            | (Trialing, Canceled)
-            | (Active, PastDue)
-            | (Active, Canceled)
-            | (Active, Unpaid)
-            | (PastDue, Active)
-            | (PastDue, Canceled)
-            | (PastDue, Unpaid)
-            | (Unpaid, Active)
-            | (Unpaid, Canceled)
-            // Self-loops are no-ops (e.g. webhook replays).
-            | _ if from == to
-    );
+pub fn validate_transition(from: SubscriptionStatus, to: SubscriptionStatus) -> Result<()> {
+    use SubscriptionStatus::{
+        Active, Canceled, Incomplete, IncompleteExpired, PastDue, Trialing, Unpaid,
+    };
+    // NOTE: the self-loop test is kept *outside* the `matches!` pattern
+    // on purpose. A match-arm guard (`_ if from == to`) binds to the
+    // whole arm, so folding it into the or-pattern would gate every
+    // listed transition behind `from == to` as well and reject all
+    // real progressions. Keep it as a separate boolean disjunct.
+    let ok = from == to
+        || matches!(
+            (from, to),
+            // The "in-progress" states can advance into the terminal /
+            // active states; `Active`, `PastDue` and `Unpaid` additionally
+            // move between themselves.
+            (Incomplete, Active | IncompleteExpired | Canceled)
+                | (Trialing | Unpaid, Active | Canceled)
+                | (Active, PastDue | Canceled | Unpaid)
+                | (PastDue, Active | Canceled | Unpaid)
+        );
     if ok {
         Ok(())
     } else {
@@ -144,15 +155,18 @@ pub struct SubscriptionRegistry {
 }
 
 impl SubscriptionRegistry {
+    /// Create an empty in-process registry.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Insert or replace the row for `sub.tenant_id`.
     pub fn upsert(&self, sub: Subscription) {
         self.by_tenant.write().insert(sub.tenant_id, sub);
     }
 
+    /// Look up the row for `tenant_id`, if any.
     #[must_use]
     pub fn get(&self, tenant_id: TenantId) -> Option<Subscription> {
         self.by_tenant.read().get(&tenant_id).cloned()
@@ -167,11 +181,16 @@ pub struct SubscriptionService {
 }
 
 impl SubscriptionService {
+    /// Build a service over a shared registry.
     #[must_use]
     pub fn new(registry: Arc<SubscriptionRegistry>) -> Self {
         Self { registry }
     }
 
+    /// Apply a state transition for `tenant_id` and persist the
+    /// resulting row. The transition is validated against the
+    /// previously stored status (see [`validate_transition`]) and
+    /// rejected with [`BillingError::StripeApi`] if it is illegal.
     pub fn apply_transition(
         &self,
         tenant_id: TenantId,
@@ -195,6 +214,7 @@ impl SubscriptionService {
         Ok(())
     }
 
+    /// The current row for `tenant_id`, if any.
     #[must_use]
     pub fn current(&self, tenant_id: TenantId) -> Option<Subscription> {
         self.registry.get(tenant_id)
@@ -250,11 +270,19 @@ mod tests {
     #[test]
     fn legal_transitions_are_allowed() {
         // Active <-> PastDue <-> Unpaid are all legal.
-        assert!(validate_transition(SubscriptionStatus::Active, SubscriptionStatus::PastDue).is_ok());
-        assert!(validate_transition(SubscriptionStatus::PastDue, SubscriptionStatus::Active).is_ok());
-        assert!(validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Canceled).is_ok());
+        assert!(
+            validate_transition(SubscriptionStatus::Active, SubscriptionStatus::PastDue).is_ok()
+        );
+        assert!(
+            validate_transition(SubscriptionStatus::PastDue, SubscriptionStatus::Active).is_ok()
+        );
+        assert!(
+            validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Canceled).is_ok()
+        );
         // Self-loop is always legal (replays).
-        assert!(validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Active).is_ok());
+        assert!(
+            validate_transition(SubscriptionStatus::Active, SubscriptionStatus::Active).is_ok()
+        );
     }
 
     #[test]

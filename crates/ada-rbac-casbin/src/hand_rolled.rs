@@ -1,27 +1,42 @@
-//! v0.4.0 hand-rolled RBAC + ABAC enforcer.
+//! Hand-rolled RBAC + ABAC enforcer.
 //!
-//! Preserved behind the `hand-rolled` Cargo feature so v0.4.0
-//! callers can pin to the old surface without pulling in casbin 2.x
-//! and notify. The casbin implementation lives in
-//! [`crate::casbin_impl`] (Linux/macOS only — see `Cargo.toml`)
-//! and is the default (feature off).
+//! Compiled only when the `hand-rolled` Cargo feature is on (see the
+//! `[features]` matrix in `Cargo.toml` for the other two
+//! configurations). It exists so the crate is usable on targets that
+//! cannot link `casbin` 2.x — notably Windows, where casbin's
+//! transitive `openssl-sys` needs system OpenSSL headers.
+//!
+//! ## Authorization model
+//!
+//! Both decisions this evaluator makes are delegated to
+//! `ada-m11-rbac-collab`, which is the single source of truth for the
+//! role model. Nothing about the matrix is duplicated here:
+//!
+//! - **Who** the subject is: [`resolve_role`] maps the caller's
+//!   subject token to exactly one [`Role`].
+//! - **What** they may do: [`HandRolledEnforcer::check`] asks
+//!   `role_permissions(role)` whether that role holds the specific
+//!   `(resource_type, action)` [`Permission`]. The resource type is
+//!   an explicit input, so a grant on one resource type never leaks
+//!   onto another.
+//!
+//! Anything that cannot be resolved to a role, or whose object string
+//! does not carry a known resource-type prefix, is denied. The
+//! evaluator never falls back to a default role.
 
 #![cfg(feature = "hand-rolled")]
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use ada_m11_rbac_collab::{
-    Action, CollaborationMap, ResourceType as M11ResourceType, Role,
+    role_permissions, Action, CollaborationMap, Permission, ResourceType, Role,
 };
 
 use crate::attrs::Attrs;
-use crate::error::{RbacCasbinError, Result};
+use crate::error::Result;
 use crate::policy::PolicySet;
 
-/// Hand-rolled evaluator. Mirrors the v0.4.0 skeleton semantics: a
-/// fixed role ladder (`Owner > Admin > Editor > Executor > Viewer`),
-/// per-role static permission matrix, ABAC tenant + ownership gates.
+/// Hand-rolled evaluator. See the module docs for the model.
 #[derive(Clone)]
 pub struct HandRolledEnforcer {
     inner: Arc<Inner>,
@@ -30,8 +45,6 @@ pub struct HandRolledEnforcer {
 #[derive(Debug)]
 struct Inner {
     set: PolicySet,
-    role_ladder: Vec<(Role, Role)>,
-    perms: HashMap<(Role, M11ResourceType), Vec<Action>>,
 }
 
 impl std::fmt::Debug for HandRolledEnforcer {
@@ -41,25 +54,34 @@ impl std::fmt::Debug for HandRolledEnforcer {
 }
 
 impl HandRolledEnforcer {
-    /// Build from a [`PolicySet`]. The static role ladder + permission
-    /// matrix are regenerated from the v0.4.0 source.
+    /// Build from a [`PolicySet`].
     pub fn from_policy_set(set: &PolicySet) -> Result<Self> {
         set.validate()?;
         Ok(Self {
-            inner: Arc::new(Inner {
-                set: set.clone(),
-                role_ladder: role_ladder(),
-                perms: build_perm_map(),
-            }),
+            inner: Arc::new(Inner { set: set.clone() }),
         })
     }
 
     /// v0.4.0 entry point — identical to `from_policy_set`.
+    ///
+    /// The `CollaborationMap` is not consulted here: m11 keys its
+    /// role grants by [`ada_m11_rbac_collab::ResourceId`] (a UUID),
+    /// while this API receives opaque object strings such as
+    /// `"canvas:abc"`, so there is no key to look the subject up by.
+    /// Resolving one would mean inventing a mapping from object string
+    /// to UUID, which this crate deliberately does not do.
     pub fn from_m11(set: &PolicySet, _m11: &CollaborationMap) -> Result<Self> {
         Self::from_policy_set(set)
     }
 
-    /// Synchronous enforcement — pure role + permission check.
+    /// Synchronous enforcement — role + `(resource type, action)`
+    /// permission lookup, gated by the ABAC ownership check.
+    ///
+    /// `user_id` is the caller's resolved role token, e.g.
+    /// `"role:owner"`. `object_id` carries the resource type as a
+    /// `"<kind>:<id>"` prefix, e.g. `"canvas:abc"` — the composite
+    /// form the v0.4.0 surface already used and the one
+    /// [`Self::enforce_typed`] builds.
     pub fn enforce(
         &self,
         user_id: &str,
@@ -68,33 +90,29 @@ impl HandRolledEnforcer {
         attrs: &Attrs,
         m11: Option<&CollaborationMap>,
     ) -> Result<bool> {
-        let roles = effective_roles_for(user_id, m11);
-        for role in roles {
-            if self.check(role, object_id, action, attrs)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        // Fail closed: an unresolvable subject or an object with no
+        // known resource type is a deny, not a default role.
+        let Some(role) = resolve_role(user_id, m11) else {
+            return Ok(false);
+        };
+        let Some(resource_type) = resource_type_of(object_id) else {
+            return Ok(false);
+        };
+        Ok(Self::check(role, resource_type, action, attrs))
     }
 
     /// Typed variant — same enforcement, m11 typed convenience.
     pub fn enforce_typed(
         &self,
         user_id: &str,
-        object_kind: M11ResourceType,
+        object_kind: ResourceType,
         object_id: &str,
         action: Action,
         attrs: &Attrs,
         m11: Option<&CollaborationMap>,
     ) -> Result<bool> {
         let composite = format!("{}:{}", object_kind.as_str(), object_id);
-        if !self
-            .enforce(user_id, &composite, action, attrs, m11)?
-        {
-            return Ok(false);
-        }
-        let _ = self.inner.perms.get(&(Role::Owner, object_kind));
-        Ok(true)
+        self.enforce(user_id, &composite, action, attrs, m11)
     }
 
     /// Return the bound [`PolicySet`].
@@ -103,132 +121,50 @@ impl HandRolledEnforcer {
         &self.inner.set
     }
 
-    fn check(
-        &self,
-        role: Role,
-        _object_id: &str,
-        action: Action,
-        attrs: &Attrs,
-    ) -> Result<bool> {
-        if matches!(action, Action::Delete) && !attrs.is_owner {
-            return Ok(false);
+    /// Does `role` hold `action` on `resource_type`?
+    ///
+    /// The lookup is keyed on the exact `(role, resource_type)` pair
+    /// via m11's `role_permissions`, so a role that holds `Write` on
+    /// Canvas is not granted `Write` on Workspace or Credential.
+    ///
+    /// An associated function rather than a method: the answer depends
+    /// only on the m11 matrix and the ABAC attributes, not on any state
+    /// this evaluator holds.
+    fn check(role: Role, resource_type: ResourceType, action: Action, attrs: &Attrs) -> bool {
+        // ABAC gate: destructive actions always require the ownership
+        // flag, independent of what the role ladder grants. The rule
+        // itself is shared with the casbin evaluator — see
+        // [`crate::contract::requires_ownership`].
+        if requires_ownership(action) && !attrs.is_owner {
+            return false;
         }
-        if role == Role::Owner {
-            return Ok(true);
-        }
-        for (high, low) in &self.inner.role_ladder {
-            if *high == role && self.role_allows(*low, action)? {
-                return Ok(true);
-            }
-            if *low == role && self.role_allows(*low, action)? {
-                return Ok(true);
-            }
-        }
-        if self.role_allows(role, action)? {
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
-    fn role_allows(&self, role: Role, action: Action) -> Result<bool> {
-        if role == Role::Owner {
-            return Ok(true);
-        }
-        for rt in [
-            M11ResourceType::Canvas,
-            M11ResourceType::Workspace,
-            M11ResourceType::Credential,
-        ] {
-            if let Some(actions) = self.inner.perms.get(&(role, rt)) {
-                if actions.contains(&action) {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
+        role_permissions(role).contains(&Permission::new(resource_type, action))
     }
 }
 
-fn effective_roles_for(_user_id: &str, _m11: Option<&CollaborationMap>) -> Vec<Role> {
-    // v0.4.0 skeleton: every authenticated user holds Owner through
-    // the role ladder; per-user grants are added in v0.5.0.
-    vec![
+/// Resolve a subject token to the single role it names.
+///
+/// The contract is the role token `"role:<name>"` documented on
+/// [`crate::enforcer::Enforcer::enforce`]; `Role::as_str` supplies the
+/// canonical names. Returns `None` for anything else, which makes
+/// [`HandRolledEnforcer::enforce`] deny. No default or fallback role
+/// is applied — a subject that does not name a role has no grants.
+fn resolve_role(subject: &str, _m11: Option<&CollaborationMap>) -> Option<Role> {
+    let name = subject.strip_prefix("role:")?;
+    [
         Role::Owner,
         Role::Admin,
         Role::Editor,
         Role::Executor,
         Role::Viewer,
     ]
+    .into_iter()
+    .find(|role| role.as_str() == name)
 }
 
-fn role_ladder() -> Vec<(Role, Role)> {
-    vec![
-        (Role::Owner, Role::Admin),
-        (Role::Admin, Role::Editor),
-        (Role::Editor, Role::Executor),
-        (Role::Executor, Role::Viewer),
-    ]
-}
-
-fn build_perm_map() -> HashMap<(Role, M11ResourceType), Vec<Action>> {
-    let mut m = HashMap::new();
-    let r = |a: &[Action]| a.to_vec();
-    m.insert(
-        (Role::Admin, M11ResourceType::Canvas),
-        r(&[
-            Action::Read,
-            Action::Write,
-            Action::Execute,
-            Action::Delete,
-            Action::ShareManage,
-        ]),
-    );
-    m.insert(
-        (Role::Admin, M11ResourceType::Workspace),
-        r(&[
-            Action::Read,
-            Action::Write,
-            Action::Execute,
-            Action::Delete,
-            Action::ShareManage,
-        ]),
-    );
-    m.insert(
-        (Role::Admin, M11ResourceType::Credential),
-        r(&[Action::Read, Action::Write, Action::Execute, Action::ShareManage]),
-    );
-    m.insert(
-        (Role::Editor, M11ResourceType::Canvas),
-        r(&[Action::Read, Action::Write, Action::Execute]),
-    );
-    m.insert(
-        (Role::Editor, M11ResourceType::Workspace),
-        r(&[Action::Read]),
-    );
-    m.insert(
-        (Role::Editor, M11ResourceType::Credential),
-        r(&[Action::Read]),
-    );
-    m.insert(
-        (Role::Executor, M11ResourceType::Canvas),
-        r(&[Action::Read, Action::Execute]),
-    );
-    m.insert(
-        (Role::Executor, M11ResourceType::Workspace),
-        r(&[Action::Read]),
-    );
-    m.insert(
-        (Role::Executor, M11ResourceType::Credential),
-        r(&[Action::Read]),
-    );
-    m.insert((Role::Viewer, M11ResourceType::Canvas), r(&[Action::Read]));
-    m.insert((Role::Viewer, M11ResourceType::Workspace), r(&[Action::Read]));
-    m.insert((Role::Viewer, M11ResourceType::Credential), r(&[Action::Read]));
-    m
-}
-
-#[allow(dead_code)]
-fn _ensure_compile() -> Result<()> {
-    let _ = RbacCasbinError::Internal("compile probe".into());
-    Ok(())
-}
+/// Extract the resource type from a `"<kind>:<id>"` object string.
+///
+/// Lives in [`crate::contract`] so the casbin adapter resolves object
+/// strings the same way — the two evaluators are mutually exclusive at
+/// the `cfg` level and cannot otherwise share this logic.
+use crate::contract::{requires_ownership, resource_type_of};

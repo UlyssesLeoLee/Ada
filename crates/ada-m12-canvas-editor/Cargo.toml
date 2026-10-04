@@ -27,29 +27,37 @@ path = "src/lib.rs"
 # 走 rlib,wasm-pack 才走 cdylib。
 crate-type = ["cdylib", "rlib"]
 
-# B2 lesson: Cargo 1.85+ silently drops integration test targets
-# declared only via the implicit `tests/*.rs` discovery when the [lib]
-# block also has an explicit `path = ...`. The `[[test]]` block makes
-# the test target explicit so `cargo test --workspace` actually runs
-# `tests/integration.rs`. Pre-applied here per the B2 worker retro.
+# The `[[test]]` blocks below are explicit declarations, not a
+# workaround. An earlier revision of this file claimed that "Cargo 1.85+
+# silently drops integration test targets declared only via the implicit
+# tests/*.rs discovery when the [lib] block also has an explicit
+# path", and cited the "B2 lesson" as the reason for declaring them.
+# That claim is false, and it was checked rather than assumed:
+# `cargo test -p <crate> --test <name> --no-run` builds the file in
+# every crate in this workspace that relies on the implicit discovery --
+# ada-identity (rfc6238_vectors, totp_smoke), ada-m03-data-flow-engine
+# (trace_smoke), ada-m10-tenant-middleware (trace_smoke), ada-mock
+# (aci_integration) and gm-console (api_proxy) -- all of which set an
+# explicit `[lib] path` and declare no `[[test]]` at all.
+#
+# Auto-discovery and explicit `[[test]]` declarations are additive, not
+# mutually exclusive; only `autotests = false` turns discovery off. The
+# declarations are kept because they also carry `required-features`,
+# which is what lets `crdt_sync` be skipped unless the `crdt` feature is
+# on. Keeping the blocks is fine; leaving a false explanation attached
+# to them is not, because the next person inherits the premise and
+# "fixes" something else with it.
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
 
-# B2 lesson (repeated for `crdt_sync`): explicit `[[test]]`
-# block so `cargo test --workspace` actually runs the
-# integration test under `tests/crdt_sync.rs` (Cargo 1.85+
-# silently drops tests/* when `[lib]` also has an explicit
-# `path = ...`). The test itself is feature-gated (only
-# meaningful with `--features crdt`); see the `#[cfg]`
-# at the top of `tests/crdt_sync.rs`.
 [[test]]
 name = "crdt_sync"
 path = "tests/crdt_sync.rs"
 required-features = ["crdt"]
 
 [dependencies]
-ada-core = { path = "../ada-core" }
+ada-core = { path = "../ada-core", version = "0.1.0" }
 # `tokio` baseline 是 wasm-friendly 子集(`macros,sync,time`)—
 # 这样 `--target wasm32-unknown-unknown` 直接可编。native
 # (含 CI default) 通过下面的 `[target.'cfg(not(...))']` 块

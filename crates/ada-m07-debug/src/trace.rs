@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(r.len(), 2);
         let drained = r.drain();
         assert_eq!(drained.len(), 2);
-        assert!(r.is_empty());
+        assert_eq!(r.len(), 0);
         assert!(!r.overflowed());
     }
 

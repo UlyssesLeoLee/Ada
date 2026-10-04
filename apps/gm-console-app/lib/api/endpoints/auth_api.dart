@@ -1,6 +1,10 @@
 // Auth endpoint wrapper — login, logout, refresh.
 
 import '../api_client.dart';
+// ApiUnauthorizedException lives in api_exception.dart, which api_client
+// imports but does not re-export, so throwing it here needs the import
+// spelled out. (`creation_with_non_type`: the name resolved to nothing.)
+import '../api_exception.dart';
 
 class LoginResult {
   const LoginResult({required this.token, required this.expiresAt});
@@ -24,7 +28,7 @@ class AuthApi {
     final body = await _client.postJson('/api/v1/auth/login', body: {
       'email': email,
       'password': password,
-    });
+    },);
     final token = body['token'] as String?;
     if (token == null || token.isEmpty) {
       throw const ApiUnauthorizedException(

@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/endpoints/pipelines_api.dart';
+import '../../../api/endpoints/pipelines_api.dart';
 import '../../auth/data/auth_repository.dart';
 import '../data/pipeline_model.dart';
 

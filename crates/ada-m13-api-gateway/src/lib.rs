@@ -7,28 +7,44 @@
 //! - [`AppState`] — per-request state shared across handlers
 //! - [`HealthCheck`] trait + [`MemoryHealthCheck`] default
 //! - [`ApiError`] with `IntoResponse` mapping
-//! - [`build_router`] with the four v0.1.0 endpoints:
-//!   - `GET /health` — JSON snapshot for dashboards
-//!   - `GET /health/live` — plain-text liveness probe
-//!   - `GET /health/ready` — readiness probe backed by [`HealthCheck`]
-//!   - `GET /api/v1/ping` — smoke endpoint (`pong: true`)
+//! - [`build_router`] with the endpoints below
 //!
-//! Production middleware (CORS / HSTS / JWT / tenant / RBAC) and the
-//! real authentication/authorization layer live in B3+. See
+//! ## Authentication and authorization
+//!
+//! `/health`, `/health/live` and `/health/ready` are unauthenticated,
+//! because a kubelet probe cannot carry a bearer token and a probe that
+//! 401s takes the pod out of service.
+//!
+//! Everything under `/api` requires `Authorization: Bearer <token>`,
+//! resolved by [`auth::Principal`] against
+//! `ada_identity::session::SessionStore`. The tenant comes from the
+//! server-side session and **never** from the client's `x-tenant-id`
+//! header — `gm-console` forwards that header verbatim, and nothing
+//! here reads it to make a decision. Authorization is answered by
+//! `ada-rbac-casbin` via [`auth::AuthContext::authorize`].
+//!
+//! There is no JWT verification. `ada_identity::mint::verify_jwt_stub`
+//! fails closed for every input because the crate has no asymmetric
+//! crypto dependency, and a decode-only "verifier" would let a caller
+//! mint their own `tenant` and `roles`. The stateless-JWT path is
+//! future work; it must not be faked.
+//!
+//! A freshly started pod has an empty session store and no login flow,
+//! so every `/api` request is a 401. That is the intended posture.
+//!
+//! CORS / HSTS remain unwired. See
 //! [`DOC-MOD-013`](../docs/modules/M-13-api-gateway.md) §3.1 for the
-//! full middleware chain and [`api/error-codes.md`](../docs/api/error-codes.md)
-//! for the canonical error-code mapping.
-//!
-//! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-13-api-gateway.md (DOC-MOD-013)
-//! ワークフロー: docs/architecture/08-workflow-overview.md
+//! intended full chain and `../docs/api/error-codes.md` for the
+//! canonical error-code mapping.
 
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
 
+pub mod auth;
 mod error;
 mod health;
 mod router;
+pub mod server;
 mod state;
 
 pub use error::{ApiError, Result};
@@ -53,12 +69,12 @@ mod tests {
 
     #[test]
     fn version_not_empty() {
-        assert!(!VERSION.is_empty());
+        assert_ne!(VERSION, "");
     }
 
     #[test]
     fn name_not_empty() {
-        assert!(!NAME.is_empty());
+        assert_ne!(NAME, "");
     }
 
     #[test]

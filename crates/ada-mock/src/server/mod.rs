@@ -1,4 +1,4 @@
-//! `server` feature 模块 — 简单的 TcpListener 风格 mock 服务器.
+//! `server` feature 模块 — 简单的 `TcpListener` 风格 mock 服务器.
 //!
 //! 4 能力层之第 2 层: HTTP / OTLP 拦截.
 //!
@@ -75,9 +75,8 @@ impl FakeOtlpServer {
         let join = thread::spawn(move || {
             // 单连接服务: accept 一次, 然后 exit. 适合"测试一次推送".
             while !closed_cl.load(std::sync::atomic::Ordering::Relaxed) {
-                let (stream, _) = match listener.accept() {
-                    Ok(p) => p,
-                    Err(_) => return,
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
                 };
                 if let Some(resp) = handle_one(stream, &rec) {
                     let _ = resp.shutdown(Shutdown::Write);
@@ -94,7 +93,8 @@ impl FakeOtlpServer {
 
     /// 主动关闭 (drop 也会自动关).
     pub fn close(mut self) {
-        self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         // 主动断连以让 accept 循环退出
         let _ = TcpStream::connect(self.addr);
         if let Some(j) = self.join.take() {
@@ -105,7 +105,8 @@ impl FakeOtlpServer {
 
 impl Drop for FakeOtlpServer {
     fn drop(&mut self) {
-        self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = TcpStream::connect(self.addr);
         if let Some(j) = self.join.take() {
             let _ = j.join();
@@ -139,9 +140,8 @@ fn handle_one(mut stream: TcpStream, rec: &Recorder) -> Option<TcpStream> {
             let body_start = idx + 4;
             let already = raw.len() - body_start;
             body.extend_from_slice(&raw[body_start..]);
-            let need = match content_length {
-                Some(c) => c,
-                None => break,
+            let Some(need) = content_length else {
+                break;
             };
             if already >= need {
                 break;
@@ -164,9 +164,7 @@ fn handle_one(mut stream: TcpStream, rec: &Recorder) -> Option<TcpStream> {
 
     rec.push(CapturedRequest { raw, body });
 
-    let _ = stream.write_all(
-        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-    );
+    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     Some(stream)
 }
 

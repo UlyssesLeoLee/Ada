@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(m.name, "a");
         assert_eq!(m.version, "0.1.0");
         assert_eq!(m.kind, PluginKind::Wasm);
-        assert!(m.capabilities.is_empty());
+        assert_eq!(m.capabilities.len(), 0);
     }
 
     #[test]

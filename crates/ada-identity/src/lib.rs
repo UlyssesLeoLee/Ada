@@ -1,4 +1,4 @@
-//! `ada-identity` — SAML 2.0 / OIDC RP + TOTP / WebAuthn / Passkey
+//! `ada-identity` — SAML 2.0 / OIDC RP + TOTP / `WebAuthn` / Passkey
 //! authentication crate for Ada v0.5.0.
 //!
 //! Implements the binding contract in
@@ -10,14 +10,15 @@
 //!   printed (per memory 2026-08-27).
 //! - [`jwks`] — JWKS endpoint exposing the RS256 public key.
 //! - [`mint`] — JWT minting (RS256, kid-tagged).
-//! - [`oidc`] — OpenID Connect Authorization Code + PKCE RP
+//! - [`oidc`] — `OpenID` Connect Authorization Code + PKCE RP
 //!   (`openidconnect = "3"`).
-//! - [`saml`] — SAML 2.0 SP: AuthnRequest generation + assertion
+//! - [`saml`] — SAML 2.0 SP: `AuthnRequest` generation + assertion
 //!   parsing (`samael = "0.0"`).
-//! - [`webauthn`] — WebAuthn RP: registration + authentication
+//! - [`webauthn`] — `WebAuthn` RP: registration + authentication
 //!   (`webauthn-rs = "0.6"`).
-//! - [`totp`] — RFC 6238 TOTP (`totp-rs = "5"`).
-//! - [`passkey`] — WebAuthn resident-key flow (re-export of webauthn).
+//! - [`totp`] — RFC 6238 TOTP, in-house HMAC (`hmac` + `sha1`/`sha2`),
+//!   verified against the published test vectors.
+//! - [`passkey`] — `WebAuthn` resident-key flow (re-export of webauthn).
 //! - [`recovery`] — single-use recovery code generation + redemption.
 //! - [`session`] — opaque session token + cookie management.
 //! - [`rate_limit`] — token-bucket rate limiter for `/login`.

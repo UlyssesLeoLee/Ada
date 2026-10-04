@@ -1,12 +1,151 @@
 # ada-remediation k8s deployment (v0.7.1)
 
 This directory contains a minimal k8s deployment for the
-`ada-remediation` binary built from `crates/ada-remediation/`.
+`ada-remediation` binary built from `crates/ada-remediation/`, plus the
+`ada-api-gateway` and `gm-console` services that make up the rest of
+the deployed topology.
 
 ## Files
 
+- `ada-api-gateway.yaml` — Deployment + Service + PodDisruptionBudget for the gateway
 - `ada-remediation.yaml` — ConfigMap + Secret (placeholders) + Deployment + Service + NetworkPolicy
-- `kustomization.yaml` — kustomize entry point
+- `gm-console.yaml` — Deployment + Service + HPA + PodDisruptionBudget for the web console
+- `kustomization.yaml` — kustomize entry point, and the single place
+  the image registry is named
+
+## The images cannot be built: there is no Dockerfile
+
+**Applying these manifests produces three Deployments that never start.**
+All three images are referenced, and none of them exists:
+
+```text
+ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
+ghcr.io/ulyssesleolee/ada-remediation:v0.7.1
+ghcr.io/ulyssesleolee/gm-console:v0.1.0
+```
+
+The repository contains **no Dockerfile for any of the three**, and none
+of the four workflows in `.github/workflows/` builds or pushes an image —
+there is no `docker` or `buildx` step anywhere in CI. So there is no
+reproducible build path for any image this directory references, and a
+fresh `kubectl apply -k deploy/k8s/` lands every pod in
+`ImagePullBackOff` with no local cause.
+
+Two details that make this awkward to diagnose:
+
+- The three services are Rust workspace members, so a build needs the
+  whole workspace, not one crate directory. `ada-remediation` in
+  particular only produces its binary with `--features bin`.
+- `gm-console` has no frontend at all in this repository — only `src`,
+  `tests` and `Cargo.toml`. `GM_CONSOLE_STATIC_DIR` has nothing to point
+  at, so the console serves no UI even once it is running.
+
+This is recorded rather than fixed here because writing three
+Dockerfiles that cannot be built is the same mistake as the webhook
+signing example this file used to carry: an artifact that looks right and
+fails on first use. The build needs a base image and a crate registry,
+and neither was reachable while this was written.
+
+### One registry, one tag format
+
+The three references used to disagree, which nothing flagged — each line
+is a valid image reference and each manifest reads fine alone:
+
+```text
+ghcr.io/ada-project/ada-api-gateway:0.1.0
+ghcr.io/ulysse/ada-remediation:v0.7.1     <- a second registry
+ghcr.io/ada-project/gm-console:0.1.0      <- and no `v` prefix
+```
+
+Neither original namespace matched the account that owns this repository
+(`git@github.com:UlyssesLeoLee/Ada.git`): `ada-project` is not a namespace
+that owner can push to, and `ulysse` reads like the username truncated. All
+three now point at `ghcr.io/ulyssesleolee/`, which is what a `docker push`
+from that account actually produces.
+
+`kustomization.yaml` now declares all three in an `images:` block, so a
+retarget is one edit (or `kustomize edit set image <name>=<ref>`), and
+`crates/ada-core/tests/deploy_images.rs` fails the build if they drift
+apart again. The manifests keep the full reference on purpose:
+`kubectl apply -f <file>` bypasses the kustomization, and a bare name
+there would silently resolve against the node's default registry.
+
+
+## The topology, and what it was not doing
+
+The request path is:
+
+```
+client -> gm-console (Service :80) -> /api/* -> ada-api-gateway (Service :8080)
+```
+
+`gm-console` is a reverse proxy in front of a static SPA. It forwards
+`/api/<rest>` to `$GM_CONSOLE_UPSTREAM` and forwards the client's
+`authorization` and `x-tenant-id` headers **verbatim**. Its source
+comment says "auth, rate limit and observability live in api-gateway",
+so the gateway is the security boundary by design.
+
+**That boundary did not exist until this manifest was added.** Until
+then the only two Services in this directory were `gm-console` and
+`ada-remediation`; the string `ada-api-gateway` appeared solely as an
+env value in `gm-console.yaml`, never as a Service. In-cluster DNS
+resolved no record for it, so every `/api/*` request through the only
+deployed service returned **502 BAD_GATEWAY**. The failure is silent in
+the sense that nothing in the build or the manifests fails — a
+reference to a service that does not exist is not a YAML error.
+
+## Authentication and authorization
+
+`/health`, `/health/live` and `/health/ready` are unauthenticated, and
+that is deliberate: a kubelet probe cannot carry a bearer token, and a
+probe that 401s takes the pod out of service while the API is healthy.
+
+Everything under `/api` requires `Authorization: Bearer <token>`:
+
+| Route | Auth | Authorization |
+|---|---|---|
+| `GET /health` | no | — |
+| `GET /health/live` | no | — |
+| `GET /health/ready` | no | — |
+| `GET /api/v1/ping` | bearer | none (smoke endpoint) |
+| `GET /api/v1/whoami` | bearer | none (echoes the principal) |
+| `GET /api/v1/canvases/:id` | bearer | `Read` on `canvas` |
+| `POST /api/v1/canvases/:id/run` | bearer | `Execute` on `canvas` |
+
+An unmatched path is a **404**, not a 401 — see the note on `fallback`
+in `crates/ada-m13-api-gateway/src/router.rs` for why that distinction
+is enforced by a test.
+
+### The token is an opaque server-side session, not a JWT
+
+`ada-identity` has no asymmetric crypto dependency, so
+`mint_jwt` and `verify_jwt_stub` both fail closed for **every** input.
+A verifier that merely *decodes* a token would let a caller mint their
+own `roles` and their own `tenant_id`, and `tenant_id` is the isolation
+key for the whole multi-tenant model. So the gateway uses
+`ada_identity::session::SessionStore` instead: `mint` → opaque token →
+`lookup` → `Session { user_id, tenant_id, roles, expires_at }`, with
+immediate revocation and no new crypto dependency. Stateless
+verification is future work and must not be faked by decoding.
+
+### The tenant is never taken from a header
+
+`gm-console` forwards the browser's `x-tenant-id` verbatim. The
+gateway ignores it for every decision. The tenant comes from the
+server-side session, so a client asserting a tenant it does not own
+changes nothing. This is pinned by two tests — one on `/whoami`, one
+on a business route — because a single test on the echo endpoint would
+not show that the business path is also safe.
+
+### A fresh pod answers 401 to everything
+
+`SessionStore` is process-local and in-memory, and **there is no login
+flow**, so nothing ever mints a session. Every `/api` request is a 401
+until a login endpoint exists. That is the correct posture — a backend
+that authorizes nothing yet must not pretend to authorize everyone — but
+it does mean this manifests are not yet a working product. The
+remaining gap is a login flow, and `SessionStore`'s in-memory state
+does not survive a restart.
 
 ## Prerequisites
 
@@ -88,32 +227,68 @@ kubectl -n observability get pods -l app.kubernetes.io/name=ada-remediation
 kubectl -n observability logs -l app.kubernetes.io/name=ada-remediation -f
 ```
 
-## Verifying HMAC + webhook
+## Verifying the webhook signature
 
-Once the pod is up, verify the webhook rejects unsigned
-requests:
+The scheme is **blake3 keyed-hash** over `timestamp || 0x00 || body`
+(see `crates/ada-remediation/src/auth.rs`) — *not* HMAC-SHA256. Python's
+stdlib `hmac`/`hashlib` therefore cannot produce a signature this server
+accepts, even when it is given the right secret and the right bytes. An
+earlier version of this file showed an `hmac.new(secret, TS.BODY, sha256)`
+example; every request signed that way was rejected.
+
+Produce the signature with the crate's own helper, `auth::sign_at`
+(also exposed as `LoggingClient::sign_request`):
+
+```rust
+let ts  = ada_remediation::auth::now_unix_secs().to_string();
+let sig = ada_remediation::auth::sign_at(secret.as_bytes(), ts.as_bytes(), &body);
+```
+
+The timestamp is *inside* the signed material, and that is load-bearing.
+A signature over the body alone makes a captured `(body, signature)` pair
+a permanent credential: the 5-minute window compares the **supplied**
+header against the server clock, so an attacker simply attaches a current
+timestamp and the window never expires for them. With the timestamp signed,
+refreshing the header invalidates the signature (`403`).
+
+Once the pod is up, verify the webhook rejects unsigned requests:
 
 ```bash
-# this should return 401
+# this should return 200 -- /health is unauthenticated
 kubectl -n observability exec -it deploy/ada-remediation -- \
-  wget -q -O - http://localhost:9100/healthz
-# /healthz is unauthenticated, expected to return 200
+  wget -q -O - http://localhost:9100/health
+# note: this service does NOT serve /healthz, which is what gm-console serves
 
 kubectl -n observability port-forward deploy/ada-remediation 9100:9100 &
 sleep 1
 
-# compute signature locally
-SECRET="<the value of REMEDIATION_WEBHOOK_SECRET>"
-TS=$(date +%s)
-BODY='{"alerts":[{"status":"firing","labels":{"alertname":"DiskSpaceFillingFast"}}]}'
-SIG=$(python3 -c "import hmac,hashlib,sys; print(hmac.new(b'$SECRET', b'$TS.$BODY', hashlib.sha256).hexdigest())")
-
+# signed request, with $SIG from auth::sign_at and $TS matching the
+# timestamp that was signed:
 curl -i -X POST http://localhost:9100/webhook/alertmanager \
   -H "X-Webhook-Signature: $SIG" \
   -H "X-Webhook-Timestamp: $TS" \
   -H "Content-Type: application/json" \
   -d "$BODY"
 ```
+
+Two failure modes are worth knowing, because the status codes differ:
+
+- `401` — missing/unparseable header, or the timestamp outside the window.
+- `403` — the signature did not match. This includes the replay case above.
+
+Two other things about this endpoint as it stands:
+
+- The service starts with **no runbooks**. The five runbooks do
+  exist, in `config/remediation/`, and `crates/ada-remediation`
+  loads them from there. But the Deployment mounts a ConfigMap
+  named `ada-remediation-runbooks` at that path, and that ConfigMap
+  is **referenced and never defined** in `deploy/k8s/`. Marked
+  `optional: true`, so the mount succeeds with an empty directory
+  and nothing warns. A validly signed alert is therefore accepted
+  and then matches zero actions — the service runs, answers its
+  probes, and remediates nothing.
+- `/health`, not `/healthz`, is the health route; see the
+  note in `ada-remediation.yaml`.
 
 ## Graceful shutdown
 
@@ -128,7 +303,16 @@ keeps at least one pod serving).
 
 - `/metrics` — Prometheus text format (no auth, gated by
   `NetworkPolicy` to `prometheus` namespace only)
-- `/healthz` — liveness + readiness (no auth)
+- `/health` — liveness + readiness (no auth). **This service serves
+  `/health`, not `/healthz`.** The three services in this directory do
+  not agree on the spelling: `gm-console` serves `/healthz`,
+  `ada-api-gateway` serves `/health/live` + `/health/ready`, and this
+  one serves `/health`. Each manifest has to name its own, and this
+  manifest used to name `gm-console`'s — which 404s, so readiness
+  never went green and liveness killed the container after ~35s. The
+  invariant is now pinned by a test in `ada-core`
+  (`probe_paths_match_the_routes_they_call`) that reads every manifest
+  and the corresponding router source together.
 - `/webhook/alertmanager` — Alertmanager v4 payload
   (HMAC-SHA256 signed)
 - `/remediation/trigger` — manual operator trigger
@@ -147,9 +331,17 @@ keeps at least one pod serving).
   runbooks in place, swap for a CSI-backed RWX volume or
   use a `Reloader` sidecar that restarts the pod on
   ConfigMap change.
-- Real HMAC-SHA256 via `blake3::keyed_hash` + manual hex
-  (not the IETF-standard `HMAC-SHA256`). Functionally
-  equivalent for webhook authentication (server holds
-  secret, client signs, server verifies) but a strict
-  compliance audit may flag it. v0.7.2 will switch to
-  standard HMAC-SHA256 once `hmac` + `sha2` crates ship.
+- The signature is `blake3::keyed_hash` with manual hex encoding,
+  not the IETF-standard HMAC-SHA256. Functionally equivalent for
+  webhook authentication (server holds the secret, client signs,
+  server verifies) but a strict compliance audit may flag it.
+  v0.7.2 will switch to standard HMAC-SHA256 once `hmac` + `sha2`
+  ship. Note that Python's stdlib `hmac`/`hashlib` cannot produce
+  a signature this server accepts today, so an external client
+  cannot be wired up without a small signing shim.
+- The signature covers `timestamp || 0x00 || body`, not the body
+  alone. A body-only signature made a captured request replayable
+  forever, because the replay window reads the header the caller
+  supplied. The cost is that the two parties must agree on the
+  timestamp: a client cannot sign once and send twice, and cannot
+  batch a queued payload with a stale clock.

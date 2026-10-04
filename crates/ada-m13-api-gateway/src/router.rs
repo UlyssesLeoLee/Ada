@@ -1,6 +1,9 @@
-//! Gateway router + the four canonical endpoints.
+//! Gateway router.
 //!
 //! ## Endpoints
+//!
+//! Unauthenticated, because a kubelet probe cannot carry a bearer token
+//! and a probe that 401s takes the pod out of service:
 //!
 //! - `GET /health`       — JSON snapshot for human / dashboard
 //!   consumption.
@@ -8,25 +11,45 @@
 //! - `GET /health/ready` — Readiness probe; 503 when the configured
 //!   [`HealthCheck`] returns [`HealthStatus::Unhealthy`](crate::health::HealthStatus::Unhealthy)
 //!   or an [`AdaError`], otherwise 200 with the verdict.
-//! - `GET /api/v1/ping`  — Lightweight smoke endpoint used by the
-//!   deployment pipeline (`pong: true`).
 //!
-//! See [`DOC-MOD-013`](../docs/modules/M-13-api-gateway.md) §3.1 for
-//! the full middleware chain (CORS / HSTS / JWT / tenant / RBAC) that
-//! production builds wrap around [`build_router`]. The v0.1.0 skeleton
-//! mounts only the four endpoints above; the middleware chain is added
-//! in B3+.
+//! Authenticated — `Authorization: Bearer <opaque session token>`:
+//!
+//! - `GET /api/v1/ping`  — Lightweight smoke endpoint (`pong: true`).
+//! - `GET /api/v1/whoami` — the resolved principal, so the trust model
+//!   is observable end-to-end rather than only asserted in tests.
+//! - `GET /api/v1/canvases/:canvas_id` — a business read, gated on
+//!   `Read` over `ResourceType::Canvas`.
+//! - `POST /api/v1/canvases/:canvas_id/run` — a business action gated on
+//!   `Execute` over the same resource. Kept separate from the read
+//!   because the two are the smallest pair of actions the bundled
+//!   policy actually distinguishes: `role:viewer` has a canvas `read`
+//!   row and no `execute` row, so a viewer gets a 200 from one and a
+//!   401 from the other. That is what makes these routes a test of the
+//!   authorization layer rather than of the authentication layer.
+//!
+//! The whole `/api` subtree is wrapped in one layer that resolves the
+//! principal, so a route added later cannot accidentally ship
+//! unauthenticated: it is mounted inside the layer, not beside it.
+//!
+//! Note the two are not the same guarantee. The layer proves a
+//! *credential* was presented; only the per-handler `require` call
+//! proves the policy permitted the *action*. Authentication without
+//! authorization is a 200 for every logged-in caller, which is the
+//! failure mode a single subtree layer cannot prevent on its own.
 
+use ada_m11_rbac_collab::{Action, ResourceType};
 use axum::{
-    extract::State,
+    extract::{Extension, FromRequestParts, Path, Request, State},
     http::StatusCode,
+    middleware::Next,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
 
 use crate::{
+    auth::{self, AuthContext, Principal},
     error::ApiError,
     health::{HealthStatus, MemoryHealthCheck},
     state::AppState,
@@ -81,21 +104,151 @@ struct Pong {
     pong: bool,
 }
 
+/// The resolved principal, echoed back.
+///
+/// Exists so the trust model can be observed: the `tenant` here comes
+/// from the server-side session, never from the client's `x-tenant-id`
+/// header, which this crate ignores.
+#[derive(Debug, Serialize)]
+struct Whoami {
+    user_id: String,
+    tenant_id: String,
+    roles: Vec<String>,
+}
+
 async fn ping_handler() -> Json<Pong> {
     Json(Pong { pong: true })
 }
 
-/// Build the gateway router with the four v0.1.0 endpoints mounted.
+async fn whoami_handler(Extension(principal): Extension<Principal>) -> Json<Whoami> {
+    Json(Whoami {
+        user_id: principal.user_id,
+        tenant_id: principal.tenant_id,
+        roles: principal.roles,
+    })
+}
+
+/// What a permitted business operation reports back.
+#[derive(Debug, Serialize)]
+struct Authorized {
+    /// Echoed so a caller can confirm which object the decision was
+    /// about — two different ids in the same session must not share a
+    /// decision.
+    object_id: String,
+    /// The action the policy actually permitted.
+    action: &'static str,
+    /// The tenant the decision was made in, which came from the
+    /// server-side session rather than any client header.
+    tenant_id: String,
+}
+
+/// A business read, gated on `Read` over the canvas resource.
+async fn get_canvas(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(canvas_id): Path<String>,
+) -> Result<Json<Authorized>, ApiError> {
+    auth::require(
+        &state.auth,
+        &principal,
+        ResourceType::Canvas,
+        &canvas_id,
+        Action::Read,
+    )?;
+    Ok(Json(Authorized {
+        object_id: canvas_id,
+        action: "read",
+        tenant_id: principal.tenant_id,
+    }))
+}
+
+/// A business action, gated on `Execute` over the canvas resource.
+async fn run_canvas(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(canvas_id): Path<String>,
+) -> Result<Json<Authorized>, ApiError> {
+    auth::require(
+        &state.auth,
+        &principal,
+        ResourceType::Canvas,
+        &canvas_id,
+        Action::Execute,
+    )?;
+    Ok(Json(Authorized {
+        object_id: canvas_id,
+        action: "execute",
+        tenant_id: principal.tenant_id,
+    }))
+}
+
+/// Resolve the bearer token for every route in this subtree and put the
+/// [`Principal`] in the request extensions.
 ///
-/// CORS / tracing layers are added in a future release; for now the
-/// function returns the bare router so that the integration tests
-/// can drive it with `tower::ServiceExt::oneshot`.
+/// A `from_request_parts` rejection is already an [`ApiError::Unauthorized`],
+/// so it maps straight to 401. Wrapping the whole `/api` subtree -- rather
+/// than each handler -- is the point: there is no way to add a route under
+/// `/api` and forget this.
+async fn require_principal(
+    Extension(auth): Extension<AuthContext>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let (mut parts, body) = request.into_parts();
+    let principal = Principal::from_request_parts(&mut parts, &auth).await?;
+    request = Request::from_parts(parts, body);
+    request.extensions_mut().insert(principal);
+    Ok(next.run(request).await)
+}
+
+/// 404 for a path no route matched.
+///
+/// Set **after** `merge(api)`, and deliberately not behind
+/// [`require_principal`].
+///
+/// `Router::layer` wraps `catch_all_fallback` as well as the routes,
+/// and `Fallback::merge` keeps the *incoming* router's fallback when
+/// both sides are the default one. So the `/api` layer, applied before
+/// the merge, was inherited as the whole router's fallback and every
+/// unmatched path in the gateway answered 401. That is not a security
+/// win — an unknown path returns no data either way — and it hides the
+/// one signal you want when a route is mounted with a typo: the 404.
+/// Assigning the fallback after the merge takes it back.
+async fn not_found() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        ApiError::NotFound("no such route".into()),
+    )
+}
+
+/// Build the gateway router.
+///
+/// `/health/*` is unauthenticated so kubelet probes work; everything
+/// under `/api` sits behind [`require_principal`].
 pub fn build_router(state: AppState) -> Router {
+    // Cloned once and reused: the middleware needs its own owned copy
+    // (`from_fn_with_state` takes `S` by value) and the extension layer
+    // needs another, and `state` itself is consumed by `with_state` at
+    // the end. Reading `state.auth` twice instead of moving it would
+    // use a partially-moved value.
+    let auth = state.auth.clone();
+    let api = Router::new()
+        .route("/api/v1/ping", get(ping_handler))
+        .route("/api/v1/whoami", get(whoami_handler))
+        .route("/api/v1/canvases/:canvas_id", get(get_canvas))
+        .route("/api/v1/canvases/:canvas_id/run", post(run_canvas))
+        .layer(axum::middleware::from_fn_with_state(
+            auth.clone(),
+            require_principal,
+        ));
+
     Router::new()
         .route("/health", get(health_handler))
         .route("/health/live", get(live_handler))
         .route("/health/ready", get(ready_handler))
-        .route("/api/v1/ping", get(ping_handler))
+        .merge(api)
+        .fallback(not_found)
+        .layer(Extension(auth))
         .with_state(state)
 }
 

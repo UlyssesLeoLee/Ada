@@ -11,7 +11,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::mocks::{InMemoryEvent, InMemoryEventBus, InMemoryScheduler, JobState, ScheduledJob, SchedulerError};
+use crate::mocks::{
+    InMemoryEvent, InMemoryEventBus, InMemoryScheduler, JobState, ScheduledJob, SchedulerError,
+};
 use crate::Result;
 
 // ---------------------------------------------------------------------------
@@ -51,11 +53,15 @@ impl EventBuilder {
         }
     }
 
+    /// 链式: 覆盖事件 payload.
+    #[must_use]
     pub fn with_payload(mut self, payload: serde_json::Value) -> Self {
         self.payload = payload;
         self
     }
 
+    /// 链式: 挂上 trace ID (用于断言扇出链路).
+    #[must_use]
     pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
         self.trace_id = Some(trace_id.into());
         self
@@ -88,11 +94,15 @@ impl JobBuilder {
         }
     }
 
+    /// 链式: 指定 job ID (否则入队时由调度器分配).
+    #[must_use]
     pub fn with_id(mut self, id: Uuid) -> Self {
         self.id = Some(id);
         self
     }
 
+    /// 链式: 指定入队初始状态 (默认 [`JobState::Pending`]).
+    #[must_use]
     pub fn starting_in(mut self, state: JobState) -> Self {
         self.initial_state = state;
         self
@@ -100,7 +110,10 @@ impl JobBuilder {
 
     /// 入队 — 调度器分配 ID, 返回 `ScheduledJob` 句柄.
     /// 错误用 `SchedulerError` 表示, 通过 `From` 桥接到 crate 顶级 `Result`.
-    pub fn enqueue(self, sched: &mut InMemoryScheduler) -> std::result::Result<ScheduledJob, SchedulerError> {
+    pub fn enqueue(
+        self,
+        sched: &mut InMemoryScheduler,
+    ) -> std::result::Result<ScheduledJob, SchedulerError> {
         sched.enqueue(self.kind, self.id, self.initial_state)
     }
 }
@@ -121,7 +134,7 @@ pub struct GoldenEnvelope {
 }
 
 impl GoldenEnvelope {
-    /// 校验 schema_version 落在受支持范围 (避免读到旧文件沉默通过).
+    /// 校验 `schema_version` 落在受支持范围 (避免读到旧文件沉默通过).
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != 1 {
             return Err(crate::MockError::FixtureParse(format!(

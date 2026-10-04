@@ -1,7 +1,16 @@
 ---
-# kustomize entry point for ada-remediation v0.7.1
+# kustomize entry point for the Ada platform (M-13 api-gateway,
+# ada-remediation, gm-console).
 #
 # Apply: kubectl apply -k deploy/k8s/
+#
+# Do NOT put a second `---` in this file. A leading `---` starts an
+# empty first YAML document, and kustomize reads the *first* document
+# -- so a comment block followed by another `---` made it read an empty
+# document and report `error: kustomization.yaml is empty`. The apply
+# command documented above had therefore never worked. Verified:
+# removing the second separator makes this render (484 lines of output
+# as of the commit that added the gate for it).
 #
 # SECRET HANDLING: the Secret in ada-remediation.yaml uses
 # stringData placeholders. Before `kubectl apply -k`,
@@ -14,24 +23,86 @@
 #        --namespace=observability`
 #      then `kubectl apply -k deploy/k8s/` will skip the
 #      placeholder Secret if the real one already exists.
----
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: observability
 
 resources:
+  - ada-api-gateway.yaml
   - ada-remediation.yaml
   - gm-console.yaml
 
+# Shared platform labels, applied to resource **metadata only**.
+#
+# `includeSelectors` is deliberately left off. With it on, kustomize
+# rewrites `spec.selector` / `podSelector` as well as labels, and it
+# *overwrites* values it finds. Verified by rendering this file
+# (`kubectl kustomize deploy/k8s`) before the change:
+#
+#   NetworkPolicy ada-remediation
+#     podSelector: {app.kubernetes.io/name: ada-platform, ...}
+#
+# The source says `app.kubernetes.io/name: ada-remediation`. The
+# transformer rewrote it to `ada-platform` -- a label every pod in this
+# directory carries -- so a policy written to restrict ingress to the
+# remediation webhook would have selected gm-console and ada-api-gateway
+# too. That is invisible in the source manifests and in any YAML lint;
+# it only exists in the rendered output, which is what actually gets
+# applied.
+#
+# `app.kubernetes.io/version` is excluded for the same reason: it is a
+# per-service value, and a shared entry overwrote ada-remediation's
+# `v0.7.1` with `v0.1.0` in 25 places. Same for
+# `app.kubernetes.io/component`, which cannot be expressed in one
+# `pairs` map at all -- see above.
+#
+# Each service's own `app:` label already gives every Deployment,
+# Service and PDB a unique selector, so nothing needs injecting.
 labels:
-  - includeSelectors: true
+  - includeSelectors: false
     pairs:
-      app.kubernetes.io/name: ada-platform
-      app.kubernetes.io/version: v0.1.0
       app.kubernetes.io/managed-by: kustomize
       app.kubernetes.io/part-of: ada-platform
-  - includeSelectors: true
-    pairs:
-      app.kubernetes.io/component: remediator
-      app.kubernetes.io/component: gm-console
+
+# Image references, declared once.
+#
+# These three services previously named their images inconsistently:
+#
+#   ghcr.io/ada-project/ada-api-gateway:0.1.0
+#   ghcr.io/ulysse/ada-remediation:v0.7.1     <- different registry
+#   ghcr.io/ada-project/gm-console:0.1.0      <- and a different tag style
+#
+# Two registries in one directory means two places to publish, two sets of
+# credentials, and a Deployment that pulls from whichever one happens to be
+# reachable. Nothing flagged it: each line is a well-formed image reference,
+# and the rendered output only shows the split if you read all three.
+#
+# Neither original namespace was this one either. `ada-project` is not the
+# GitHub owner (the remote is `UlyssesLeoLee/Ada`), and `ulysse` looks like
+# the username truncated, so no image here was publishable under the account
+# that owns the repository. The namespace is now the owner's, which is what
+# `docker push` would produce.
+#
+# The manifests carry the full reference so that `kubectl apply -f <file>`
+# -- which bypasses this file entirely -- still resolves the right image.
+# This block is the single override point on top of that: retarget every
+# image for another environment with one edit here, or
+# `kustomize edit set image <name>=<ref>`.
+#
+# `name:` deliberately omits the tag so it matches regardless of which tag
+# the manifest happens to carry.
+#
+# UNRESOLVED: no image here is buildable. There is no Dockerfile anywhere in
+# this repository, and no CI job that builds or pushes one, so all three
+# Deployments land in ImagePullBackOff. See deploy/k8s/README.md.
+images:
+  - name: ada-api-gateway
+    newName: ghcr.io/ulyssesleolee/ada-api-gateway
+    newTag: v0.1.0
+  - name: ada-remediation
+    newName: ghcr.io/ulyssesleolee/ada-remediation
+    newTag: v0.7.1
+  - name: gm-console
+    newName: ghcr.io/ulyssesleolee/gm-console
+    newTag: v0.1.0

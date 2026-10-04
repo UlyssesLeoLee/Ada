@@ -21,9 +21,21 @@ spec:
       labels:
         app: gm-console
     spec:
+      # Matches ada-remediation.yaml exactly, so all three Deployments in
+      # this directory state the same posture. UID 65532 is the `ada` user
+      # the three Dockerfiles in deploy/docker/ create with an explicit
+      # uid, rather than whatever `useradd --system` happens to allocate --
+      # a build-order-dependent UID would make this manifest non-deterministic.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: gm-console
-          image: ghcr.io/ada-project/gm-console:0.1.0
+          image: ghcr.io/ulyssesleolee/gm-console:v0.1.0
           ports:
             - containerPort: 8080
               name: http
@@ -45,6 +57,29 @@ spec:
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits:   { cpu: 500m, memory: 256Mi }
+          # Same posture as ada-remediation.yaml, which already had it. This
+          # manifest and ada-api-gateway.yaml had no `securityContext` at
+          # all, which Trivy flagged as KSV014 (HIGH) in the `security scan`
+          # job -- the first time that step ever completed, because
+          # cargo-deny had been failing first.
+          #
+          # The SPA is served from GM_CONSOLE_STATIC_DIR, which in the
+          # shipped manifests is unset, so nothing here reads the document
+          # root. If that is ever pointed at a path, it has to be a volume
+          # mount (read-only) rather than a write to the image filesystem,
+          # or the read-only root turns the console into a 500.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

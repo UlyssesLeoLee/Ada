@@ -30,13 +30,17 @@ impl core::fmt::Display for CustomerId {
 }
 
 /// A tenant's billing customer record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Customer {
+    /// The Ada user this Stripe customer belongs to.
     pub user_id: UserId,
+    /// The Stripe-side customer id, once one has been created.
+    /// `None` until the first successful Stripe call.
     pub stripe_customer_id: Option<CustomerId>,
 }
 
 impl Customer {
+    /// Build a customer record with no Stripe id yet.
     #[must_use]
     pub fn new(user_id: UserId) -> Self {
         Self {
@@ -53,23 +57,30 @@ pub struct CustomerRegistry {
 }
 
 impl CustomerRegistry {
+    /// Create an empty in-process registry.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Insert or replace the record for `customer.user_id`.
     pub fn upsert(&self, customer: Customer) {
         self.by_user.write().insert(customer.user_id, customer);
     }
 
+    /// Look up the record for `user_id`, if any.
     #[must_use]
     pub fn get(&self, user_id: UserId) -> Option<Customer> {
         self.by_user.read().get(&user_id).cloned()
     }
 
+    /// Return the stored record for `user_id`, creating an
+    /// id-less placeholder in the registry if none exists.
     pub fn ensure(&self, user_id: UserId) -> Customer {
         let mut w = self.by_user.write();
-        w.entry(user_id).or_insert_with(|| Customer::new(user_id)).clone()
+        w.entry(user_id)
+            .or_insert_with(|| Customer::new(user_id))
+            .clone()
     }
 }
 
@@ -83,13 +94,18 @@ pub struct CustomerService {
 }
 
 impl CustomerService {
+    /// Build a service with its own 10 s-timeout HTTP client.
     #[must_use]
     pub fn new(cfg: Arc<Config>, registry: Arc<CustomerRegistry>) -> Self {
         let http = Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("reqwest client build");
-        Self { cfg, http, registry }
+        Self {
+            cfg,
+            http,
+            registry,
+        }
     }
 
     /// Look up the local customer; lazily create + persist it on
@@ -163,7 +179,10 @@ mod tests {
         let mut c2 = c.clone();
         c2.stripe_customer_id = Some(CustomerId("cus_test_1".into()));
         reg.upsert(c2.clone());
-        assert_eq!(reg.get(uid).and_then(|c| c.stripe_customer_id), c2.stripe_customer_id);
+        assert_eq!(
+            reg.get(uid).and_then(|c| c.stripe_customer_id),
+            c2.stripe_customer_id
+        );
     }
 
     #[test]

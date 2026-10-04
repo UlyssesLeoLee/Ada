@@ -64,6 +64,46 @@ env:
 jobs:
 
   # ---------------------------------------------------------------------
+  # Resolve which signing lanes are armed.
+  #
+  # GitHub does NOT expose the `env` context to job-level `if:` (only
+  # `github`, `needs`, `inputs`, `vars`, `always`, etc.). Referencing
+  # `env.APPLE_P12_BASE64` in a job-level `if:` makes the whole workflow
+  # fail to parse, and every run dies with zero jobs.
+  #
+  # This cheap ubuntu job reads the secrets and republishes them as
+  # BOOLEAN outputs, which downstream job-level `if:` expressions may use.
+  # It exists so we keep the documented "skip the job rather than burn a
+  # macOS runner on a doomed import" behaviour without an invalid `if:`.
+  #
+  # Only booleans cross the job boundary — no secret material is echoed.
+  # ---------------------------------------------------------------------
+  resolve-signing-lanes:
+    name: resolve signing lanes
+    runs-on: ubuntu-latest
+    outputs:
+      ios_armed: ${{ steps.lanes.outputs.ios_armed }}
+      android_armed: ${{ steps.lanes.outputs.android_armed }}
+    steps:
+      - name: Detect which signing secrets are present
+        id: lanes
+        env:
+          APPLE_P12_BASE64: ${{ secrets.APPLE_P12_BASE64 }}
+          GM_CONSOLE_PLAY_UPLOAD_KEY: ${{ secrets.GM_CONSOLE_PLAY_UPLOAD_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_P12_BASE64:-}" ]; then
+            echo "ios_armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ios_armed=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${GM_CONSOLE_PLAY_UPLOAD_KEY:-}" ]; then
+            echo "android_armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "android_armed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------
   # TruffleHog diff scan — runs FIRST so any leaked secret in the diff aborts
   # the build before we burn 10 minutes compiling Flutter.
   # ---------------------------------------------------------------------
@@ -127,10 +167,13 @@ jobs:
   sign-and-pack-ios:
     name: sign + pack iOS
     runs-on: macos-14
-    needs: verify-no-secrets-leaked
+    needs:
+      - verify-no-secrets-leaked
+      - resolve-signing-lanes
     # Hard-gate: skip the job if the secret is empty / unset rather than
     # attempt an import that would fail with a less obvious error.
-    if: ${{ env.APPLE_P12_BASE64 != '' && inputs.run_sign_and_pack_ios != false }}
+    # `env` is not available here, so arming comes from resolve-signing-lanes.
+    if: ${{ needs.resolve-signing-lanes.outputs.ios_armed == 'true' && inputs.run_sign_and_pack_ios != false }}
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -142,6 +185,20 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ inputs.flutter_version }}
+
+      - name: Verify the installed SDK matches .flutter-version
+        # `flutter_version` is a workflow_dispatch input carrying its own
+        # default, so it can silently drift from the file its own
+        # description points at. Fail loudly rather than signing a
+        # release built with a different SDK than CI analysed.
+        run: |
+          want="$(tr -d '[:space:]' < apps/gm-console-app/.flutter-version)"
+          got="$(flutter --version --machine | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4)"
+          echo "dispatch input=${{ inputs.flutter_version }} pinned=$want installed=$got"
+          test "$got" = "$want" || {
+            echo "::error::Flutter SDK drift: .flutter-version says $want but $got was installed"
+            exit 1
+          }
 
       - name: Cache pub & build dirs
         uses: actions/cache@v4.1.2
@@ -193,8 +250,10 @@ jobs:
   sign-and-pack-android:
     name: sign + pack Android
     runs-on: ubuntu-latest
-    needs: verify-no-secrets-leaked
-    if: ${{ env.GM_CONSOLE_PLAY_UPLOAD_KEY != '' && inputs.run_sign_and_pack_android != false }}
+    needs:
+      - verify-no-secrets-leaked
+      - resolve-signing-lanes
+    if: ${{ needs.resolve-signing-lanes.outputs.android_armed == 'true' && inputs.run_sign_and_pack_android != false }}
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -277,9 +336,10 @@ jobs:
     needs:
       - verify-no-secrets-leaked
       - sign-and-pack-ios
+      - resolve-signing-lanes
     # Only run on tag pushes; never on workflow_dispatch (manual dispatch is
     # for dry-runs of the build, not the publish path).
-    if: ${{ startsWith(github.ref, 'refs/tags/mobile-v') && env.APPLE_P12_BASE64 != '' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/mobile-v') && needs.resolve-signing-lanes.outputs.ios_armed == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1

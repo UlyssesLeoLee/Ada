@@ -29,21 +29,23 @@ impl FixturePath {
         match self {
             Self::Relative(p) => {
                 let manifest = env!("CARGO_MANIFEST_DIR");
-                PathBuf::from(manifest).join("tests").join("fixtures").join(p)
+                PathBuf::from(manifest)
+                    .join("tests")
+                    .join("fixtures")
+                    .join(p)
             }
             Self::Absolute(p) => PathBuf::from(p),
         }
     }
 }
 
-/// 加载 GoldenEnvelope (含 schema_version 校验).
+/// 加载 `GoldenEnvelope` (含 `schema_version` 校验).
 pub fn load_envelope(path: &FixturePath) -> Result<GoldenEnvelope> {
     let p = path.resolve();
-    let raw = fs::read_to_string(&p).map_err(|_| {
-        MockError::FixtureNotFound(p.display().to_string())
-    })?;
-    let env: GoldenEnvelope = serde_json::from_str(&raw)
-        .map_err(|e| MockError::FixtureParse(e.to_string()))?;
+    let raw =
+        fs::read_to_string(&p).map_err(|_| MockError::FixtureNotFound(p.display().to_string()))?;
+    let env: GoldenEnvelope =
+        serde_json::from_str(&raw).map_err(|e| MockError::FixtureParse(e.to_string()))?;
     env.validate()?;
     Ok(env)
 }
@@ -51,9 +53,8 @@ pub fn load_envelope(path: &FixturePath) -> Result<GoldenEnvelope> {
 /// 加载 NDJSON (每行一条 JSON, 跳过空行与 `//` 注释).
 pub fn load_ndjson(path: &FixturePath) -> Result<Vec<serde_json::Value>> {
     let p = path.resolve();
-    let raw = fs::read_to_string(&p).map_err(|_| {
-        MockError::FixtureNotFound(p.display().to_string())
-    })?;
+    let raw =
+        fs::read_to_string(&p).map_err(|_| MockError::FixtureNotFound(p.display().to_string()))?;
     let mut out = Vec::new();
     for (i, line) in raw.lines().enumerate() {
         let trimmed = line.trim();

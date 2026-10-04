@@ -1,6 +1,25 @@
 [toolchain]
 # D-04 Bevy 0.14 互換性のため Rust 1.98+ を要求（v0.1.0 升版, per 523afda）
 # Rust 1.98.0 (本環境 host toolchain, 2026-08-18 stable) でビルド検証済み
-channel = "stable"
+#
+# channel は "stable" ではなく 1.98.0 に固定する。このファイルは rustup の
+# toolchain override なので、dtolnay/rust-toolchain action の
+# `toolchain: 1.98` より優先される。channel = "stable" のままにすると
+# CI は宣言通りの 1.98 ではなく最新の stable でビルドしており、pin は
+# 無効になっている。実際には wasm32 ジョブが
+# "error[E0463]: can't find crate for `std`" で落ちた — stable には
+# wasm32-unknown-unknown が入っていない。
+#
+# channel = "1.98.0": the pin is otherwise inert. A rustup toolchain file
+# overrides the `toolchain: 1.98` that every dtolnay/rust-toolchain step
+# in .github/workflows/ci.yml asks for, so CI has been building on
+# whatever `stable` happened to be. The wasm32 job proved it by failing
+# with "can't find crate for `std`" -- a `stable` toolchain installed with
+# profile = "minimal" and no wasm32 target.
+channel = "1.98.0"
 components = ["rustfmt", "clippy", "rust-src"]
+# The `wasm32 build` job checks --target wasm32-unknown-unknown. Listing it
+# here means rustup installs it on first use, so the job works on a
+# contributor's machine too and not only on a fresh runner.
+targets = ["wasm32-unknown-unknown"]
 profile = "minimal"

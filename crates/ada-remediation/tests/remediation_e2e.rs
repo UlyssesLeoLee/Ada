@@ -31,13 +31,14 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 /// v0.7.1 E2E helper. Builds a webhook request
-/// whose body is signed with [`E2E_WEBHOOK_SECRET`]
-/// and which carries a fresh `X-Webhook-Timestamp`.
-/// Mirrors the production wire format (raw body
-/// bytes, `X-Webhook-Signature`, `X-Webhook-Timestamp`).
+/// whose timestamp and body are signed with
+/// [`E2E_WEBHOOK_SECRET`], carrying a fresh
+/// `X-Webhook-Timestamp`. Mirrors the production
+/// wire format (raw body bytes, `X-Webhook-Signature`,
+/// `X-Webhook-Timestamp`).
 fn signed_webhook(method: &str, uri: &str, body: Vec<u8>) -> Request<Body> {
-    let sig = ada_remediation::auth::sign(E2E_WEBHOOK_SECRET.as_bytes(), &body);
     let ts = ada_remediation::auth::now_unix_secs().to_string();
+    let sig = ada_remediation::auth::sign_at(E2E_WEBHOOK_SECRET.as_bytes(), ts.as_bytes(), &body);
     Request::builder()
         .method(method)
         .uri(uri)
@@ -240,6 +241,88 @@ async fn webhook_executes_and_records_history() {
     assert_eq!(resp.outcomes.len(), 1);
     assert_eq!(store.history_len(), 1);
     assert!(store.is_in_cooldown("disk-space-low"));
+}
+
+#[tokio::test]
+async fn a_captured_signature_replayed_with_a_fresh_timestamp_is_rejected() {
+    // At the HTTP boundary, not just in `auth::verify_request` — the
+    // handler is what an attacker actually talks to.
+    //
+    // Capture one legitimate delivery's `(body, signature)`, then
+    // re-send exactly those bytes with a *refreshed* timestamp.
+    // Under a body-only signature this is accepted forever: the window
+    // check compares the supplied header against the server clock, so
+    // supplying a current one always satisfies it.
+    //
+    // The refresh is only 60s, deliberately well inside
+    // `REPLAY_WINDOW_SECS`. That is what makes this test mean anything.
+    // `verify_request` checks the window BEFORE the signature, and a
+    // replay timestamp far from now would be rejected there — so an
+    // "an hour later" variant of this test passes even against a
+    // body-only signature, and re-tests `webhook_rejects_expired_timestamp`.
+    // Inside the window, the signature binding is the only thing left
+    // that can reject the request.
+    //
+    // The expected status is 403, not 401: `map_auth_error` sends
+    // `Expired` to 401 and `InvalidSignature` to 403. So 403 is
+    // self-discriminating — it cannot be produced by the window check,
+    // which means this assertion cannot pass for the wrong reason.
+    let (app, _engine, store) = app_with_state();
+    let body = disk_alert_webhook_body();
+    let captured_at = ada_remediation::auth::now_unix_secs();
+    let captured_ts = captured_at.to_string();
+    let captured_sig = ada_remediation::auth::sign_at(
+        E2E_WEBHOOK_SECRET.as_bytes(),
+        captured_ts.as_bytes(),
+        &body,
+    );
+
+    // The honest request is accepted.
+    let ok = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/alertmanager")
+                .header("content-type", "application/json")
+                .header("x-webhook-signature", &captured_sig)
+                .header("x-webhook-timestamp", &captured_ts)
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200, "precondition: the first delivery works");
+    assert_eq!(store.history_len(), 1);
+
+    // The replay: same body, same signature, refreshed timestamp. 60s
+    // ahead of the captured one, so the window check passes on its own.
+    let replay_ts = (captured_at + 60).to_string();
+    let replay = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/alertmanager")
+                .header("content-type", "application/json")
+                .header("x-webhook-signature", &captured_sig)
+                .header("x-webhook-timestamp", &replay_ts)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        replay.status(),
+        403,
+        "a captured signature must not be replayable just by refreshing \
+         the timestamp, or the 5-minute window protects nothing. A 401 \
+         here would mean the window check rejected it, not the signature."
+    );
+    assert_eq!(
+        store.history_len(),
+        1,
+        "the replay must not have been processed"
+    );
 }
 
 #[tokio::test]

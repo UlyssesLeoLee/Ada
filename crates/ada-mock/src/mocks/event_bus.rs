@@ -1,4 +1,4 @@
-//! InMemoryEventBus — 业务 ada-m15 event-bus 的"形状相似"克隆.
+//! `InMemoryEventBus` — 业务 ada-m15 event-bus 的"形状相似"克隆.
 //!
 //! 接口形状 (publish / subscribe / recv) 与业务版本一致, 但**没有 glob
 //! topic match 优化** — 这里只支持精确 topic. 业务版本做 `*`/`#` 通配,
@@ -34,22 +34,12 @@ pub struct InMemoryEventBus {
     inner: Arc<Mutex<Inner>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Inner {
     next_seq: i64,
     subscribers: Vec<Subscriber>,
     /// 每个订阅者一个 FIFO 队列, publish 时扇出.
     queues: Vec<VecDeque<InMemoryEvent>>,
-}
-
-impl Default for Inner {
-    fn default() -> Self {
-        Self {
-            next_seq: 0,
-            subscribers: Vec::new(),
-            queues: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +68,10 @@ impl InMemoryEventBus {
         }
         let mut g = self.inner.lock();
         let id = SubscriberId(Uuid::new_v4());
-        g.subscribers.push(Subscriber { id, topic: topic.clone() });
+        g.subscribers.push(Subscriber {
+            id,
+            topic: topic.clone(),
+        });
         g.queues.push(VecDeque::new());
         Ok(id)
     }
@@ -142,7 +135,7 @@ impl InMemoryEventBus {
 
     /// 调试用: 复制当前每个订阅者队列长度.
     pub fn queue_depths(&self) -> Vec<usize> {
-        self.inner.lock().queues.iter().map(|q| q.len()).collect()
+        self.inner.lock().queues.iter().map(VecDeque::len).collect()
     }
 }
 
@@ -154,7 +147,9 @@ mod tests {
     fn subscribe_publish_recv_round_trip() {
         let bus = InMemoryEventBus::new();
         let sub = bus.subscribe("a.b").unwrap();
-        let ev = bus.publish("a.b", serde_json::json!({"k": 1}), None).unwrap();
+        let ev = bus
+            .publish("a.b", serde_json::json!({"k": 1}), None)
+            .unwrap();
         let got = bus.try_recv(sub).unwrap().expect("one event");
         assert_eq!(got.id, ev.id);
         assert_eq!(got.seq, 1);

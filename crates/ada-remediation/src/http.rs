@@ -456,7 +456,7 @@ fn map_auth_error(e: &AuthError) -> HttpError {
 mod tests {
     use super::*;
     use crate::action::{ActionStep, RemediationAction, Trigger};
-    use crate::auth::sign;
+    use crate::auth::sign_at;
     use axum::body::Body;
     use axum::http::{Request, StatusCode as AxStatus};
     use std::collections::BTreeMap;
@@ -515,8 +515,8 @@ mod tests {
     /// (rejection path) call `Request::builder()`
     /// themselves and bypass this helper.
     fn signed_request(method: &str, uri: &str, body: Vec<u8>) -> Request<Body> {
-        let sig = sign(TEST_SECRET, &body);
         let ts = crate::auth::now_unix_secs().to_string();
+        let sig = sign_at(TEST_SECRET, ts.as_bytes(), &body);
         Request::builder()
             .method(method)
             .uri(uri)
@@ -737,7 +737,15 @@ mod tests {
             alerts: vec![],
         })
         .unwrap();
-        let sig = sign(TEST_SECRET, &body);
+        // A real, correctly-signed header for the current time, so the
+        // only thing missing is the timestamp. An empty string here
+        // would also produce a 401, but for the wrong reason, and the
+        // test would stop isolating what it claims to isolate.
+        let sig = sign_at(
+            TEST_SECRET,
+            crate::auth::now_unix_secs().to_string().as_bytes(),
+            &body,
+        );
         let r = authed_app()
             .oneshot(
                 Request::builder()
@@ -764,8 +772,9 @@ mod tests {
             alerts: vec![],
         })
         .unwrap();
-        let sig = sign(TEST_SECRET, &body);
+
         let stale_ts = (crate::auth::now_unix_secs() - 600).to_string();
+        let sig = sign_at(TEST_SECRET, stale_ts.as_bytes(), &body);
         let r = authed_app()
             .oneshot(
                 Request::builder()
@@ -794,7 +803,8 @@ mod tests {
         })
         .unwrap();
         let different_body = b"{\"alerts\":[]}".to_vec();
-        let sig = sign(TEST_SECRET, &different_body);
+        let ts = crate::auth::now_unix_secs().to_string();
+        let sig = sign_at(TEST_SECRET, ts.as_bytes(), &different_body);
         let r = authed_app()
             .oneshot(
                 Request::builder()

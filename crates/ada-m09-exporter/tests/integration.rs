@@ -24,7 +24,7 @@ fn record_snapshot_clear_lifecycle() {
     let snap = r.snapshot();
     assert_eq!(snap.len(), 2);
     r.clear();
-    assert!(r.is_empty());
+    assert_eq!(r.len(), 0);
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn exporter_rejects_invalid_metric_in_snapshot() {
     let bad = Metric::now("", MetricKind::Counter, 1.0, HashMap::new());
     let err = exp.export(&[bad]).expect_err("invalid");
     assert!(matches!(err, ExporterError::InvalidMetric(_)));
-    assert!(exp.is_empty(), "failed export must not write");
+    assert_eq!(exp.len(), 0, "failed export must not write");
 }
 
 #[test]

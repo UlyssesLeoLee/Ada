@@ -162,6 +162,6 @@ mod tests {
         let ns = nodes::<2>();
         let a = ShardAssignment::assign(&ns, 4).expect("assign");
         let stranger = NodeId::new();
-        assert!(a.shards_of(stranger).is_empty());
+        assert_eq!(a.shards_of(stranger).len(), 0);
     }
 }

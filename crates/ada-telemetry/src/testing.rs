@@ -25,8 +25,12 @@ use crate::metrics::MetricsHandle;
 /// Ephemeral metrics handle bundled with a guard for safe
 /// teardown in tests.
 #[cfg(feature = "prometheus")]
+#[derive(Debug)]
 pub struct TestHandle {
-    /// Guard that owns the recorder's lifetime.
+    /// Reports whether installation succeeded. It does **not** own the
+    /// recorder: `PrometheusBuilder::install_recorder` installs the
+    /// exporter into the `metrics` crate's process-global recorder slot
+    /// and returns only a handle.
     pub guard: crate::metrics::MetricsGuard,
     /// Snapshot/render handle.
     pub handle: MetricsHandle,
@@ -47,10 +51,14 @@ impl TestHandle {
     }
 }
 
-/// Build a `TestHandle` with a fresh Prometheus recorder
-/// bound to `127.0.0.1:0` (the OS picks an ephemeral port).
+/// Build a `TestHandle` with a Prometheus recorder bound to
+/// `127.0.0.1:0` (the OS picks an ephemeral port).
 ///
-/// The returned guard's `Drop` impl shuts the listener down.
+/// Note the `metrics` crate allows a process-global recorder to be set
+/// only once, so a second call to this function returns `Err`. A test
+/// binary that needs several independent recorders cannot get them
+/// through this helper; the crate currently has no caller, and adding
+/// one is a real design decision rather than a mechanical change.
 #[cfg(feature = "prometheus")]
 pub fn test_recorder() -> Result<TestHandle> {
     let cfg = TelemetryConfig::new("ada-telemetry-test").with_prometheus_addr("127.0.0.1:0");
@@ -125,7 +133,7 @@ ada_app_y_total 2
 
     #[test]
     fn metric_names_handles_empty() {
-        assert!(metric_names("").is_empty());
-        assert!(metric_names("# only a comment\n\n").is_empty());
+        assert_eq!(metric_names("").len(), 0);
+        assert_eq!(metric_names("# only a comment\n\n").len(), 0);
     }
 }

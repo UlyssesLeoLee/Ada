@@ -59,7 +59,7 @@ fn three_clients_converge_to_same_state() {
             let mut node = CanvasNode::new(
                 NodeKind::Block,
                 Position::new(0, 0),
-                &format!("client-{i}-node-{j}"),
+                format!("client-{i}-node-{j}"),
             );
             node.id = ada_m12_canvas_editor::NodeId(uuid::Uuid::new_v4());
             insert_element(doc, &node).expect("insert");
@@ -100,7 +100,7 @@ fn three_clients_converge_to_same_state() {
 }
 
 /// v0.7.0: server has 1 element (in v0.5.0 `Canvas` shape),
-/// client has 1 element (in v0.7.0 YDoc shape). After
+/// client has 1 element (in v0.7.0 `YDoc` shape). After
 /// `reconcile_with_crdt` with a fresh `ClientId`, the
 /// merged state encodes both elements under the v0.7.0
 /// YMap-keyed-by-uuid schema.
@@ -140,10 +140,11 @@ fn reconcile_with_server_canvas_preserves_client_additions() {
         let mut live = 0usize;
         for (_k, v) in elements.iter(&txn) {
             if let Value::YMap(m) = v {
+                // An element with no `alive` key counts as alive: only an
+                // explicit `alive: false` tombstones it.
                 let alive = m
                     .get(&txn, "alive")
-                    .map(|x| matches!(x, Value::Any(yrs::any::Any::Bool(true))))
-                    .unwrap_or(true);
+                    .is_none_or(|x| matches!(x, Value::Any(yrs::any::Any::Bool(true))));
                 if alive {
                     live += 1;
                 }

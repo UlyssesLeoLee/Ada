@@ -97,7 +97,9 @@ impl AdminApi {
             is_owner: is_owner.into(),
         };
         let mut w = self.overrides.write();
-        if w.iter().any(|p| p.sub == o.sub && p.obj == o.obj && p.act == o.act && p.tenant == o.tenant) {
+        if w.iter()
+            .any(|p| p.sub == o.sub && p.obj == o.obj && p.act == o.act && p.tenant == o.tenant)
+        {
             return Ok(false);
         }
         w.push(o);
@@ -114,7 +116,13 @@ impl AdminApi {
     ) -> Result<bool> {
         let mut w = self.overrides.write();
         let before = w.len();
-        w.retain(|p| !(p.sub == sub && p.obj == obj && p.act == act && p.tenant == tenant && p.is_owner == is_owner));
+        w.retain(|p| {
+            !(p.sub == sub
+                && p.obj == obj
+                && p.act == act
+                && p.tenant == tenant
+                && p.is_owner == is_owner)
+        });
         Ok(w.len() < before)
     }
 

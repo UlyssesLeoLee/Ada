@@ -103,12 +103,34 @@ impl AlertEvent {
     }
 
     /// Convenience: render `{{ $labels.X }}` style template
-    /// references against the current label bag. Used by
-    /// `ActionStep::HttpCall` and `ActionStep::NotifySlack`.
+    /// references against the current label bag.
     ///
     /// Unknown `{{ $labels.X }}` placeholders are left in place
     /// rather than dropped — this makes it obvious in the
     /// destination message that a label was missing.
+    ///
+    /// # Currently called from nowhere in production code
+    ///
+    /// This used to be documented as "Used by `ActionStep::HttpCall` and
+    /// `ActionStep::NotifySlack`". That is not true: neither calls it, and
+    /// a runbook containing `{{ $labels.service }}` in a Slack message
+    /// sends the literal placeholder. The steps interpolate through their
+    /// own formatting instead.
+    ///
+    /// It is left in place and kept tested because it is the obvious way to
+    /// add label substitution to those steps — and the property to preserve
+    /// when doing so is that it is used for *messages and URLs only*.
+    ///
+    /// It must never be used to build an `ActionStep::RunCommand` command
+    /// or argument. Label values are chosen by whoever posts to the
+    /// webhook, so interpolating them into a command line is arbitrary
+    /// code execution. The two variants that are allowed to interpolate
+    /// cannot do that kind of damage, which is exactly what makes the
+    /// difference worth stating rather than leaving to be rediscovered.
+    ///
+    /// `crates/ada-core/tests/remediation_command_boundary.rs` fails if
+    /// `render_template` starts being called from the engine's command
+    /// path.
     #[must_use]
     pub fn render_template(&self, template: &str) -> String {
         let mut out = template.to_string();
