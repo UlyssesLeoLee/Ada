@@ -245,6 +245,18 @@ struct Lane {
     features: Vec<String>,
     all_targets: bool,
     source: String,
+    /// Did the raw command reference a `${{ matrix.* }}` expression?
+    ///
+    /// This is the only reliable way to tell a matrix lane from a
+    /// hand-written one, and the gate got it wrong for a long time by
+    /// proxying on `features.len() > 2` instead. That proxy happened to
+    /// work only while the hand-written m12 clippy lane named exactly two
+    /// features (`full,crdt`); adding a third to it silently reclassified
+    /// the lane as a matrix lane and the gate began failing on correct
+    /// configuration. Feature count is a number that changes when someone
+    /// does something unrelated; whether the command interpolates a
+    /// matrix entry is a property of the command.
+    uses_matrix: bool,
 }
 
 /// Feature list of one command, with `${{ matrix.<key> }}` expanded.
@@ -352,6 +364,7 @@ fn cargo_lanes(root: &Path) -> Vec<Lane> {
                 features,
                 all_targets: command.contains("--all-targets"),
                 source: format!("{}: {}", file.display(), t),
+                uses_matrix: t.contains("${{"),
             });
         }
     }
@@ -473,14 +486,18 @@ fn matrix_expansion_is_actually_resolved() {
         );
     }
 
+    // The matrix lane is identified by the command interpolating a matrix
+    // entry, not by how many features it resolved to. The earlier
+    // `features.len() > 2` proxy broke the moment a hand-written m12 lane
+    // named a third feature.
     let matrix_lanes: Vec<&Lane> = lanes
         .iter()
         .filter(|l| l.crate_name.as_deref() == Some("ada-m12-canvas-editor"))
-        .filter(|l| l.features.len() > 2)
+        .filter(|l| l.uses_matrix)
         .collect();
     assert!(
         !matrix_lanes.is_empty(),
-        "no ada-m12-canvas-editor lane resolved to more than two features; \
+        "no ada-m12-canvas-editor lane interpolates a matrix entry; \
          the m12 matrix (10 entries) is not being expanded"
     );
     for lane in &matrix_lanes {
@@ -489,6 +506,21 @@ fn matrix_expansion_is_actually_resolved() {
             "matrix lane resolved to {} features, expected the 10 declared in \
              the matrix: {}",
             lane.features.len(),
+            lane.source
+        );
+    }
+
+    // A hand-written lane is not required to name all ten, and saying so
+    // would be wrong: `full,crdt` is a deliberate combination, not a
+    // shrunken matrix. This is the assertion the old proxy could not make.
+    for lane in lanes
+        .iter()
+        .filter(|l| l.crate_name.as_deref() == Some("ada-m12-canvas-editor"))
+        .filter(|l| !l.uses_matrix)
+    {
+        assert!(
+            !lane.features.is_empty(),
+            "hand-written m12 lane names no features at all: {}",
             lane.source
         );
     }
