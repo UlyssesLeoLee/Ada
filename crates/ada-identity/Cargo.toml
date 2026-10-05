@@ -32,6 +32,21 @@ path = "src/lib.rs"
 # (SHA-256, base32, base64url) and the `reqwest` HTTP client is
 # replaced with the api-gateway's middleware for outbound calls.
 
+[features]
+default = []
+# `inproc-sessions` restores the per-process session store
+# (`session::SessionStore`). It is OFF by default and must stay off in a
+# production build: a session minted in one process is unknown to the
+# next one, so a deployment that accepts it logs users out on every
+# request that lands on a different replica. Production uses
+# `shared_session::SharedSessionStore`.
+#
+# It is a feature rather than a `#[cfg(test)]`-only item so that another
+# crate's *tests* can use the double: enable it from that crate's
+# [dev-dependencies] and it applies to its test targets only, not to its
+# normal build.
+inproc-sessions = []
+
 [dependencies]
 ada-core = { path = "../ada-core", version = "0.1.0" }
 ada-m11-rbac-collab = { path = "../ada-m11-rbac-collab", version = "0.1.0" }
