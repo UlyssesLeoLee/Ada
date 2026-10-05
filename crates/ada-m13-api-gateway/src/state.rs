@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::auth::AuthContext;
 use crate::health::HealthCheck;
+use crate::login::{CredentialDirectory, LoginService};
 
 /// State held by every gateway request handler.
 #[derive(Clone)]
@@ -25,6 +26,14 @@ pub struct AppState {
     /// which is why this is state rather than a module-level global:
     /// tests must be able to build an isolated pair.
     pub auth: AuthContext,
+    /// Backing `POST /api/v1/auth/login`.
+    ///
+    /// The only thing in the process that mints a session, so it is the
+    /// one place the "empty store denies everything" invariant can be
+    /// lifted. It defaults to an empty [`CredentialDirectory`], which
+    /// keeps that invariant for every construction that does not
+    /// configure credentials — see [`Self::with_login`].
+    pub login: Arc<LoginService>,
 }
 
 impl core::fmt::Debug for AppState {
@@ -33,6 +42,9 @@ impl core::fmt::Debug for AppState {
             .field("name", &self.name)
             .field("db", &"<dyn HealthCheck>")
             .field("auth", &self.auth)
+            // `LoginService`'s own `Debug` is hand-written and redacts,
+            // so this cannot surface a configured credential.
+            .field("login", &self.login)
             .finish()
     }
 }
@@ -53,6 +65,7 @@ impl AppState {
             name: name.into(),
             db,
             auth: AuthContext::bootstrap()?,
+            login: Arc::new(LoginService::new(Arc::new(CredentialDirectory::new()))),
         })
     }
 
@@ -65,7 +78,21 @@ impl AppState {
             name: name.into(),
             db,
             auth,
+            login: Arc::new(LoginService::new(Arc::new(CredentialDirectory::new()))),
         }
+    }
+
+    /// Install the credential directory the login endpoint reads.
+    ///
+    /// Separate from [`Self::new`] rather than folded into it on
+    /// purpose: `AppState::new` must not read the environment, or every
+    /// test that builds state would inherit whatever credential set the
+    /// developer's machine happens to export. Production wires this from
+    /// [`CredentialDirectory::from_env`] in `server::serve`.
+    #[must_use]
+    pub fn with_login(mut self, login: Arc<LoginService>) -> Self {
+        self.login = login;
+        self
     }
 }
 
@@ -95,5 +122,16 @@ mod tests {
         // token, something is minting sessions without a login flow.
         let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).unwrap();
         assert!(state.auth.resolve("any-token").is_none());
+    }
+
+    /// The default construction must not become a back door. Before
+    /// `/auth/login` existed, an empty session store was a complete
+    /// answer; if a default-constructed `AppState` came with a
+    /// credential directory, this crate would ship a way in that no
+    /// test and no operator had asked for.
+    #[test]
+    fn a_bootstrapped_state_has_no_configured_credentials() {
+        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).unwrap();
+        assert!(!state.login.is_enabled());
     }
 }

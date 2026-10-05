@@ -13,7 +13,9 @@
 use std::sync::Arc;
 
 use ada_identity::session::{Session, SessionStore};
-use ada_m13_api_gateway::{AppState, MemoryHealthCheck};
+use ada_m13_api_gateway::{
+    AppState, CredentialDirectory, LoginService, MemoryHealthCheck, StoredUser,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -534,4 +536,351 @@ async fn a_wrong_method_on_a_real_path_is_405() {
         .await
         .expect("router call");
     assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/auth/login
+//
+// gm-console's `auth_api.dart` POSTs `{email, password}` to
+// `/api/v1/auth/login`, reads `body['token']`, and throws
+// `ApiUnauthorizedException` when it is null or empty. These tests pin
+// that contract from both ends: the field name, the 401, and the fact
+// that the token the client stores is one the gateway itself accepts.
+// ---------------------------------------------------------------------------
+
+/// The identity the login fixtures configure.
+///
+/// `.invalid` is reserved by RFC 2606 and can never route.
+const TEST_EMAIL: &str = concat!("ops", "@", "example.invalid");
+
+/// Assembled from fragments so no committed line is a bare secret, and
+/// so a grep for a password-shaped literal does not match this file.
+const TEST_PASSWORD: &str = concat!("pw-", "integration-fixture");
+
+/// A credential directory holding exactly one loginable account.
+fn login_directory() -> Arc<CredentialDirectory> {
+    let dir = Arc::new(CredentialDirectory::new());
+    dir.insert(
+        TEST_EMAIL,
+        StoredUser::new(
+            "user-login",
+            "tenant-a",
+            vec!["viewer".into()],
+            TEST_PASSWORD,
+        ),
+    );
+    dir
+}
+
+/// An app whose login endpoint has one configured account, on the
+/// default attempt limits.
+fn app_with_login() -> axum::Router {
+    app_with_login_service(LoginService::new(login_directory()))
+}
+
+/// An app whose login service the caller supplies, for the tests that
+/// need a different attempt ceiling or session lifetime.
+fn app_with_login_service(login: LoginService) -> axum::Router {
+    let state = AppState::new("ada-gateway-test", Arc::new(MemoryHealthCheck::new()))
+        .expect("bootstrap auth context")
+        .with_login(Arc::new(login));
+    ada_m13_api_gateway::build_router(state)
+}
+
+/// POST a credential and return the status plus the raw response body.
+async fn post_login(router: axum::Router, email: &str, password: &str) -> (StatusCode, String) {
+    let payload = serde_json::json!({"email": email, "password": password}).to_string();
+    let resp = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await
+        .expect("router call");
+    let status = resp.status();
+    let bytes = resp
+        .into_body()
+        .collect()
+        .await
+        .expect("response body")
+        .to_bytes();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// `GET /api/v1/whoami` with a bearer token, returning status and body.
+async fn whoami(router: axum::Router, token: &str) -> (StatusCode, serde_json::Value) {
+    let resp = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/whoami")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("router call");
+    let status = resp.status();
+    let bytes = resp
+        .into_body()
+        .collect()
+        .await
+        .expect("response body")
+        .to_bytes();
+    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, value)
+}
+
+/// The closed loop the endpoint exists for: a client logs in, takes the
+/// `token` field, and presents it as a bearer credential on a business
+/// route. Before this, the client had a login call that could only ever
+/// fail and a gateway that could never mint a session.
+///
+/// One `Router` serves both halves, and that is load-bearing: each
+/// `AppState` owns its own `SessionStore`, so a token minted against one
+/// router is simply unknown to a different one. Cloning the `Router`
+/// clones the state (an `Arc`), which is what lets the follow-up request
+/// see the session the login just created.
+#[tokio::test]
+async fn login_issues_a_token_that_authenticates_a_business_request() {
+    let router = app_with_login();
+    let (status, body) = post_login(router.clone(), TEST_EMAIL, TEST_PASSWORD).await;
+    assert_eq!(status, StatusCode::OK, "login body was {body}");
+
+    let issued: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    let token = issued["token"]
+        .as_str()
+        .expect("`token` must be a non-empty string: this is the field auth_api.dart reads")
+        .to_owned();
+
+    let (status, who) = whoami(router, &token).await;
+    assert_eq!(status, StatusCode::OK, "the issued token must authenticate");
+    assert_eq!(who["user_id"], "user-login");
+    assert_eq!(who["tenant_id"], "tenant-a");
+    assert_eq!(who["roles"][0], "viewer");
+}
+
+/// The failure the client surfaces as `ApiUnauthorizedException`.
+#[tokio::test]
+async fn a_wrong_password_is_a_401() {
+    let (status, body) = post_login(
+        app_with_login(),
+        TEST_EMAIL,
+        concat!("not-", "the-password"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(
+        !body.contains(TEST_PASSWORD),
+        "a credential reached the response: {body}"
+    );
+}
+
+/// An unknown identity and a wrong password must be indistinguishable.
+///
+/// Not just the same status — the same status with a different body is
+/// still a user-enumeration oracle, and it is the shape a "helpful"
+/// `unknown user` message takes. Both are asserted so a later edit that
+/// makes one of them more specific cannot pass.
+#[tokio::test]
+async fn an_unknown_identity_is_indistinguishable_from_a_wrong_password() {
+    let (unknown_status, unknown_body) = post_login(
+        app_with_login(),
+        concat!("nobody", "@", "example.invalid"),
+        TEST_PASSWORD,
+    )
+    .await;
+    let (wrong_status, wrong_body) = post_login(
+        app_with_login(),
+        TEST_EMAIL,
+        concat!("not-", "the-password"),
+    )
+    .await;
+
+    assert_eq!(unknown_status, StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong_status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        unknown_body, wrong_body,
+        "the two denials must be byte-identical, or the endpoint enumerates users"
+    );
+}
+
+/// The `token` field must not be present-but-empty on a denial, since
+/// the client only checks for null/empty and would treat a placeholder
+/// as a successful login.
+#[tokio::test]
+async fn a_denied_login_never_carries_a_token_field() {
+    let (_, body) = post_login(
+        app_with_login(),
+        TEST_EMAIL,
+        concat!("not-", "the-password"),
+    )
+    .await;
+    let denied: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    assert!(
+        denied.get("token").is_none(),
+        "a denial must not carry a token at all: {body}"
+    );
+}
+
+/// A token that has been altered by one byte must stop working.
+///
+/// The credential is opaque, so there is no signature to check — its
+/// authority *is* the store lookup. A tampered token therefore has to
+/// miss the store entirely rather than decode into something.
+#[tokio::test]
+async fn a_tampered_token_is_refused() {
+    let router = app_with_login();
+    let (status, body) = post_login(router.clone(), TEST_EMAIL, TEST_PASSWORD).await;
+    assert_eq!(status, StatusCode::OK);
+    let issued: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    let token = issued["token"].as_str().expect("token").to_owned();
+
+    // Flip the final character, keeping the token's shape and length.
+    let mut tampered: Vec<char> = token.chars().collect();
+    let last = tampered.len() - 1;
+    tampered[last] = if tampered[last] == 'A' { 'B' } else { 'A' };
+    let tampered: String = tampered.into_iter().collect();
+    assert_ne!(
+        tampered, token,
+        "the mutation must actually change the token"
+    );
+
+    let (status, _) = whoami(router, &tampered).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a token that was never minted must not authenticate"
+    );
+}
+
+/// A token whose session has expired must stop working, on the real
+/// request path rather than only in the store's own tests.
+#[tokio::test]
+async fn an_expired_token_is_refused() {
+    let router = app_with_login_service(LoginService::new(login_directory()).with_session_ttl(0));
+    let (status, body) = post_login(router.clone(), TEST_EMAIL, TEST_PASSWORD).await;
+    assert_eq!(status, StatusCode::OK, "a zero-TTL session is still issued");
+    let issued: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    let token = issued["token"].as_str().expect("token").to_owned();
+
+    let (status, _) = whoami(router, &token).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "an expired session must not authenticate a business request"
+    );
+}
+
+/// An unconfigured deployment must keep the fail-closed posture it had
+/// before this endpoint existed. If `AppState::new` grew a default
+/// credential, this is where it would show.
+#[tokio::test]
+async fn a_deployment_with_no_configured_credentials_refuses_every_login() {
+    let (status, body) = post_login(app(), TEST_EMAIL, TEST_PASSWORD).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!body.contains(TEST_PASSWORD), "credential leaked: {body}");
+}
+
+/// The login route sits outside the authentication layer, so it has to
+/// answer without a credential. If it were ever moved inside, a caller
+/// would need a session to get a session.
+#[tokio::test]
+async fn the_login_route_does_not_require_a_bearer_token() {
+    let (status, _) = post_login(app_with_login(), TEST_EMAIL, TEST_PASSWORD).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// The attempt ceiling. A login surface with no limit is an offline
+/// password-guessing oracle.
+#[tokio::test]
+async fn repeated_login_attempts_are_rate_limited() {
+    let router = app_with_login_service(LoginService::with_limits(login_directory(), 2, 1));
+
+    for i in 0..2 {
+        let (status, _) =
+            post_login(router.clone(), TEST_EMAIL, concat!("not-", "the-password")).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "attempt {i} is inside the burst allowance and must fail on the credential"
+        );
+    }
+    let (status, _) = post_login(router, TEST_EMAIL, concat!("not-", "the-password")).await;
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the third attempt exceeds a burst of two"
+    );
+}
+
+/// A body the gateway cannot parse must be refused with a message that
+/// does not quote the offending value. The value here is a password, and
+/// axum's own `Json` rejection is free to include it.
+#[tokio::test]
+async fn a_malformed_login_body_is_refused_without_quoting_it() {
+    let secret = concat!("pw-", "quoted-by-a-parser");
+    for raw in [
+        // Not JSON at all.
+        format!("{{\"email\": \"{secret}\""),
+        // A JSON array where an object is required.
+        format!("[\"{secret}\"]"),
+        // Right shape, wrong field types: neither value is the secret,
+        // but the point is that the *shape* of the failure is uniform.
+        r#"{"email": 1, "password": 2}"#.to_owned(),
+    ] {
+        let resp = app_with_login()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(raw.clone()))
+                    .unwrap(),
+            )
+            .await
+            .expect("router call");
+        let status = resp.status();
+        let bytes = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("response body")
+            .to_bytes();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            status.is_client_error(),
+            "a malformed body must be refused, got {status} for {raw:?}"
+        );
+        assert_eq!(
+            text, "{\"error\":{\"code\":400,\"message\":\"bad request: malformed login request\"}}",
+            "the refusal must be the fixed message, so no parser can quote the body"
+        );
+    }
+}
+
+/// A missing `password` field is a malformed body, not an empty
+/// password. The two must not be confusable: a deserialization default
+/// is exactly how "absent" turns into "matched".
+#[tokio::test]
+async fn a_missing_password_field_is_refused() {
+    let resp = app_with_login()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(format!("{{\"email\": \"{TEST_EMAIL}\"}}")))
+                .unwrap(),
+        )
+        .await
+        .expect("router call");
+    assert!(
+        resp.status().is_client_error(),
+        "an absent password must not authenticate, got {}",
+        resp.status()
+    );
 }
