@@ -44,6 +44,20 @@ spec:
               value: "0.0.0.0:8080"
             - name: GM_CONSOLE_UPSTREAM
               value: "http://ada-api-gateway:8080"
+            # The document root is baked into the image at /srv/static, so
+            # this needs no volume and no ConfigMap. It MUST stay equal to
+            # the GM_CONSOLE_STATIC_DIR in deploy/docker/gm-console.Dockerfile:
+            # a value pointing at a path the image does not have degrades
+            # silently, because try_disk returns None on a miss and the
+            # server falls back to the index.html compiled into the binary
+            # instead of erroring. That silence is what made `/` serve the
+            # placeholder for as long as this was unset.
+            #
+            # `baked_static_dir_agrees_between_the_image_and_the_manifest`
+            # in crates/gm-console/tests/baked_static.rs compares the two
+            # files and fails on drift.
+            - name: GM_CONSOLE_STATIC_DIR
+              value: "/srv/static"
             - name: RUST_LOG
               value: "info"
           readinessProbe:
@@ -63,11 +77,11 @@ spec:
           # job -- the first time that step ever completed, because
           # cargo-deny had been failing first.
           #
-          # The SPA is served from GM_CONSOLE_STATIC_DIR, which in the
-          # shipped manifests is unset, so nothing here reads the document
-          # root. If that is ever pointed at a path, it has to be a volume
-          # mount (read-only) rather than a write to the image filesystem,
-          # or the read-only root turns the console into a 500.
+          # The SPA is served from /srv/static, baked into the image by
+          # deploy/docker/gm-console.Dockerfile. It is a read of the image
+          # filesystem, not a write, so readOnlyRootFilesystem is fine --
+          # and because the tree is in the image, this Deployment needs no
+          # volume and no ConfigMap to make `/` serve the real console.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
