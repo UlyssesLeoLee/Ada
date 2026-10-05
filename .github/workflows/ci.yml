@@ -185,6 +185,30 @@ jobs:
       - name: cargo clippy (mock server capture)
         run: cargo clippy -p ada-mock --features server --all-targets --locked -- -D warnings
 
+      # ada-identity gained an `inproc-sessions` feature that re-exposes the
+      # per-process session store, and this lane is the only thing that
+      # builds it. It exists for a sharper reason than "coverage".
+      #
+      # The in-process store is the double the rest of the workspace uses in
+      # its tests, and it is deliberately unreachable from a production
+      # build. A `#[cfg(test)]`-only item would not be visible to another
+      # crate's tests, so it is a feature instead -- which means it can
+      # also be switched on by accident, and nothing else in CI would notice.
+      # `inproc-sessions` in a real build is a session minted in one process
+      # and unknown to the next, i.e. a user logged out on every request
+      # that lands on a different replica.
+      #
+      # The crate enforces that itself with a `compile_fail` doctest on
+      # `SessionStore::new()`. This lane is the other half: it keeps the
+      # feature compiling, tested and linted, so the gate in
+      # crates/ada-core/tests/ci_feature_coverage.rs can keep asserting that
+      # no non-default feature is built by nothing.
+      - name: cargo test (identity in-proc sessions)
+        run: cargo test -p ada-identity --features inproc-sessions --locked
+
+      - name: cargo clippy (identity in-proc sessions)
+        run: cargo clippy -p ada-identity --features inproc-sessions --all-targets --locked -- -D warnings
+
       # ada-remediation's binary is the payload of the k8s Deployment in
       # deploy/k8s/ada-remediation.yaml (replicas: 2, port 9100, an
       # HMAC-authenticated webhook and a NetworkPolicy). Its `[[bin]]`
