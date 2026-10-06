@@ -59,7 +59,7 @@
 //! `deploy/k8s/ada-remediation.yaml` runs **two replicas**:
 //!
 //!  1. **Replicas do not share cooldowns.** An alert reaches one replica
-//!     through the ClusterIP Service; it records the cooldown there. A
+//!     through the `ClusterIP` Service; it records the cooldown there. A
 //!     second alert inside the same window can land on the other replica,
 //!     which has no record and re-executes the remediation.
 //!  2. **A restart forgets everything.** Cooldowns do not survive a pod
