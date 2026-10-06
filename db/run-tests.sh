@@ -104,7 +104,10 @@ for f in "$TESTS_DIR"/V*.sql; do
     # 全テスト通過時も "0 PASS notices" を報告していた (数えられない検査)。
     # 行頭固定を外す。
     pcount=$(echo "$out" | grep -c 'NOTICE:.*PASS:' || true)
-    fcount=$(echo "$out" | grep -cE 'ERROR:.*\[t_|FAIL:.*TEST FAIL|EXCEPTION:' || true)
+    # `NOTICE:.*FAIL:` matters as much as `ERROR:.*[t_`: a test could announce
+    # a failure with RAISE NOTICE and not raise, in which case psql still exits
+    # 0 and only this counter would catch it.
+    fcount=$(echo "$out" | grep -cE 'ERROR:.*\[t_|NOTICE:.*FAIL:|EXCEPTION:' || true)
     if [ "$VERBOSE" = "1" ]; then
         echo "$out" | grep -E 'NOTICE:|ERROR:|FAIL:' || true
     else
@@ -113,7 +116,11 @@ for f in "$TESTS_DIR"/V*.sql; do
     TOTAL_PASS=$((TOTAL_PASS + pcount))
     if [ "$fcount" -gt 0 ]; then
         red "    FAILED: $f ($fcount error(s))"
-        echo "$out" | grep -E '^\[t_|FAIL:.*TEST FAIL|EXCEPTION:' | head -5
+        # || true is load-bearing: under `set -e` + `pipefail`, a grep that
+        # matches nothing exits non-zero and would kill the script here --
+        # before the summary printed -- turning a reportable failure into a
+        # silent exit with no explanation.
+        echo "$out" | grep -E 'ERROR:.*\[t_|NOTICE:.*FAIL:|EXCEPTION:' | head -5 || true
         FAIL=$((FAIL+1))
         FAILED_FILES+=("$f")
     else
