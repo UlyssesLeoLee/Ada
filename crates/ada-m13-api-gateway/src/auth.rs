@@ -34,7 +34,12 @@
 
 use std::sync::Arc;
 
-use ada_identity::redis_session::{RedisSessionBackend, REDIS_URL_ENV};
+// `REDIS_URL_ENV` is deliberately not imported here. It is referenced
+// from two doc comments, and an intra-doc link does not count as a use
+// for `unused_imports` -- so importing it to make those links resolve
+// would make the crate fail `-D warnings` for having a correct import.
+// The links below spell the path out instead.
+use ada_identity::redis_session::RedisSessionBackend;
 use ada_identity::session::SessionStorage;
 use ada_identity::shared_session::SharedSessionStore;
 use ada_m11_rbac_collab::{Action, ResourceType, Role};
@@ -156,7 +161,8 @@ impl AuthContext {
     ///
     /// The seam that makes both deployments and tests work without a Redis
     /// on the other side. `bootstrap` is this plus "read
-    /// [`REDIS_URL_ENV`] and connect"; a test passes the in-process double,
+    /// [`REDIS_URL_ENV`](ada_identity::redis_session::REDIS_URL_ENV) and
+    /// connect"; a test passes the in-process double,
     /// which it can reach because `ada-identity` is a `[dev-dependencies]`
     /// of this crate with the `inproc-sessions` feature enabled. The lib's own
     /// build has no such feature, so production cannot name the in-process
@@ -168,7 +174,8 @@ impl AuthContext {
     }
 
     /// Build a context from the bundled policy set and the shared session
-    /// store named by [`REDIS_URL_ENV`].
+    /// store named by
+    /// [`REDIS_URL_ENV`](ada_identity::redis_session::REDIS_URL_ENV).
     ///
     /// # Fails closed when no shared store is configured
     ///
