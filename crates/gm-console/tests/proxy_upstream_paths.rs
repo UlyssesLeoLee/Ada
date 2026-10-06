@@ -131,7 +131,7 @@ async fn gateway_stub(req: Request) -> Response {
         // required, `expires_at` is optional.
         let body = req.into_body().collect().await.expect("body").to_bytes();
         let sent: serde_json::Value =
-            serde_json::from_slice(&body).unwrap_or_else(|_| serde_json::Value::Null);
+            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
         // The stub only issues a token for credentials it recognises, so a
         // test that posts the wrong password gets a real 401 rather than a
         // 200 that hides a broken body.
