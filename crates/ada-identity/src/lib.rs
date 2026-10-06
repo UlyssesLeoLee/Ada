@@ -49,6 +49,7 @@ pub mod oidc;
 pub mod passkey;
 pub mod rate_limit;
 pub mod recovery;
+pub mod redis_session;
 pub mod saml;
 pub mod session;
 pub mod shared_session;

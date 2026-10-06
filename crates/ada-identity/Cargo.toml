@@ -65,6 +65,15 @@ sha2 = "0.10"
 # authenticator apps expect. Not optional — the correct verifier must
 # be the only code path, never a fallback.
 hmac = "0.12"
+# The shared session backend, decided on 2026-10-06 after
+# `shared_session.rs` shipped `SharedSessionBackend` as a trait with no
+# implementation: the interface first, the backend once the deployment
+# picked one. Redis it is. `connection-manager` because the client has to
+# survive a reconnect mid-request; a backend that gives up on the first
+# blip turns a Redis restart into a fleet-wide logout. `tokio-comp`
+# because `SharedSessionBackend` is an `#[async_trait]`, and this crate
+# already depends on tokio.
+redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
 sha1 = "0.10"
 hex = "0.4"
 url = "2"

@@ -56,15 +56,18 @@ impl AppState {
     /// for `db`; production builds will pass a wrapper that probes the
     /// real DB / peer pool.
     ///
-    /// `auth` comes from [`AuthContext::bootstrap`], which is the
-    /// freshly-started shape: an empty session store and an enforcer
-    /// built from the bundled policy. There is no way to reach
-    /// `/api/*` until a session is minted, which is deliberate.
-    pub fn new(name: impl Into<String>, db: Arc<dyn HealthCheck>) -> crate::Result<Self> {
+    /// `auth` comes from [`AuthContext::bootstrap`], which needs the shared
+    /// session store named by `ADA_SESSION_REDIS_URL` and therefore cannot
+    /// be built offline. There is no way to reach `/api/*` without a session,
+    /// which is deliberate.
+    pub async fn new(
+        name: impl Into<String>,
+        db: Arc<dyn HealthCheck>,
+    ) -> crate::Result<Self> {
         Ok(Self {
             name: name.into(),
             db,
-            auth: AuthContext::bootstrap()?,
+            auth: AuthContext::bootstrap().await?,
             login: Arc::new(LoginService::new(Arc::new(CredentialDirectory::new()))),
         })
     }
@@ -101,26 +104,29 @@ mod tests {
     use super::*;
     use crate::health::MemoryHealthCheck;
 
-    #[test]
+    #[tokio::test]
+    async fn new_takes_name_and_db() {
     fn new_takes_name_and_db() {
-        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new()))
+        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).await
             .expect("bootstrap auth context");
         assert_eq!(state.name, "ada-gateway");
     }
 
-    #[test]
+    #[tokio::test]
+    async fn new_accepts_string_and_str() {
     fn new_accepts_string_and_str() {
-        let s = AppState::new(String::from("a"), Arc::new(MemoryHealthCheck::new())).unwrap();
+        let s = AppState::new(String::from("a"), Arc::new(MemoryHealthCheck::new())).await.unwrap();
         assert_eq!(s.name, "a");
-        let s = AppState::new("b", Arc::new(MemoryHealthCheck::new())).unwrap();
+        let s = AppState::new("b", Arc::new(MemoryHealthCheck::new())).await.unwrap();
         assert_eq!(s.name, "b");
     }
 
-    #[test]
+    #[tokio::test]
+    async fn a_bootstrapped_state_denies_every_token() {
     fn a_bootstrapped_state_denies_every_token() {
         // The freshly-started shape. If this ever starts resolving a
         // token, something is minting sessions without a login flow.
-        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).unwrap();
+        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).await.unwrap();
         assert!(state.auth.resolve("any-token").is_none());
     }
 
@@ -129,9 +135,10 @@ mod tests {
     /// answer; if a default-constructed `AppState` came with a
     /// credential directory, this crate would ship a way in that no
     /// test and no operator had asked for.
-    #[test]
+    #[tokio::test]
+    async fn a_bootstrapped_state_has_no_configured_credentials() {
     fn a_bootstrapped_state_has_no_configured_credentials() {
-        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).unwrap();
+        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).await.unwrap();
         assert!(!state.login.is_enabled());
     }
 }

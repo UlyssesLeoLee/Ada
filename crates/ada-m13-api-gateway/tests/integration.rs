@@ -24,7 +24,7 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 fn app() -> axum::Router {
-    let state = AppState::new("ada-gateway-test", Arc::new(MemoryHealthCheck::new()))
+    let state = AppState::new("ada-gateway-test", Arc::new(MemoryHealthCheck::new())).await
         .expect("bootstrap auth context");
     ada_m13_api_gateway::build_router(state)
 }
@@ -50,7 +50,7 @@ fn app_with_roles(tenant_id: &str, roles: Vec<String>) -> (axum::Router, String)
             expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
         })
         .expect("mint");
-    let auth = ada_m13_api_gateway::auth::AuthContext::bootstrap()
+    let auth = ada_m13_api_gateway::auth::AuthContext::bootstrap().await
         .expect("bootstrap")
         .with_sessions(Arc::clone(&store));
     let state = AppState::with_auth("ada-gateway-test", Arc::new(MemoryHealthCheck::new()), auth);
@@ -429,7 +429,7 @@ async fn a_revoked_session_stops_working() {
             expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
         })
         .expect("mint");
-    let auth = ada_m13_api_gateway::auth::AuthContext::bootstrap()
+    let auth = ada_m13_api_gateway::auth::AuthContext::bootstrap().await
         .expect("bootstrap")
         .with_sessions(Arc::clone(&store));
     let router = ada_m13_api_gateway::build_router(AppState::with_auth(
@@ -581,7 +581,7 @@ fn app_with_login() -> axum::Router {
 /// An app whose login service the caller supplies, for the tests that
 /// need a different attempt ceiling or session lifetime.
 fn app_with_login_service(login: LoginService) -> axum::Router {
-    let state = AppState::new("ada-gateway-test", Arc::new(MemoryHealthCheck::new()))
+    let state = AppState::new("ada-gateway-test", Arc::new(MemoryHealthCheck::new())).await
         .expect("bootstrap auth context")
         .with_login(Arc::new(login));
     ada_m13_api_gateway::build_router(state)
