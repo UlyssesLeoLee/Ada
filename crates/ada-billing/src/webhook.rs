@@ -152,6 +152,15 @@ pub const IDEMPOTENCY_TTL_SECS: i64 = 72 * 60 * 60;
 /// TTL equals Stripe's redelivery window, `t + TTL` is the exact instant
 /// of the final delivery Stripe is entitled to make; forgetting the key
 /// there re-admits that delivery and charges the customer twice.
+///
+/// `cfg(test)` because only the tests need the name. The behaviour it
+/// describes is production code, and it is stated there as well -- at the
+/// `>= now_unix` sweep in [`IdempotencyStore::record_at`] and in
+/// [`IdempotencyStore::has_seen_at`]. Left ungated it would be a dead
+/// constant in every real build, which `-D warnings` rejects; this keeps
+/// the explanation attached to the boundary while letting only the tests
+/// pay for it.
+#[cfg(test)]
 const PAST_TTL: i64 = IDEMPOTENCY_TTL_SECS + 1;
 
 /// Default capacity ceiling on held keys.
