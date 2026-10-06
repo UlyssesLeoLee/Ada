@@ -452,6 +452,26 @@ keeps at least one pod serving).
 
 ## Known gaps (v0.7.1)
 
+- **Cooldowns are per-process, and this Deployment runs two replicas.**
+  `remediation` keeps cooldowns in an in-process `MemoryStore`. The
+  Deployment sets `replicas: 2`, so an alert that arrives through the
+  ClusterIP Service lands on one replica and is recorded *there*. A
+  second alert inside the same cooldown window can land on the other
+  replica, which has no record of it and **re-executes the
+  remediation**. A pod restart, rollout or reschedule forgets every
+  cooldown.
+
+  This matters more than an availability setting, because the shipped
+  `disk-space-low` runbook's second step is
+  `find /var/log -type f -name '*.gz' -mtime +7 -delete`.
+
+  `db/migrations/V003__phase8_remediation.sql` defines
+  `remediation_check_cooldown()` and a `remediation_cooldowns` table
+  for exactly this, and **nothing in the workspace calls them** — the
+  crate's own documentation previously described that layer as
+  existing. Until it is wired, either run a single replica or treat the
+  cooldown as advisory rather than enforced.
+
 - Runbook hot-reload uses 1s polling (the `notify` crate is
   not in D:/Ada's offline cache). Latency between runbook
   edit and engine reload is up to 1s. v0.7.2 will switch
