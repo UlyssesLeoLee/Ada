@@ -31,11 +31,13 @@ data:
 ---
 # ada-remediation-runbooks -- the runbooks the remediation engine executes.
 #
-# This ConfigMap used to be referenced by the Deployment and never
-# defined, with `optional: true`. That combination is silent: the mount point
-# is created and left empty, `load_runbooks_from_dir` returns an empty
-# `Vec` rather than an error, and the service starts, passes its probes and
-# accepts signed alerts while matching zero actions.
+# GENERATED from config/remediation by
+# crates/ada-remediation/scripts/gen-runbooks-configmap.py -- do not edit by hand.
+#
+# `every_runbook_on_disk_is_mounted_by_the_deployment` in
+# crates/ada-core/tests/mounted_configmaps.rs fails the build if this and
+# the directory disagree, so this is a rendering of the runbooks rather than
+# a second copy of them. Regenerate it after editing anything in there.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -45,15 +47,6 @@ metadata:
     app.kubernetes.io/name: ada-remediation
     app.kubernetes.io/version: v0.7.1
 data:
-  # GENERATED from config/remediation -- do not edit by hand.
-  # Every *.json runbook in that directory appears below. The Deployment
-  # mounts this at /etc/ada-remediation/runbooks and
-  # REMEDIATION_RUNBOOK_DIR points there, so a runbook that exists in the
-  # repository but not here is a runbook the deployed service never loads.
-  # `every_runbook_on_disk_is_mounted_by_the_deployment` in
-  # crates/ada-core/tests/mounted_configmaps.rs pins that correspondence;
-  # `every_mounted_configmap_is_defined_in_the_kustomization` pins that
-  # this ConfigMap exists at all.
   db-connection-pool-exhausted.json: |
     {
       "version": 1,
@@ -190,6 +183,7 @@ data:
         }
       ]
     }
+
 
 ---
 apiVersion: v1
