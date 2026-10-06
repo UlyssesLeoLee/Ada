@@ -54,7 +54,7 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Every `runbook_url` value in `text`, as (host, raw_value).
+/// Every `runbook_url` value in `text`, as (host, `raw_value`).
 ///
 /// Deliberately keyed on `runbook_url` and not on "any http:// string". The
 /// first version of this gate scanned every URL in `deploy/k8s/` and reported
@@ -67,9 +67,8 @@ fn repo_root() -> PathBuf {
 fn runbook_urls(text: &str) -> Vec<(Option<String>, String)> {
     let mut out = Vec::new();
     for line in text.lines() {
-        let after = match line.split_once("runbook_url") {
-            Some((_, rest)) => rest,
-            None => continue,
+        let Some((_, after)) = line.split_once("runbook_url") else {
+            continue;
         };
         let Some((_, rest)) = after.split_once(':') else {
             continue;
@@ -132,18 +131,19 @@ fn shipped_runbook_urls_name_routable_hosts() {
             fs::read_dir(&path).unwrap_or_else(|e| panic!("read_dir {}: {e}", path.display()));
         for entry in entries.flatten() {
             let p = entry.path();
-            let name = p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default()
-                .to_string();
-            let is_scanned =
-                name.ends_with(".json") || name.ends_with(".yaml") || name.ends_with(".yml");
+            // `Path::extension` plus a case-insensitive compare, rather than
+            // `ends_with(".yml")`: a file named `Foo.YAML` is a YAML file, and
+            // clippy's case_sensitive_file_extension_comparisons says the same
+            // thing.
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
+            let is_scanned = ext.eq_ignore_ascii_case("json")
+                || ext.eq_ignore_ascii_case("yaml")
+                || ext.eq_ignore_ascii_case("yml");
             if !p.is_file() || !is_scanned {
                 continue;
             }
             let rel = p.strip_prefix(&root).unwrap_or(&p).display().to_string();
-            let text = fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", rel));
+            let text = fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {rel}: {e}"));
             for (host, raw) in runbook_urls(&text) {
                 checked += 1;
                 if dir == "config/remediation" {
