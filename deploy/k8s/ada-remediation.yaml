@@ -129,7 +129,7 @@ data:
             {
               "kind": "page_operator",
               "severity": "high",
-              "runbook_url": "https://runbooks.ada.local/service-down"
+              "runbook_url": "docs/observability/14-auto-remediation.md"
             }
           ],
           "cooldown": 600,
@@ -152,7 +152,7 @@ data:
             {
               "kind": "page_operator",
               "severity": "high",
-              "runbook_url": "https://runbooks.ada.local/slo-burn-fast"
+              "runbook_url": "docs/observability/14-auto-remediation.md"
             }
           ],
           "cooldown": 3600,
