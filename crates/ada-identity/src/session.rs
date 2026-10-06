@@ -728,11 +728,6 @@ mod contract_tests {
     /// never expiring at all.
     #[test]
     fn a_record_carries_an_absolute_deadline_not_a_duration() {
-        let before = unix_millis_now();
-        let record = SessionRecord::from_session(&session(Duration::from_secs(60)));
-        let after = unix_millis_now();
-        let deadline = record.expires_at_unix_ms;
-
         // One millisecond of slack on the lower bound, because that is the
         // precision `from_session` actually has: it converts the remaining
         // lifetime with `as_millis()`, which truncates, so the stored
@@ -747,7 +742,17 @@ mod contract_tests {
         // the pods' clocks agree, which `SessionRecord`'s own docs state.
         // Claiming sub-millisecond exactness here only tested the rounding
         // mode of a conversion.
+        //
+        // Declared before the bindings because a `const` after a statement
+        // is `clippy::items_after_statements` -- items exist from the start
+        // of the scope, so putting it here reads the way the code means it.
         const TRUNCATION_SLACK_MS: i64 = 1;
+
+        let before = unix_millis_now();
+        let record = SessionRecord::from_session(&session(Duration::from_secs(60)));
+        let after = unix_millis_now();
+        let deadline = record.expires_at_unix_ms;
+
         assert!(
             deadline + TRUNCATION_SLACK_MS >= before + 60_000 && deadline <= after + 60_000,
             "deadline must sit ~60s past now (+/-{TRUNCATION_SLACK_MS}ms \
