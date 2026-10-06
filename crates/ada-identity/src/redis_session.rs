@@ -81,6 +81,25 @@ pub struct RedisSessionBackend {
     conn: ConnectionManager,
 }
 
+/// Hand-written rather than derived, for two reasons.
+///
+/// `ConnectionManager` is not `Debug`, so a derive would not compile --
+/// but the lint that asks for one is real: a type that holds the session
+/// store should be printable in a log line without anyone adding a
+/// derive later and accidentally leaking what is inside.
+///
+/// More importantly, its `Display` renders the connection URL, and a
+/// Redis URL may carry the password (`redis://:pw@host`). So this prints
+/// the shape and nothing else, in the same spirit as
+/// [`SharedSessionStore`](crate::shared_session::SharedSessionStore).
+impl std::fmt::Debug for RedisSessionBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisSessionBackend")
+            .field("conn", &"<ConnectionManager>")
+            .finish()
+    }
+}
+
 impl RedisSessionBackend {
     /// Connect to `url`, or read [`REDIS_URL_ENV`].
     ///
@@ -118,7 +137,7 @@ impl RedisSessionBackend {
 impl SharedSessionBackend for RedisSessionBackend {
     async fn get(&self, token: &str) -> Result<Option<SessionRecord>> {
         let mut conn = self.conn.clone();
-        let raw: Option<String> = conn.get(key_for(token)).await.map_err(redis_err)?;
+        let raw: Option<String> = conn.get(key_for(token)).await.map_err(|e| redis_err(&e))?;
         let Some(raw) = raw else {
             return Ok(None);
         };
@@ -146,7 +165,7 @@ impl SharedSessionBackend for RedisSessionBackend {
             .arg(value.expires_at_unix_ms)
             .arg(token)
             .ignore();
-        pipe.query_async(&mut conn).await.map_err(redis_err)
+        pipe.query_async(&mut conn).await.map_err(|e| redis_err(&e))
     }
 
     async fn delete(&self, token: &str) -> Result<()> {
@@ -162,7 +181,7 @@ impl SharedSessionBackend for RedisSessionBackend {
             .ignore();
         // Idempotent by construction: both commands succeed whether or not
         // the key was there, so `revoke` does not need to know.
-        pipe.query_async(&mut conn).await.map_err(redis_err)
+        pipe.query_async(&mut conn).await.map_err(|e| redis_err(&e))
     }
 
     async fn count(&self) -> Result<usize> {
@@ -171,7 +190,7 @@ impl SharedSessionBackend for RedisSessionBackend {
         // The ceiling is checked against this, so the error is in the safe
         // direction -- it fails a mint closed rather than admitting one too
         // many.
-        conn.zcard(EXPIRY_INDEX).await.map_err(redis_err)
+        conn.zcard(EXPIRY_INDEX).await.map_err(|e| redis_err(&e))
     }
 
     async fn delete_expired(&self, now_unix_ms: i64) -> Result<usize> {
@@ -179,7 +198,7 @@ impl SharedSessionBackend for RedisSessionBackend {
         let dead: Vec<String> = conn
             .zrangebyscore(EXPIRY_INDEX, i64::MIN, now_unix_ms)
             .await
-            .map_err(redis_err)?;
+            .map_err(|e| redis_err(&e))?;
         let batch = dead.len().min(SWEEP_BATCH);
         if batch == 0 {
             return Ok(0);
@@ -202,7 +221,9 @@ impl SharedSessionBackend for RedisSessionBackend {
         // fix. The two other `query_async` calls in this file are tail
         // expressions of `Result<()>` functions, so their type is already
         // pinned and they are not affected.
-        pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
+        pipe.query_async::<()>(&mut conn)
+            .await
+            .map_err(|e| redis_err(&e))?;
         Ok(batch)
     }
 }
@@ -213,8 +234,13 @@ impl SharedSessionBackend for RedisSessionBackend {
 /// can echo the arguments it failed on, and the arguments here are key names
 /// built from live tokens. The kind is enough to act on, and the detail is
 /// available from the Redis server's own log.
-fn redis_err(e: redis::RedisError) -> IdentityError {
-    IdentityError::SessionBackend(format!("redis command failed: {}", classify(&e)))
+/// Reduce a `redis` error to a message that cannot leak a session token.
+///
+/// Takes the error by reference: only its [`redis::ErrorKind`] is read,
+/// and the value itself is never consumed. That is also why the call
+/// sites pass `&e` rather than handing the closure the error directly.
+fn redis_err(e: &redis::RedisError) -> IdentityError {
+    IdentityError::SessionBackend(format!("redis command failed: {}", classify(e)))
 }
 
 /// Name the failure in the operator's terms, never in Redis's.
@@ -263,7 +289,7 @@ mod tests {
             // Whatever Redis attached to the error, the message we build
             // comes from `classify` alone.
             let e = redis::RedisError::from((kind, "value is not a valid integer"));
-            let msg = redis_err(e).to_string();
+            let msg = redis_err(&e).to_string();
             assert!(
                 !msg.contains("value is not a valid integer"),
                 "the raw Redis error text leaked into our message: {msg}"
