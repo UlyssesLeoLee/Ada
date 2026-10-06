@@ -27,7 +27,7 @@
 //!   [`BusError::SerializationError`]
 //! - [`BusError`] — five variants (PublishFailed, SubscribeFailed,
 //!   ChannelClosed, NoSubscribers, SerializationError)
-//! - integration tests only (`tests/integration.rs`)
+//! - 27 unit tests + 4 integration tests (`tests/integration.rs`)
 //!
 //! ### What v0.1.0 explicitly does **not** do
 //!

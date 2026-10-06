@@ -34,6 +34,20 @@
 //! like `http_connector_status_override_is_consumed()` cannot be counted
 //! incorrectly by a regex in a way that a hand-written list could.
 //!
+//! ## Why the crate list is explicit
+//!
+//! An earlier version made the claim purely optional: "a crate without one is
+//! not required to add one". That is right for the fourteen crates that never
+//! made a claim, and dangerously wrong for the ten that did. Deleting the
+//! number from `ada-m15-central-event-bus` entirely satisfied the optional rule
+//! -- and it did not happen in a review. The mutation harness that proves this
+//! gate can fail edits every crate's phrase at once; its restore step covered
+//! only one file, so the other nine deletions were committed and merged.
+//!
+//! `MUST_CLAIM` is that lesson encoded. Removing a number from any crate on the
+//! list is now a failure, so the state the audit established cannot be quietly
+//! undone by the next mutation run.
+//!
 //! The claim is optional: a crate without one is not required to add one. This
 //! gate closes the loop on the ones that exist rather than mandating a new
 //! convention across eleven crates.
@@ -76,6 +90,25 @@ fn all_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Crates that state a unit-test count and therefore must keep doing so.
+///
+/// Derived from the tree, not from taste: these are the `lib.rs` files that
+/// carry an `N unit tests` claim today. The other fourteen crates never made
+/// one, and this gate does not force a convention on them.
+const MUST_CLAIM: [&str; 11] = [
+    "ada-m01-acquisition",
+    "ada-m02-normalizer",
+    "ada-m03-data-flow-engine",
+    "ada-m04-orchestration",
+    "ada-m05-control-flow",
+    "ada-m06-plugin-sdk",
+    "ada-m09-exporter",
+    "ada-m10-tenant-middleware",
+    "ada-m11-rbac-collab",
+    "ada-m14-module-registry",
+    "ada-m15-central-event-bus",
+];
+
 #[test]
 fn claimed_unit_test_counts_match_the_tests_that_exist() {
     let root = repo_root();
@@ -86,6 +119,7 @@ fn claimed_unit_test_counts_match_the_tests_that_exist() {
 
     let mut checked = 0usize;
     let mut wrong: Vec<String> = Vec::new();
+    let mut claimed_crates: Vec<String> = Vec::new();
 
     let mut crate_paths: Vec<PathBuf> = crate_entries
         .flatten()
@@ -143,15 +177,34 @@ fn claimed_unit_test_counts_match_the_tests_that_exist() {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default();
+        claimed_crates.push(name.to_string());
         if claim != actual {
             wrong.push(format!("{name}: claims {claim} unit tests, has {actual}"));
         }
     }
 
+    // A crate that used to state a count and no longer does has not been made
+    // correct -- it has been made unverifiable. This is the hole that let the
+    // mutation harness commit nine deleted numbers into `main`: the optional
+    // rule was satisfied by the absence it had caused.
+    let missing: Vec<&str> = MUST_CLAIM
+        .iter()
+        .copied()
+        .filter(|c| !claimed_crates.iter().any(|x| x == c))
+        .collect();
+
     assert!(
         checked > 0,
         "no crate states a unit test count -- this gate is pointed at a tree \
          where the comments it checks have all been removed"
+    );
+    assert!(
+        missing.is_empty(),
+        "these crates stopped stating a unit test count:\n  {}\n\n\
+         Deleting the number is not the same as fixing it. The count was what \
+         made the claim checkable; removing it removes the evidence without \
+         making the underlying statement true.",
+        missing.join("\n  ")
     );
     assert!(
         wrong.is_empty(),
