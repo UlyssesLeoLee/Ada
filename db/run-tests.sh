@@ -151,7 +151,7 @@ fi
 #   (a) 実際に出た PASS notice 数 == テストソースが宣言している PASS 数
 #   (b) 宣言数が MIN_PASS_NOTES を下回らない
 # (b) があるため、テストを消して期待値も一緒に下げる操作は通らない。
-MIN_PASS_NOTES=23
+MIN_PASS_NOTES=54
 EXPECTED_PASS=$(grep -h -o "RAISE NOTICE 'PASS:" "$TESTS_DIR"/V*.sql 2>/dev/null | wc -l | tr -d ' ')
 echo "    PASS notices: ran=$TOTAL_PASS declared=$EXPECTED_PASS floor=$MIN_PASS_NOTES"
 if [ "$TOTAL_PASS" -ne "$EXPECTED_PASS" ]; then
