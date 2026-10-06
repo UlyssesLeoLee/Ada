@@ -112,11 +112,11 @@ impl AuthContext {
 
     /// Replace the session store, keeping the enforcer.
     ///
-    /// The seam tests use. It takes the trait rather than the in-process
-    /// store so that tests can install the in-process double — which
-    /// `ada-identity` deliberately keeps out of a production build — while
-    /// production installs a shared backend. Each test mints its own store
-    /// and installs it here, so tests do not share minted sessions.
+    /// Takes the trait rather than a concrete backend, so a deployment
+    /// can install a store of its own without going through
+    /// [`Self::bootstrap`]. Tests do not need it: [`Self::with_bundled_policy`]
+    /// builds the same real policy set over whatever store they hand it,
+    /// so swapping the enforcer as a side effect would buy nothing.
     #[must_use]
     pub fn with_sessions(self, sessions: Arc<dyn SessionStorage>) -> Self {
         Self { sessions, ..self }
@@ -201,11 +201,10 @@ impl AuthContext {
     /// as "logged out" would both be the wrong answer and produce an
     /// alert that says nothing about what is wrong.
     pub async fn resolve(&self, token: &str) -> Result<Option<Principal>> {
-        let session = self
-            .sessions
-            .lookup(token)
-            .await
-            .map_err(|e| ApiError::ServiceUnavailable(format!("session store unavailable: {e}")))?;
+        let session =
+            self.sessions.lookup(token).await.map_err(|e| {
+                ApiError::ServiceUnavailable(format!("session store unavailable: {e}"))
+            })?;
         Ok(session.map(|session| Principal {
             user_id: session.user_id,
             tenant_id: session.tenant_id,

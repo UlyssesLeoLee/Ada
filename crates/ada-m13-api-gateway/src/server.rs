@@ -54,7 +54,8 @@ pub async fn serve(bind: SocketAddr, name: &str) -> Result<()> {
             "no login credentials configured; POST /api/v1/auth/login will refuse every request"
         );
     }
-    let state = AppState::new(name, Arc::new(MemoryHealthCheck::new()))?
+    let state = AppState::new(name, Arc::new(MemoryHealthCheck::new()))
+        .await?
         .with_login(Arc::new(LoginService::new(Arc::new(directory))));
     let app = build_router(state).layer(TraceLayer::new_for_http());
 

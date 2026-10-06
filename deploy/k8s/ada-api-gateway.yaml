@@ -24,15 +24,27 @@
 #
 # WHAT THIS SERVICE IS NOT
 #
-# This manifest makes the deployed topology coherent. It does NOT make
-# the API authenticated. As of this commit the gateway mounts four
-# routes — /health, /health/live, /health/ready, /api/v1/ping — and none
-# of them require a credential. ada-identity, ada-rbac-casbin and
-# ada-billing are still not dependencies of this crate, and gm-console
-# still forwards the client's `authorization` and `x-tenant-id` headers
-# verbatim. Wiring the authentication and authorization middleware is
-# tracked as the next step; do not read a green deployment as a secured
-# one.
+# This manifest makes the deployed topology coherent and gives the
+# gateway the session store it refuses to start without. It does not
+# configure any credential.
+#
+# `/api/*` has been behind `require_principal` middleware since the
+# authentication boundary landed, and `POST /api/v1/auth/login` is the
+# only route that mints a session. Both sides of that still need operator
+# input to be useful:
+#
+#   - `ADA_GATEWAY_LOGIN_USERS` -- unset means the directory is empty,
+#     which means every login is a 401. The gateway logs a warning at
+#     startup and serves anyway, because "no credentials configured" and
+#     "credentials configured and all wrong" must be indistinguishable
+#     from outside.
+#   - `ADA_SESSION_REDIS_URL` -- set here to the placeholder
+#     `ada-session-redis` Service below.
+#
+# So a green deployment of this file is a gateway that is genuinely
+# fail-closed, not one that has been given a way in. Do not read a
+# successful rollout as an authenticated one; check that
+# `ADA_GATEWAY_LOGIN_USERS` is populated in the target namespace.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -85,6 +97,23 @@ spec:
             # policy files to in deploy/docker/ada-api-gateway.Dockerfile.
             - name: ADA_RBAC_POLICY_DIR
               value: "/etc/ada-rbac/policies"
+            # The shared session store. `AuthContext::bootstrap` refuses
+            # to start without a reachable one, and there is deliberately
+            # no in-process fallback: a per-process map 401s every valid
+            # credential the moment a request lands on the other replica
+            # (this Deployment runs `replicas: 2`), and a restart
+            # invalidates every outstanding session. Without this variable
+            # the pod exits before it binds its port, which is the correct
+            # outcome for an authentication service that cannot check a
+            # credential -- but it is a CrashLoop, so the variable has to
+            # be here.
+            #
+            # The Service below is a placeholder topology, not a
+            # recommendation to run Redis this way in production: no
+            # persistence, no auth, no eviction policy, one replica.
+            # Point this at a managed instance for a real deployment.
+            - name: ADA_SESSION_REDIS_URL
+              value: "redis://ada-session-redis:6379"
           # /health/live is the liveness probe target: it is the only
           # handler that cannot depend on a backing service, so a
           # dependency outage must not cause a restart loop.
@@ -120,12 +149,22 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-      volumes:
-        - name: tmp
-          emptyDir: {}
+          # On the container, not the pod spec. It was previously nested
+          # inside the `volumes:` entry below, which made it a key of an
+          # emptyDir volume rather than of the container: every apply
+          # succeeded, `kubectl kustomize` rendered without complaint, and
+          # the pod came up with no requests and no limits at all -- the
+          # one field that tells the scheduler what this workload costs
+          # and tells the kubelet when to throttle it. Silence is what a
+          # dropped key looks like; this was only caught by parsing the
+          # *rendered* output and asking where `resources` actually
+          # ended up.
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits:   { cpu: 500m, memory: 256Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -157,3 +196,123 @@ spec:
   selector:
     matchLabels:
       app: ada-api-gateway
+---
+# ada-session-redis — the shared session store the gateway refuses to
+# start without.
+#
+# WHY THIS EXISTS
+#
+# `AuthContext::bootstrap` connects to `ADA_SESSION_REDIS_URL` during
+# startup and treats "cannot reach it" as a fatal error. That is a
+# deliberate fail-closed choice (see crates/ada-m13-api-gateway/src/auth.rs)
+# and it is what makes the gateway's sessions valid across replicas — but
+# it also means the topology is incomplete without a Redis to point at.
+# Before this, `kubectl apply -k deploy/k8s/` produced a Deployment that
+# could only ever CrashLoopBackOff.
+#
+# WHAT THIS IS NOT
+#
+# This is a placeholder that makes the reference topology run, not a
+# production session store. It has:
+#
+#   - no persistence (sessions vanish on restart -- every user re-logs in)
+#   - no authentication and no TLS (in-cluster only)
+#   - one replica, so it is a single point of failure
+#   - no eviction policy, so it can OOM rather than shed cold sessions
+#
+# A real deployment points `ADA_SESSION_REDIS_URL` at a managed instance
+# and drops this file. Sessions are the credential authority for the whole
+# multi-tenant model, so the storage behind them is not the place to save
+# on engineering.
+#
+# START ORDER
+#
+# The gateway does not wait for this. Kubernetes has no ordering between
+# two Deployments in one apply, so on a cold cluster the gateway may exit
+# first and be restarted by CrashLoopBackOff's exponential backoff until
+# Redis answers. That is correct-by-restart rather than ordered: the
+# alternative -- a gateway that starts without a store and answers 401 --
+# is the bug this whole change exists to remove. An initContainer would
+# make the ordering explicit at the cost of a third image this repository
+# cannot build; a real deployment gets ordering from its orchestrator.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ada-session-redis
+  labels:
+    app: ada-session-redis
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ada-session-redis
+  template:
+    metadata:
+      labels:
+        app: ada-session-redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          # `--save ''` and `--appendonly no`: the persistence settings of
+          # the upstream image are tuned for a cache, and for a credential
+          # store the honest options are "durable" or "explicitly not".
+          # This picks the latter and says so, rather than inheriting an
+          # RDB dump on a timer nobody chose.
+          args:
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+          livenessProbe:
+            tcpSocket: { port: 6379 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ada-session-redis
+  labels:
+    app: ada-session-redis
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: ada-session-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
