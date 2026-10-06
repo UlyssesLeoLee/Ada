@@ -201,6 +201,22 @@ stringData:
   # or via sealed-secrets/external-secrets
   REMEDIATION_WEBHOOK_SECRET: "PLACEHOLDER_WEBHOOK_SECRET_REPLACE_ME"
   REMEDIATION_TRIGGER_SECRET: "PLACEHOLDER_TRIGGER_SECRET_REPLACE_ME"
+  # Credentials the runbook steps in config/remediation/ need.
+  #
+  # These two are read at step time, not at boot, so a deployment
+  # missing them starts cleanly and passes both probes -- the gap
+  # only opened when an alert fired a `notify_slack` or
+  # `page_operator` step. A step that cannot do its job now fails
+  # the action instead of recording a success nobody received, so
+  # an unset key shows up as a failed remediation rather than as a
+  # silent one.
+  #
+  # `crates/ada-core/tests/remediation_secrets.rs` fails if a step
+  # kind in a shipped runbook reads a key this Secret does not
+  # declare, so adding a step that needs a new credential is a
+  # compile-time-visible change here rather than a runtime surprise.
+  SLACK_WEBHOOK_URL: "PLACEHOLDER_SLACK_WEBHOOK_URL_REPLACE_ME"
+  PAGERDUTY_ROUTING_KEY: "PLACEHOLDER_PAGERDUTY_ROUTING_KEY_REPLACE_ME"
 ---
 apiVersion: apps/v1
 kind: Deployment
