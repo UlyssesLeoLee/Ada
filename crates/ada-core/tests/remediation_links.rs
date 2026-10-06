@@ -71,8 +71,15 @@ fn runbook_urls(text: &str) -> Vec<(Option<String>, String)> {
             Some((_, rest)) => rest,
             None => continue,
         };
-        let Some((_, rest)) = after.split_once(':') else { continue };
-        let raw = rest.trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'');
+        let Some((_, rest)) = after.split_once(':') else {
+            continue;
+        };
+        let raw = rest
+            .trim()
+            .trim_end_matches(',')
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'');
         if raw.is_empty() {
             continue;
         }
@@ -105,7 +112,9 @@ fn unroutable_reason(host: &str) -> Option<String> {
         return Some(format!("`{last}` is an RFC-reserved TLD and never routes"));
     }
     if !bare.contains('.') {
-        return Some(format!("`{bare}` has no dot: a bare hostname only resolves inside one network"));
+        return Some(format!(
+            "`{bare}` has no dot: a bare hostname only resolves inside one network"
+        ));
     }
     None
 }
@@ -119,11 +128,17 @@ fn shipped_runbook_urls_name_routable_hosts() {
 
     for dir in SCANNED_DIRS {
         let path = root.join(dir);
-        let entries = fs::read_dir(&path).unwrap_or_else(|e| panic!("read_dir {}: {e}", path.display()));
+        let entries =
+            fs::read_dir(&path).unwrap_or_else(|e| panic!("read_dir {}: {e}", path.display()));
         for entry in entries.flatten() {
             let p = entry.path();
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-            let is_scanned = name.ends_with(".json") || name.ends_with(".yaml") || name.ends_with(".yml");
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let is_scanned =
+                name.ends_with(".json") || name.ends_with(".yaml") || name.ends_with(".yml");
             if !p.is_file() || !is_scanned {
                 continue;
             }
