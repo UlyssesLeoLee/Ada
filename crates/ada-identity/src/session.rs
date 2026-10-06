@@ -231,16 +231,30 @@ impl SessionRecord {
 ///
 /// # The in-process backend is not reachable from here
 ///
-/// ```compile_fail
-/// use ada_identity::session::SessionStore;
-/// let store = SessionStore::new();
-/// ```
+/// Naming `SessionStore` from a production build is a compile error: it
+/// is `#[cfg(any(test, feature = "inproc-sessions"))]`, and nothing in a
+/// production dependency graph enables that feature.
 ///
-/// A doc test builds this crate as a normal dependency, not under
-/// `cfg(test)`, so that snippet failing to resolve is the same failure
-/// a production build gets. If the `inproc-sessions` gate is ever
-/// removed, this test fails instead of the comment being quietly
-/// ignored.
+/// # Why there is no `compile_fail` doctest proving it
+///
+/// There was one, and it was **vacuous in the context it ran in** — CI
+/// failed it with "Test compiled successfully, but it's marked
+/// `compile_fail`". Its reasoning was that "a doc test builds this crate
+/// as a normal dependency, not under `cfg(test)`". That part is true and
+/// irrelevant. Under `cargo test --workspace`, Cargo unifies features
+/// across every member, and `ada-m13-api-gateway` enables
+/// `inproc-sessions` from its `[dev-dependencies]` so its own tests can
+/// reach this double. The doctest was therefore compiled against a build
+/// that *did* have the feature on, and could only ever pass or fail for
+/// reasons unrelated to the property being claimed.
+///
+/// The property is real and is checked where it can actually be observed:
+/// `no_production_dependency_enables_a_test_only_feature` in
+/// `crates/ada-core/tests/ci_feature_coverage.rs` asserts that
+/// `inproc-sessions` appears in the workspace only in
+/// `[dev-dependencies]`, which is what makes a normal build of this crate
+/// resolve without it. A feature flag cannot prove its own absence from
+/// a build that has it switched on.
 #[async_trait]
 pub trait SessionStorage: Send + Sync {
     /// Store `session` and return its opaque token.

@@ -198,11 +198,21 @@ jobs:
       # and unknown to the next, i.e. a user logged out on every request
       # that lands on a different replica.
       #
-      # The crate enforces that itself with a `compile_fail` doctest on
-      # `SessionStore::new()`. This lane is the other half: it keeps the
-      # feature compiling, tested and linted, so the gate in
-      # crates/ada-core/tests/ci_feature_coverage.rs can keep asserting that
-      # no non-default feature is built by nothing.
+      # The *negative* half of the rule -- that no production dependency
+      # edge turns the feature on -- is asserted by
+      # `no_production_dependency_enables_a_test_only_feature` in
+      # crates/ada-core/tests/ci_feature_coverage.rs. It was previously
+      # a `compile_fail` doctest on `SessionStore::new()`, which was
+      # vacuous where it ran: under `cargo test --workspace`, Cargo
+      # unifies features across members and the gateway's dev-dependency
+      # has already switched `inproc-sessions` on, so the doctest saw a
+      # build *with* the feature and CI failed it with "Test compiled
+      # successfully, but it's marked compile_fail". A feature flag cannot
+      # demonstrate its own absence from a build that has it enabled.
+      #
+      # This lane is the positive half: it keeps the feature compiling,
+      # tested and linted, so the coverage gate beside it can keep
+      # asserting that no non-default feature is built by nothing.
       - name: cargo test (identity in-proc sessions)
         run: cargo test -p ada-identity --features inproc-sessions --locked
 
