@@ -335,6 +335,74 @@ fn docker_copy_dests(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Lines of a Dockerfile with `\` continuations joined.
+///
+/// The uid is created by a `RUN` that wraps across lines, so reading it one
+/// physical line at a time finds a flag on one line and its value nowhere.
+/// The backslash itself is dropped while joining: keeping it leaves `--uid`
+/// followed by `\`, and the digit scan that reads the value stops at a
+/// character that is not a digit and reports the flag as absent.
+fn logical_lines(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if buf.is_empty() {
+            buf = line.trim_end_matches('\\').to_string();
+        } else {
+            buf.push(' ');
+            buf.push_str(line.trim_end_matches('\\'));
+        }
+        if line.ends_with('\\') {
+            continue;
+        }
+        out.push(std::mem::take(&mut buf));
+    }
+    if !buf.is_empty() {
+        out.push(buf);
+    }
+    out
+}
+
+/// The first value of `flag` in a Dockerfile, as written.
+fn docker_flag(text: &str, flag: &str) -> Option<String> {
+    logical_lines(text).into_iter().find_map(|line| {
+        let idx = line.find(flag)?;
+        let rest = line[idx + flag.len()..].trim_start();
+        let token: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if token.is_empty() {
+            None
+        } else {
+            Some(token)
+        }
+    })
+}
+
+/// `runAsUser:` / `runAsGroup:` from a Deployment's pod security context.
+fn run_as(doc: &[&str], key: &str) -> Option<String> {
+    let top = top_indent(doc);
+    let spec_at = find_key(doc, 0, "spec:", top)?;
+    let pod = {
+        let (lo, hi) = block_after(doc, spec_at);
+        doc[lo..hi].iter().position(|l| l.trim() == "template:")? + lo
+    };
+    let (tlo, thi) = block_after(doc, pod);
+    let inner = doc[tlo..thi].iter().position(|l| l.trim() == "spec:")? + tlo;
+    let (slo, shi) = block_after(doc, inner);
+    let sec = doc[slo..shi]
+        .iter()
+        .position(|l| l.trim() == "securityContext:")?
+        + slo;
+    let sec_indent = indent_of(doc[sec]);
+    doc[block_after(doc, sec)]
+        .into_iter()
+        .find(|&j| indent_of(doc[j]) == sec_indent + 2 && doc[j].trim_start().starts_with(key))
+        .map(|j| scalar(doc[j].trim_start().strip_prefix(key).unwrap_or_default()))
+}
+
 fn dockerfile_for(workload: &str) -> Option<(String, String)> {
     let path = repo_root()
         .join(DOCKER_DIR)
@@ -557,5 +625,73 @@ fn the_service_index_spans_both_deploy_directories() {
          `ada-session-redis` lives in deploy/infra and is loaded on the same \
          basis as deploy/k8s, so a scan that missed it would report a real \
          Service as undefined."
+    );
+}
+
+/// The uid a manifest pins must be the uid its image creates.
+///
+/// `runAsUser: 65532` in a manifest and `--uid 65532` in a Dockerfile are
+/// the same fact stated twice, and the two are written at different times
+/// by different edits. When they agree, the pod starts as an unprivileged
+/// uid with a writable home. When they do not, every replica fails to start
+/// with a `runAsNonRoot` error, and the CI image job cannot see it: it runs
+/// the container without the manifest's `securityContext`.
+///
+/// `ada-session-redis` is skipped because it has no Dockerfile. It is an
+/// upstream image, the same distinction `deploy_images.rs` already draws
+/// when it refuses `redis:7-alpine` in `deploy/k8s`.
+#[test]
+fn manifest_run_as_uid_matches_the_user_its_image_creates() {
+    let mut checked = 0usize;
+    let mut problems: Vec<String> = Vec::new();
+
+    for (file, docs) in deploy_documents() {
+        for doc in &docs {
+            let top = top_indent(doc);
+            if find_key(doc, 0, "kind: Deployment", top).is_none() {
+                continue;
+            }
+            let Some(name) = name_of(doc, top) else {
+                continue;
+            };
+            let Some((docker_rel, docker_text)) = dockerfile_for(&name) else {
+                continue;
+            };
+            let pairs = [("runAsUser:", "--uid"), ("runAsGroup:", "--gid")];
+            for (manifest_key, docker_flag_name) in pairs {
+                let (Some(manifest_uid), Some(image_uid)) = (
+                    run_as(doc, manifest_key),
+                    docker_flag(&docker_text, docker_flag_name),
+                ) else {
+                    continue;
+                };
+                checked += 1;
+                if manifest_uid != image_uid {
+                    problems.push(format!(
+                        "{file}: {manifest_key} {manifest_uid}, but {docker_rel} \
+                         creates the user with `{docker_flag_name} {image_uid}`. \
+                         The kubelet refuses to start the container when the \
+                         pinned uid is not the one the image has, and no CI job \
+                         applies this manifest's security context."
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        checked >= 6,
+        "only {checked} uid comparison(s) were made; there are three images in \
+         this repository, each pinning a user and a group. A count this low \
+         means the manifest or the Dockerfile parser stopped finding them, \
+         and the comparison would be silently vacuous."
+    );
+    assert!(
+        problems.is_empty(),
+        "{} uid(s) a manifest pins disagree with the image it deploys:\n         {}\n\
+         A pod cannot start as a uid its image does not have, so this is a \
+         total outage for that workload rather than a degraded one.",
+        problems.len(),
+        problems.join("\n         ")
     );
 }
