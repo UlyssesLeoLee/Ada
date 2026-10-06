@@ -275,17 +275,14 @@ fn volume_entries(doc: &[&str], volumes_at: usize) -> Vec<(String, Range<usize>)
 /// deeper -- under `projected.sources`, say -- is not the volume's source
 /// and must not be mistaken for one.
 fn configmap_source(doc: &[&str], range: &Range<usize>) -> Option<(String, bool)> {
-    let Some(child_indent) = range
+    let child_indent = range
         .clone()
         .map(|j| doc[j])
         .find(|l| {
             let t = l.trim();
             !t.is_empty() && !t.starts_with('#') && !t.starts_with("- ")
         })
-        .map(indent_of)
-    else {
-        return None;
-    };
+        .map(indent_of)?;
 
     for j in range.clone() {
         if indent_of(doc[j]) != child_indent {
@@ -465,12 +462,26 @@ fn runbooks_on_disk() -> BTreeMap<String, String> {
         .filter_map(Result::ok)
     {
         let path = entry.path();
+        // A subdirectory named `something.json` would satisfy the extension
+        // test and then fail `read_to_string` with a panic about a runbook.
+        // The directory is documented as flat, but the check is one line.
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        // `extension()` rather than `name.ends_with(".json")`: the workspace
+        // denies warnings and clippy flags the case-sensitive form. Testing
+        // the real extension is also the more accurate question -- a file
+        // called `x.JSON` is a runbook on a case-insensitive filesystem and
+        // would be skipped by the string form on a case-sensitive one.
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        {
+            continue;
+        }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !name.ends_with(".json") {
-            continue;
-        }
         out.insert(
             name.to_string(),
             fs::read_to_string(&path).expect("read runbook"),
