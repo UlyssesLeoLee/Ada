@@ -114,7 +114,7 @@ async fn gateway_stub(req: Request) -> Response {
             && pat
                 .iter()
                 .zip(&segments)
-                .all(|(p, s)| p.starts_with(':') || *p == s)
+                .all(|(p, s)| p.starts_with(':') || *p == *s)
     });
 
     if !matched {
