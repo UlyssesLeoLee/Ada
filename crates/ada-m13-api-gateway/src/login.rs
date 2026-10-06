@@ -172,16 +172,31 @@ const DECOY_SECRET: &[u8] = b"ada-gateway-decoy-not-a-real-credential";
 /// against an attacker who can time the whole request with
 /// microsecond resolution. It removes the data-dependent *branch*, which
 /// is the part a network attacker can reach.
+///
+/// Two empty inputs are deliberately **not** a match. An earlier version
+/// returned `true` for `("", "")`: both lengths XOR to 0 and both reads are
+/// out of range so every slot contributes 0, leaving the accumulator at
+/// zero. That makes a credential configured with an empty secret
+/// authenticate an empty password — an account with no password at all. The
+/// unit test `ct_eq_secret_accepts_only_an_exact_match` caught it on CI;
+/// the empty-vs-empty case is the only pair that the length fold and the
+/// byte loop both consider "equal", so `present` is what distinguishes it.
 fn ct_eq_secret(presented: &[u8], stored: &[u8]) -> bool {
     // u64 so a length difference of 2^32 or more cannot cancel out.
     let mut diff: u64 = u64::try_from(presented.len()).unwrap_or(u64::MAX)
         ^ u64::try_from(stored.len()).unwrap_or(u64::MAX);
+    // 1 once either side has contributed at least one byte, 0 only while
+    // both slices are empty at the same slot. Derived from `is_some`, i.e.
+    // from lengths, which are already public to the caller via the fold
+    // above -- so this adds no data-dependent branch over the secret bytes.
+    let mut present: u64 = 0;
     for i in 0..SECRET_SLOTS {
-        let left = presented.get(i).copied().unwrap_or(0);
-        let right = stored.get(i).copied().unwrap_or(0);
-        diff |= u64::from(left ^ right);
+        let left = presented.get(i).copied();
+        let right = stored.get(i).copied();
+        present |= u64::from(left.is_some() | right.is_some());
+        diff |= u64::from(left.unwrap_or(0) ^ right.unwrap_or(0));
     }
-    diff == 0
+    diff == 0 && present == 1
 }
 
 /// Fold an email into the key used for both lookup and rate limiting.
@@ -318,13 +333,20 @@ impl CredentialDirectory {
     /// working login. Unknown fields are rejected, so a misspelled
     /// `tenant_id` fails at startup rather than producing a credential
     /// with an empty tenant.
+    ///
+    /// An empty `password` is rejected for the same reason, and it is the
+    /// one that used to be silent. `ct_eq_secret` treats two empty inputs
+    /// as *not* a match, so such an account could never authenticate — the
+    /// comparison is now correct, but a credential that can never log in is
+    /// a misconfiguration, and refusing to start says so instead of leaving
+    /// an operator to discover it as a mysterious 401.
     pub fn from_json(raw: &str) -> Result<Self> {
         let parsed: Vec<BootstrapUser> =
             serde_json::from_str(raw).map_err(|_| ApiError::BadRequest(BAD_USER_CONFIG.into()))?;
         let dir = Self::new();
         for user in parsed {
             let identity = user.email.trim();
-            if identity.is_empty() {
+            if identity.is_empty() || user.password.is_empty() {
                 return Err(ApiError::BadRequest(BAD_USER_CONFIG.into()));
             }
             dir.insert(
@@ -904,5 +926,22 @@ mod tests {
             "user_id defaults to email"
         );
         assert_eq!(user.tenant_id, "tenant-a");
+    }
+
+    /// An empty `password` is a misconfiguration, not a credential.
+    ///
+    /// `ct_eq_secret` already refuses to match two empty inputs, so such an
+    /// account can never authenticate. The point of rejecting it here is
+    /// that it should not start up at all: an operator gets a refusal with
+    /// a reason rather than a service that answers 401 to a real user for
+    /// as long as the misconfiguration is invisible.
+    #[test]
+    fn a_credential_with_an_empty_password_is_refused_rather_than_silently_unusable() {
+        let raw = r#"[{"email":"ops@example.invalid","password":"","tenant_id":"tenant-a","roles":["viewer"]}]"#;
+        assert!(
+            CredentialDirectory::from_json(raw).is_err(),
+            "a credential with an empty secret must fail at startup, not \
+             produce an account that can never log in"
+        );
     }
 }
