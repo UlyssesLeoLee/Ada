@@ -441,12 +441,13 @@ impl IdempotencyStore {
     /// same answer [`IdempotencyStore::record_at`] would give.
     #[must_use]
     pub fn has_seen_at(&self, event_id: &str, tenant_id: &str, now_unix: i64) -> bool {
-        // The read guard has to be bound before `get`: it is
-        // `RwLockReadGuard<HashMap<..>>`, and calling `.get()` on the guard
-        // itself is a type error rather than an auto-deref, because the
-        // inherent method lookup does not go through `Deref`.
+        // `RwLock<Inner>`, so the guard derefs to `Inner` and the map is a
+        // *field* of that -- not the guard's own target. Both hops are
+        // needed: `self.inner.read().get(..)` and `held.get(..)` are both
+        // E0599, for different reasons.
         let held = self.inner.read();
-        held.get(&(event_id.to_owned(), tenant_id.to_owned()))
+        held.entries
+            .get(&(event_id.to_owned(), tenant_id.to_owned()))
             .is_some_and(|expires_at| *expires_at > now_unix)
     }
 
