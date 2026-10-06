@@ -49,7 +49,9 @@ use tracing::warn;
 
 /// Per-step execution mode. Selected via the `executor` field
 /// on the four "outside world" step variants. `RunCommand`
-/// and `Sequence` ignore this enum.
+/// and `Sequence` carry no field: they have no per-step knob,
+/// and are governed by the engine's own [`StepExecutor::mode`]
+/// instead.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutorMode {
@@ -61,6 +63,22 @@ pub enum ExecutorMode {
     /// `ReqwestClient` / `tokio-postgres` client in
     /// production).
     Real,
+}
+
+impl ExecutorMode {
+    /// Whether a step runs for real, given what the engine is
+    /// wired as and what the step declares.
+    ///
+    /// Both have to agree. The engine alone is the outer limit --
+    /// a service wired [`ExecutorMode::DryRun`] performs no side
+    /// effects at all, whatever the runbook asks for -- and a step
+    /// that declares `dry_run` is never escalated by the engine
+    /// being real, so one cautious step stays cautious inside an
+    /// otherwise live action.
+    #[must_use]
+    pub fn runs_for_real(engine: Self, step: Option<Self>) -> bool {
+        engine == Self::Real && step != Some(Self::DryRun)
+    }
 }
 
 /// Context passed to `StepExecutor::execute`. Carries the
@@ -214,6 +232,14 @@ pub trait StepExecutor: Send + Sync {
         step: &ActionStep,
         ctx: &ExecutionContext,
     ) -> Result<StepExecutionResult>;
+
+    /// What this executor is wired as.
+    ///
+    /// The engine consults this before it dispatches, so a
+    /// `DryRunExecutor` means no step reaches a side effect --
+    /// including `run_command`, which is dispatched by the
+    /// engine rather than through this trait.
+    fn mode(&self) -> ExecutorMode;
 }
 
 /// The always-safe executor. Every step kind returns
@@ -225,6 +251,10 @@ pub struct DryRunExecutor;
 
 #[async_trait::async_trait]
 impl StepExecutor for DryRunExecutor {
+    fn mode(&self) -> ExecutorMode {
+        ExecutorMode::DryRun
+    }
+
     async fn execute(
         &self,
         step: &ActionStep,
@@ -313,6 +343,10 @@ impl RealExecutor {
 #[allow(clippy::too_many_lines)]
 #[async_trait::async_trait]
 impl StepExecutor for RealExecutor {
+    fn mode(&self) -> ExecutorMode {
+        ExecutorMode::Real
+    }
+
     async fn execute(
         &self,
         step: &ActionStep,
@@ -408,60 +442,70 @@ impl StepExecutor for RealExecutor {
                 // Slack incoming-webhook. Resolved from env at
                 // call time so the URL never lives in the
                 // runbook file (per security design §7.1).
-                let webhook_url = std::env::var("SLACK_WEBHOOK_URL").unwrap_or_else(|_| {
-                    warn!(
-                        channel,
-                        "SLACK_WEBHOOK_URL not set; notify_slack will be a no-op"
-                    );
-                    String::new()
+                //
+                // A real step that cannot do its job reports
+                // failure, not success. The old behaviour returned
+                // `ok("... skipped")`, which recorded "notified the
+                // channel" in the action outcome while nobody had
+                // been notified -- and nothing sets the variable in
+                // the shipped manifests, so every runbook carrying a
+                // notify_slack step lied on every run.
+                let webhook_url = match std::env::var("SLACK_WEBHOOK_URL") {
+                    Ok(url) if !url.trim().is_empty() => url,
+                    _ => {
+                        warn!(channel, "SLACK_WEBHOOK_URL not set; notify_slack fails");
+                        return Err(RemediationError::StepFailed {
+                            index: 0,
+                            message: format!(
+                                "notify_slack {channel}: SLACK_WEBHOOK_URL is unset, so \
+                                 the step did not run. Declare the key in the \
+                                 ada-remediation-secrets Secret."
+                            ),
+                        });
+                    }
+                };
+                let body = serde_json::json!({
+                    "channel": channel,
+                    "text": message,
                 });
-                if webhook_url.is_empty() {
-                    StepExecutionResult::ok(
-                        format!("notify_slack {channel} skipped (no webhook url)"),
-                        started.elapsed(),
+                let body_str = body.to_string();
+                let outcome = self
+                    .network
+                    .call(
+                        "POST",
+                        &webhook_url,
+                        &[("Content-Type".to_string(), "application/json".to_string())],
+                        Some(&body_str),
                     )
-                } else {
-                    let body = serde_json::json!({
-                        "channel": channel,
-                        "text": message,
-                    });
-                    let body_str = body.to_string();
-                    let outcome = self
-                        .network
-                        .call(
-                            "POST",
-                            &webhook_url,
-                            &[("Content-Type".to_string(), "application/json".to_string())],
-                            Some(&body_str),
-                        )
-                        .await?;
-                    StepExecutionResult::ok(
-                        format!("notify_slack {channel} -> {outcome}"),
-                        started.elapsed(),
-                    )
-                }
+                    .await?;
+                StepExecutionResult::ok(
+                    format!("notify_slack {channel} -> {outcome}"),
+                    started.elapsed(),
+                )
             }
             ActionStep::PageOperator {
                 severity,
                 runbook_url,
                 ..
             } => {
-                let routing_key = std::env::var("PAGERDUTY_ROUTING_KEY").unwrap_or_else(|_| {
-                    warn!(
-                        runbook_url,
-                        "PAGERDUTY_ROUTING_KEY not set; page_operator will be a no-op"
-                    );
-                    String::new()
-                });
-                if routing_key.is_empty() {
-                    return Ok(StepExecutionResult::ok(
-                        format!(
-                            "page_operator severity={} skipped (no routing key)",
-                            severity_label(*severity)
-                        ),
-                        started.elapsed(),
-                    ));
-                }
+                let routing_key = match std::env::var("PAGERDUTY_ROUTING_KEY") {
+                    Ok(key) if !key.trim().is_empty() => key,
+                    _ => {
+                        warn!(
+                            runbook_url,
+                            "PAGERDUTY_ROUTING_KEY not set; page_operator fails"
+                        );
+                        return Err(RemediationError::StepFailed {
+                            index: 0,
+                            message: format!(
+                                "page_operator severity={}: PAGERDUTY_ROUTING_KEY is unset, \
+                                 so the step did not run. Declare the key in the \
+                                 ada-remediation-secrets Secret.",
+                                severity_label(*severity)
+                            ),
+                        });
+                    }
+                };
                 let body = serde_json::json!({
                     "routing_key": routing_key,
                     "event_action": "trigger",
@@ -544,14 +588,16 @@ mod tests {
             channel: "#ada-ops".into(),
             message: "disk low".into(),
         };
-        // No SLACK_WEBHOOK_URL in the test env -> the
-        // executor short-circuits with a "skipped" message
-        // and does NOT call the network client. That is the
-        // "no-op when env is missing" behaviour we want
-        // when secrets aren't wired up.
-        let r = ex.execute(&step, &ctx()).await.unwrap();
-        assert!(r.message.contains("skipped"));
-        assert_eq!(lc.recorded().len(), 0);
+        // No SLACK_WEBHOOK_URL in the test env, so the step
+        // cannot do its job. It must fail: reporting success here
+        // is what let a runbook claim a notification that never
+        // happened, on every run, in the shipped manifests.
+        let err = ex.execute(&step, &ctx()).await.unwrap_err();
+        assert!(
+            err.to_string().contains("SLACK_WEBHOOK_URL"),
+            "the failure must name the missing key, got: {err}"
+        );
+        assert_eq!(lc.recorded().len(), 0, "must not call the network");
     }
 
     #[tokio::test]
@@ -618,19 +664,28 @@ mod tests {
             severity: PageSeverity::High,
             runbook_url: "https://runbooks.ada.local/disk".into(),
         };
-        let r = ex.execute(&step, &ctx()).await.unwrap();
-        // PAGERDUTY_ROUTING_KEY is unset in CI, so the call
-        // short-circuits without touching the network.
-        assert!(r.message.contains("skipped") || r.message.contains("page_operator"));
-        // If the env happens to be set in a developer's
-        // shell, the network call should record exactly
-        // one PagerDuty v2 enqueue. The assertion below
-        // checks either path.
-        if !lc.recorded().is_empty() {
-            assert_eq!(
-                lc.recorded()[0].url,
-                "https://events.pagerduty.com/v2/enqueue"
-            );
+        match ex.execute(&step, &ctx()).await {
+            Ok(r) => {
+                // The env happened to be set in someone's shell:
+                // exactly one PagerDuty v2 enqueue, no more.
+                assert!(r.message.contains("page_operator"));
+                assert_eq!(lc.recorded().len(), 1);
+                assert_eq!(
+                    lc.recorded()[0].url,
+                    "https://events.pagerduty.com/v2/enqueue"
+                );
+            }
+            Err(e) => {
+                // PAGERDUTY_ROUTING_KEY is unset, which is the CI
+                // case and the shipped-manifest case. The step has
+                // to fail and name the key: reporting success left
+                // an outcome claiming a page that never happened.
+                assert!(
+                    e.to_string().contains("PAGERDUTY_ROUTING_KEY"),
+                    "the failure must name the missing key, got: {e}"
+                );
+                assert!(lc.recorded().is_empty(), "must not call the network");
+            }
         }
     }
 

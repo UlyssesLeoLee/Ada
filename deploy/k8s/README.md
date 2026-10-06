@@ -253,6 +253,44 @@ panics on empty secret).
 
 Choose one:
 
+### The two step credentials
+
+`REMEDIATION_WEBHOOK_SECRET` and `REMEDIATION_TRIGGER_SECRET` are
+read at boot; an empty value panics, so a missing one stops the pod
+immediately. `SLACK_WEBHOOK_URL` and `PAGERDUTY_ROUTING_KEY` are
+read when a `notify_slack` or `page_operator` step *fires*, which is
+a much later moment than startup.
+
+A runbook that carries one of those steps and finds its credential
+unset now **fails the action** rather than recording a success. That
+is the point: a notification step that silently does nothing leaves an
+outcome claiming the operator was paged when nobody was, and the
+outcome is what a responder reads at 3am. Failing means the gap shows
+up as a failed remediation on the first alert instead of as silence
+until someone notices.
+
+Both keys are `PLACEHOLDER_*` in the shipped Secret, so a reference
+deployment that fires one of those steps will fail it loudly until the
+real values are supplied. The set of keys the executor reads is
+checked against the Secret by
+`crates/ada-core/tests/remediation_honesty.rs`, so adding a step that
+needs a new credential without declaring it here fails CI.
+
+### What runs, and what does not
+
+`main.rs` builds a `RemediationEngine::new()`, whose step executor is
+a `DryRunExecutor`. Under that wiring **no step has side effects**,
+including `run_command`: the engine short-circuits on mode before it
+dispatches, so the `find ... -delete` step in `disk-space-low.json`
+is recorded as a rehearsal rather than run. This is the shipped
+default and the only reason a destructive-looking runbook is safe to
+carry in the repository.
+
+Turning it on means injecting a real executor in `main.rs`, which
+makes every shipped runbook live. `remediation_honesty.rs` fails if
+that happens without the gate being updated in the same commit, so the
+diff always shows both halves of the decision.
+
 ### Option 1: external-secrets-operator (recommended)
 
 ```yaml
