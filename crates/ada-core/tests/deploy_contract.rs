@@ -724,3 +724,59 @@ fn manifest_run_as_uid_matches_the_user_its_image_creates() {
         problems.join("\n         ")
     );
 }
+
+/// The console states which origins it answers for.
+///
+/// `GM_CONSOLE_ALLOWED_ORIGINS` has a compiled-in default, so a
+/// deployment that never sets it silently runs on a list nobody chose
+/// -- one that carries `https://localhost:3000`, a port that belongs
+/// to Grafana, and omits the documented local dev origin
+/// `http://localhost:8080`. Nothing in the deploy path fails when
+/// that drifts, and the browser does not currently traverse the layer
+/// at all, so the drift would surface only when something starts
+/// calling the gateway cross-origin.
+#[test]
+fn the_console_declares_its_allowed_origins() {
+    let text = fs::read_to_string(repo_root().join("deploy/k8s/gm-console.yaml"))
+        .expect("reading deploy/k8s/gm-console.yaml");
+
+    // Matched by prefix rather than whole-equality: the key carries a
+    // value on the following line, and an equality test against
+    // `"value:"` finds nothing at all while reporting no error.
+    let mut next = text.lines();
+    let mut value = None;
+    while let Some(line) = next.next() {
+        if line.trim() == "- name: GM_CONSOLE_ALLOWED_ORIGINS" {
+            value = next.next().map(str::trim);
+            break;
+        }
+    }
+    let Some(raw) = value else {
+        panic!(
+            "deploy/k8s/gm-console.yaml does not set GM_CONSOLE_ALLOWED_ORIGINS. \
+             Without it the pod runs on the binary's compiled-in default, which \
+             nobody chose and no gate can see."
+        );
+    };
+    let Some(body) = raw.strip_prefix("value:") else {
+        panic!("expected a `value:` line after the key, got: {raw}");
+    };
+
+    let origins: Vec<String> = scalar(body)
+        .split(',')
+        .map(|o| o.trim().to_string())
+        .filter(|o| !o.is_empty())
+        .collect();
+    // Anti-vacuity: an empty list would satisfy every check below.
+    assert!(!origins.is_empty(), "declared an empty allow-list: {raw}");
+    for origin in &origins {
+        assert!(
+            origin.starts_with("http://") || origin.starts_with("https://"),
+            "allow-list entry {origin:?} is not an origin -- no scheme"
+        );
+        assert!(
+            !origin.ends_with('/'),
+            "allow-list entry {origin:?} has a trailing slash"
+        );
+    }
+}

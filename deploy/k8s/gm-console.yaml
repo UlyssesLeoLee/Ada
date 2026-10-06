@@ -44,6 +44,25 @@ spec:
               value: "0.0.0.0:8080"
             - name: GM_CONSOLE_UPSTREAM
               value: "http://ada-api-gateway:8080"
+            # The CORS allow-list, stated by the deployment rather than
+            # inherited from the binary's compiled-in default.
+            #
+            # The browser does not currently traverse this layer: every
+            # /api/* call is a same-origin relative URL that gm-console
+            # reverse-proxies server-side, so there is no cross-origin
+            # request for it to answer. It is declared anyway, because the
+            # moment anything calls the gateway directly -- a third-party
+            # integration, a split-origin rollout -- an allow-list nobody
+            # chose is the one that applies, and the operator has no way to
+            # see it.
+            #
+            # `deploy/web/DEMO_URL.md` records the naming convention these
+            # follow. `http://localhost:8080` is the documented local dev
+            # origin (`cargo run -p gm-console-server`); note it is *not*
+            # the port in the binary's default list, which carries
+            # `https://localhost:3000` -- that port belongs to Grafana.
+            - name: GM_CONSOLE_ALLOWED_ORIGINS
+              value: "https://gm-console.kanvas.dev,https://staging.gm-console.kanvas.dev,http://localhost:8080"
             # The document root is baked into the image at /srv/static, so
             # this needs no volume and no ConfigMap. It MUST stay equal to
             # the GM_CONSOLE_STATIC_DIR in deploy/docker/gm-console.Dockerfile:

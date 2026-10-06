@@ -267,8 +267,17 @@ spec:
             - secretRef:
                 name: ada-remediation-secrets
           env:
-            # honour the Pod's downward API for a sane
-            # log prefix in aggregated logs
+            # The Pod's downward API, for log collectors that
+            # aggregate by pod. Nothing in this repository reads
+            # either variable: the service reads RUST_LOG,
+            # REMEDIATION_BIND_ADDR, REMEDIATION_RUNBOOK_DIR,
+            # REMEDIATION_WEBHOOK_SECRET and
+            # REMEDIATION_TRIGGER_SECRET at boot (the ConfigMap
+            # and the Secret below), plus SLACK_WEBHOOK_URL and
+            # PAGERDUTY_ROUTING_KEY later, per step. These two
+            # exist for the scrape side, not for the service. The
+            # previous comment implied the service used them for
+            # its own log prefix, which it does not.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
