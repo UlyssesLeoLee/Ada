@@ -8,7 +8,9 @@ the deployed topology.
 ## Files
 
 - `ada-api-gateway.yaml` — Deployment + Service + PodDisruptionBudget for the gateway
-- `ada-remediation.yaml` — ConfigMap + Secret (placeholders) + Deployment + Service + NetworkPolicy
+- `ada-remediation.yaml` — two ConfigMaps (config, and the runbooks the
+  engine executes) + Secret (placeholders) + Deployment + Service +
+  NetworkPolicy
 - `gm-console.yaml` — Deployment + Service + HPA + PodDisruptionBudget for the web console
 - `kustomization.yaml` — kustomize entry point, and the single place
   the image registry is named
@@ -209,6 +211,39 @@ fail-closed, not one that has been given a way in.
 - For hot-reload: a CSI-backed RWX volume (or a `Reloader`-style sidecar watching the ConfigMap)
 - For real secrets: sealed-secrets, external-secrets-operator, or a similar tool
 
+## Editing a runbook
+
+Runbooks live in `config/remediation/*.json` and are mounted into
+`ada-remediation` through the `ada-remediation-runbooks` ConfigMap in
+`ada-remediation.yaml`. Edit the JSON, then regenerate the ConfigMap:
+
+```
+python crates/ada-remediation/scripts/gen-runbooks-configmap.py
+```
+
+`--check` reports staleness and exits non-zero without writing, which is
+the form for a pre-commit hook.
+
+You do not have to remember to run it. The ConfigMap is a rendering of
+the runbooks rather than a second copy, and
+`every_runbook_on_disk_is_mounted_by_the_deployment`
+(`crates/ada-core/tests/mounted_configmaps.rs`) fails the build when the
+two disagree — a missing key, drifted content, or a key with no file
+behind it. The script exists to make the right thing easy; the gate is
+what makes it correct.
+
+The comparison folds line endings first. This repository has no
+`.gitattributes`, so a checkout with `core.autocrlf` set rewrites the
+committed LF blobs to CRLF: the runbooks read back with CRLF on a
+Windows checkout and with LF on a Linux one, from the same commit. CRLF
+versus LF is a property of the checkout rather than of either file, and
+the question the gate asks does not turn on it.
+
+One authoring rule falls out of the comparison: a runbook file must end
+with exactly one newline. The ConfigMap value is a literal block scalar,
+which always carries a trailing line break, so a file without one cannot
+compare equal to its own rendered value.
+
 ## Secret bootstrap
 
 The Secret in `ada-remediation.yaml` ships with
@@ -332,15 +367,18 @@ Two failure modes are worth knowing, because the status codes differ:
 
 Two other things about this endpoint as it stands:
 
-- The service starts with **no runbooks**. The five runbooks do
-  exist, in `config/remediation/`, and `crates/ada-remediation`
-  loads them from there. But the Deployment mounts a ConfigMap
-  named `ada-remediation-runbooks` at that path, and that ConfigMap
-  is **referenced and never defined** in `deploy/k8s/`. Marked
-  `optional: true`, so the mount succeeds with an empty directory
-  and nothing warns. A validly signed alert is therefore accepted
-  and then matches zero actions — the service runs, answers its
-  probes, and remediates nothing.
+- The runbooks are baked into the `ada-remediation-runbooks` ConfigMap,
+  mounted read-only at `/etc/ada-remediation/runbooks`, which is what
+  `REMEDIATION_RUNBOOK_DIR` points at. They used to be **referenced and
+  never defined** in `deploy/k8s/`, and marked `optional: true`, so the
+  mount succeeded with an empty directory and nothing warned: a validly
+  signed alert was accepted and then matched zero actions — the service
+  ran, answered its probes, and remediated nothing. Two gates in
+  `crates/ada-core/tests/mounted_configmaps.rs` now hold both ends of
+  that: every mounted ConfigMap is defined and is not `optional`, and
+  every runbook in `config/remediation/` is a key of the ConfigMap with
+  byte-identical contents. Editing a runbook on disk without
+  regenerating the ConfigMap fails the second gate rather than shipping.
 - `/health`, not `/healthz`, is the health route; see the
   note in `ada-remediation.yaml`.
 

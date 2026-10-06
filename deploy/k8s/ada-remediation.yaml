@@ -29,6 +29,163 @@ data:
   # log level: trace | debug | info | warn | error
   RUST_LOG: "info,ada_remediation=debug"
 ---
+# ada-remediation-runbooks -- the runbooks the remediation engine executes.
+#
+# GENERATED from config/remediation by
+# crates/ada-remediation/scripts/gen-runbooks-configmap.py -- do not edit by hand.
+#
+# `every_runbook_on_disk_is_mounted_by_the_deployment` in
+# crates/ada-core/tests/mounted_configmaps.rs fails the build if this and
+# the directory disagree, so this is a rendering of the runbooks rather than
+# a second copy of them. Regenerate it after editing anything in there.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ada-remediation-runbooks
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: ada-remediation
+    app.kubernetes.io/version: v0.7.1
+data:
+  db-connection-pool-exhausted.json: |
+    {
+      "version": 1,
+      "_comment": "Phase 8 / 12-auto-remediation.md §5.3. P2/P3. The pg function `remediation_kill_idle` (v0.6.x future) closes idle sessions older than 5 min on the affected database. Notify #ada-ops so the postmortem picks up the burst.",
+      "actions": [
+        {
+          "id": "db-pool-exhausted-kill-idle",
+          "name": "DB connection pool exhausted — kill idle sessions",
+          "trigger": "DBConnectionPoolExhausted",
+          "severities": ["P2", "P3"],
+          "steps": [
+            {
+              "kind": "pg_function",
+              "name": "remediation_kill_idle",
+              "args": ["{{ $labels.database }}", "300"]
+            },
+            {
+              "kind": "notify_slack",
+              "channel": "#ada-ops",
+              "message": "auto-remediation killed idle sessions on {{ $labels.database }} (pool exhausted since {{ $labels.starts_at }})"
+            }
+          ],
+          "cooldown": 900,
+          "max_retries": 1
+        }
+      ]
+    }
+
+  disk-space-low.json: |
+    {
+      "version": 1,
+      "_comment": "Phase 8 / 12-auto-remediation.md §5.1. JSON (not YAML) due to offline build env (no serde_yaml in Cargo.lock). All step 'cmd'/'channel' values are template-free; alerting uses Alertmanager's separate Slack/PagerDuty receivers for the user-facing message — these auto-remediation steps are for the *operator* (sizing, postmortem trail).",
+      "actions": [
+        {
+          "id": "disk-space-low",
+          "name": "Disk space low on {{ $labels.instance }}",
+          "trigger": "DiskSpaceFillingFast",
+          "severities": ["P2", "P3"],
+          "steps": [
+            {
+              "kind": "run_command",
+              "cmd": "du",
+              "args": ["-sh", "/var/log"],
+              "timeout_secs": 30
+            },
+            {
+              "kind": "run_command",
+              "cmd": "find",
+              "args": ["/var/log", "-type", "f", "-name", "*.gz", "-mtime", "+7", "-delete"],
+              "timeout_secs": 60
+            },
+            {
+              "kind": "notify_slack",
+              "channel": "#ada-ops",
+              "message": "auto-remediation disk-space-low ran on {{ $labels.instance }} — see Phase 8 dashboard for step results"
+            }
+          ],
+          "cooldown": 1800,
+          "max_retries": 1
+        }
+      ]
+    }
+
+  service-down.json: |
+    {
+      "version": 1,
+      "_comment": "Phase 8 / 12-auto-remediation.md §5.2. P1 only — ServiceDown on a production service means user impact. Auto-remediation tries the in-cluster restart first (the pg function `remediation_restart_service` is a future v0.6.x addition — for now the step is a dry-run), then pages the on-call with the runbook URL.",
+      "actions": [
+        {
+          "id": "service-down-restart-and-page",
+          "name": "Service {{ $labels.service }} down — restart and page",
+          "trigger": "ServiceDown",
+          "severities": ["P1"],
+          "steps": [
+            {
+              "kind": "pg_function",
+              "name": "remediation_restart_service",
+              "args": ["{{ $labels.service }}", "{{ $labels.instance }}"]
+            },
+            {
+              "kind": "page_operator",
+              "severity": "high",
+              "runbook_url": "https://runbooks.ada.local/service-down"
+            }
+          ],
+          "cooldown": 600,
+          "max_retries": 2
+        }
+      ]
+    }
+
+  slo-budget-burn-rate-fast.json: |
+    {
+      "version": 1,
+      "_comment": "Phase 8 / 12-auto-remediation.md §5.4. SLIBurnRateFast (2% budget in 1h) is the alert that pages the on-call per the Google SRE workbook. Auto-remediation here only *amplifies* the page; it does not attempt corrective action (the burn may be from a deploy, code regression, infra, or external — wrong retry is worse than no retry). Severity=high, cooldown=3600 so we do not double-page during a sustained burn.",
+      "actions": [
+        {
+          "id": "slo-burn-fast-page",
+          "name": "SLO budget burning fast ({{ $labels.service }} / {{ $labels.slo }})",
+          "trigger": "SLIBurnRateFast",
+          "severities": ["P1"],
+          "steps": [
+            {
+              "kind": "page_operator",
+              "severity": "high",
+              "runbook_url": "https://runbooks.ada.local/slo-burn-fast"
+            }
+          ],
+          "cooldown": 3600,
+          "max_retries": 0
+        }
+      ]
+    }
+
+  slo-budget-burn-rate-slow.json: |
+    {
+      "version": 1,
+      "_comment": "Phase 8 / 12-auto-remediation.md §5.5. SLIBurnRateSlow (5% budget in 6h) is the 'you have a few days' burn — no page, just a Slack post in #ada-warnings so the team sees it during standup. cooldown=7200 (2h) so a sustained slow burn does not flood the channel.",
+      "actions": [
+        {
+          "id": "slo-burn-slow-notify",
+          "name": "SLO budget burning slowly ({{ $labels.service }} / {{ $labels.slo }})",
+          "trigger": "SLIBurnRateSlow",
+          "severities": ["P2", "P3"],
+          "steps": [
+            {
+              "kind": "notify_slack",
+              "channel": "#ada-warnings",
+              "message": "SLO slow burn: service={{ $labels.service }} slo={{ $labels.slo }} window={{ $labels.window }} (per Phase 7 dashboard 90)"
+            }
+          ],
+          "cooldown": 7200,
+          "max_retries": 0
+        }
+      ]
+    }
+
+
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -159,9 +316,16 @@ spec:
           # Mount the runbook ConfigMap read-only. For
           # hot-reload to pick up live edits, swap this
           # for a CSI-backed RWX volume.
+          #
+          # No `optional: true` here. It used to be there because this
+          # ConfigMap was never defined, and `optional` is what made the
+          # absence silent. Now that it is defined with the real runbooks
+          # baked in, the only thing the flag still does is turn a deleted
+          # ConfigMap, or an apply that skipped this file, into a pod that
+          # starts with an empty directory and remediates nothing -- the
+          # exact defect this volume was added to fix. Fail loudly instead.
           configMap:
             name: ada-remediation-runbooks
-            optional: true
         - name: tmp
           emptyDir: {}
       terminationGracePeriodSeconds: 30
