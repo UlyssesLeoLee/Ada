@@ -71,5 +71,5 @@ cargo fmt   --all -- --check
 cargo clippy --workspace
 ```
 
-See `docs/observability/12-auto-remediation.md` for the
+See `docs/observability/14-auto-remediation.md` for the
 architecture, runbook authoring guide, and cooldown policy.

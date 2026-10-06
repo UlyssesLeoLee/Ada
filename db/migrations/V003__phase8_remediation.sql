@@ -5,7 +5,7 @@
 --
 -- 設計依据:
 --   - docs/observability/11-phased-rollout.md §10 (Phase 8 scope)
---   - docs/observability/12-auto-remediation.md (architecture)
+--   - docs/observability/14-auto-remediation.md (architecture)
 --   - db/Makefile (migrate 入口)
 --
 -- 含むオブジェクト:
@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS remediation_cooldowns_expires_at_idx
 --   2. 如果 outcome = 'succeeded', 同步 upsert remediation_cooldowns 行
 --      (cooldown_seconds 来自 action 表 / app 配置; 此存过接受
 --      cooldown_seconds 入参由调用者提供). 失败 execution 不更新
---      cooldown (per 12-auto-remediation.md §4.2).
+--      cooldown (per 14-auto-remediation.md §4.2).
 --
 -- 幂等性:
 --   - history 行不要求幂等 (BIGSERIAL 主键, 每次调用都新增).
@@ -176,7 +176,7 @@ $$;
 COMMENT ON FUNCTION remediation_record_execution(
     VARCHAR, VARCHAR, VARCHAR, INT, TEXT, INT
 ) IS
-    'Phase 8 / 12-auto-remediation.md §4.2: 记录一次 action 执行 + 同步 cooldown (仅 succeeded). 幂等 history 写 + upsert cooldown. 默认 cooldown_seconds=300 (5min).';
+    'Phase 8 / 14-auto-remediation.md §4.2: 记录一次 action 执行 + 同步 cooldown (仅 succeeded). 幂等 history 写 + upsert cooldown. 默认 cooldown_seconds=300 (5min).';
 
 
 -- -----------------------------------------------------------------------------
@@ -215,6 +215,6 @@ END;
 $$;
 
 COMMENT ON FUNCTION remediation_check_cooldown(VARCHAR) IS
-    'Phase 8 / 12-auto-remediation.md §4.1: 持久 cooldown 查询. 返回 true 表示仍在窗口内 (拒绝再 evaluate).';
+    'Phase 8 / 14-auto-remediation.md §4.1: 持久 cooldown 查询. 返回 true 表示仍在窗口内 (拒绝再 evaluate).';
 
 COMMIT;

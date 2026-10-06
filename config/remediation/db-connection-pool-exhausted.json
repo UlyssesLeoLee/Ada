@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "Phase 8 / 12-auto-remediation.md §5.3. P2/P3. The pg function `remediation_kill_idle` (v0.6.x future) closes idle sessions older than 5 min on the affected database. Notify #ada-ops so the postmortem picks up the burst.",
+  "_comment": "Phase 8 / 14-auto-remediation.md §5.3. P2/P3. The pg function `remediation_kill_idle` (v0.6.x future) closes idle sessions older than 5 min on the affected database. Notify #ada-ops so the postmortem picks up the burst.",
   "actions": [
     {
       "id": "db-pool-exhausted-kill-idle",

@@ -15,7 +15,7 @@
 //! is constrained to follow):
 //!
 //! - [`docs/observability/11-phased-rollout.md` §10] — phase 8 scope
-//! - [`docs/observability/12-auto-remediation.md`] — architecture, runbook
+//! - [`docs/observability/14-auto-remediation.md`] — architecture, runbook
 //!   authoring guide, cooldown policy (introduced by v0.6.0)
 //! - [`db/migrations/V003__phase8_remediation.sql`] — durable history
 //!

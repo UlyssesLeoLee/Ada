@@ -50,7 +50,7 @@ data:
   db-connection-pool-exhausted.json: |
     {
       "version": 1,
-      "_comment": "Phase 8 / 12-auto-remediation.md §5.3. P2/P3. The pg function `remediation_kill_idle` (v0.6.x future) closes idle sessions older than 5 min on the affected database. Notify #ada-ops so the postmortem picks up the burst.",
+      "_comment": "Phase 8 / 14-auto-remediation.md §5.3. P2/P3. The pg function `remediation_kill_idle` (v0.6.x future) closes idle sessions older than 5 min on the affected database. Notify #ada-ops so the postmortem picks up the burst.",
       "actions": [
         {
           "id": "db-pool-exhausted-kill-idle",
@@ -78,7 +78,7 @@ data:
   disk-space-low.json: |
     {
       "version": 1,
-      "_comment": "Phase 8 / 12-auto-remediation.md §5.1. JSON (not YAML) due to offline build env (no serde_yaml in Cargo.lock). All step 'cmd'/'channel' values are template-free; alerting uses Alertmanager's separate Slack/PagerDuty receivers for the user-facing message — these auto-remediation steps are for the *operator* (sizing, postmortem trail).",
+      "_comment": "Phase 8 / 14-auto-remediation.md §5.1. JSON (not YAML) due to offline build env (no serde_yaml in Cargo.lock). All step 'cmd'/'channel' values are template-free; alerting uses Alertmanager's separate Slack/PagerDuty receivers for the user-facing message — these auto-remediation steps are for the *operator* (sizing, postmortem trail).",
       "actions": [
         {
           "id": "disk-space-low",
@@ -113,7 +113,7 @@ data:
   service-down.json: |
     {
       "version": 1,
-      "_comment": "Phase 8 / 12-auto-remediation.md §5.2. P1 only — ServiceDown on a production service means user impact. Auto-remediation tries the in-cluster restart first (the pg function `remediation_restart_service` is a future v0.6.x addition — for now the step is a dry-run), then pages the on-call with the runbook URL.",
+      "_comment": "Phase 8 / 14-auto-remediation.md §5.2. P1 only — ServiceDown on a production service means user impact. Auto-remediation tries the in-cluster restart first (the pg function `remediation_restart_service` is a future v0.6.x addition — for now the step is a dry-run), then pages the on-call with the runbook URL.",
       "actions": [
         {
           "id": "service-down-restart-and-page",
@@ -141,7 +141,7 @@ data:
   slo-budget-burn-rate-fast.json: |
     {
       "version": 1,
-      "_comment": "Phase 8 / 12-auto-remediation.md §5.4. SLIBurnRateFast (2% budget in 1h) is the alert that pages the on-call per the Google SRE workbook. Auto-remediation here only *amplifies* the page; it does not attempt corrective action (the burn may be from a deploy, code regression, infra, or external — wrong retry is worse than no retry). Severity=high, cooldown=3600 so we do not double-page during a sustained burn.",
+      "_comment": "Phase 8 / 14-auto-remediation.md §5.4. SLIBurnRateFast (2% budget in 1h) is the alert that pages the on-call per the Google SRE workbook. Auto-remediation here only *amplifies* the page; it does not attempt corrective action (the burn may be from a deploy, code regression, infra, or external — wrong retry is worse than no retry). Severity=high, cooldown=3600 so we do not double-page during a sustained burn.",
       "actions": [
         {
           "id": "slo-burn-fast-page",
@@ -164,7 +164,7 @@ data:
   slo-budget-burn-rate-slow.json: |
     {
       "version": 1,
-      "_comment": "Phase 8 / 12-auto-remediation.md §5.5. SLIBurnRateSlow (5% budget in 6h) is the 'you have a few days' burn — no page, just a Slack post in #ada-warnings so the team sees it during standup. cooldown=7200 (2h) so a sustained slow burn does not flood the channel.",
+      "_comment": "Phase 8 / 14-auto-remediation.md §5.5. SLIBurnRateSlow (5% budget in 6h) is the 'you have a few days' burn — no page, just a Slack post in #ada-warnings so the team sees it during standup. cooldown=7200 (2h) so a sustained slow burn does not flood the channel.",
       "actions": [
         {
           "id": "slo-burn-slow-notify",

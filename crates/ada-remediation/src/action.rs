@@ -93,7 +93,7 @@ impl Trigger {
 
 /// One executable step inside a runbook. Six variants — chosen
 /// to cover ~all of the runbook actions described in
-/// `docs/observability/12-auto-remediation.md` §3.1.
+/// `docs/observability/14-auto-remediation.md` §3.1.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActionStep {
