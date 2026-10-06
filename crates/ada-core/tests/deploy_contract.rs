@@ -163,7 +163,14 @@ fn name_of(doc: &[&str], top: usize) -> Option<String> {
 
 /// Every YAML document under both deploy directories, as
 /// (relative path, document).
-fn deploy_documents() -> Vec<(String, Vec<Vec<&str>>)> {
+/// Every YAML file under both deploy directories, as (relative path, text).
+///
+/// Returning the raw text rather than pre-split documents is what keeps the
+/// borrows sound: `documents()` hands back `&str` slices into its argument,
+/// so a function returning them would be returning references into a local
+/// `String` that is dropped on return. Callers split, so the text outlives
+/// the slices.
+fn deploy_files() -> Vec<(String, String)> {
     let mut out = Vec::new();
     for dir in [K8S_DIR, INFRA_DIR] {
         let path = repo_root().join(dir);
@@ -188,7 +195,37 @@ fn deploy_documents() -> Vec<(String, Vec<Vec<&str>>)> {
                 .to_string_lossy()
                 .replace('\\', "/");
             let text = fs::read_to_string(&f).expect("read manifest");
-            out.push((rel, documents(&text)));
+            out.push((rel, text));
+        }
+    }
+    out
+}
+
+/// Every `Deployment` under both deploy directories, with the literal env
+/// values it hands its containers.
+///
+/// Each manifest is split inside the loop rather than by a helper that
+/// returned the documents: `documents()` lends `&str` slices into its
+/// argument, so a function returning those slices would be returning
+/// references into a `String` that has already been dropped. CI's first run
+/// of this file reported exactly that as a missing lifetime specifier.
+fn workloads() -> Vec<Workload> {
+    let mut out = Vec::new();
+    for (file, text) in deploy_files() {
+        for doc in documents(&text) {
+            let top = top_indent(&doc);
+            if find_key(&doc, 0, "kind: Deployment", top).is_none() {
+                continue;
+            }
+            let Some(name) = name_of(&doc, top) else {
+                continue;
+            };
+            out.push(Workload {
+                file: file.clone(),
+                namespace: namespace_of(&doc, top),
+                name,
+                env: env_values(&doc),
+            });
         }
     }
     out
@@ -251,28 +288,6 @@ fn env_values(doc: &[&str]) -> Vec<(String, String)> {
                     }
                 }
             }
-        }
-    }
-    out
-}
-
-fn workloads() -> Vec<Workload> {
-    let mut out = Vec::new();
-    for (file, docs) in deploy_documents() {
-        for doc in &docs {
-            let top = top_indent(doc);
-            if find_key(doc, 0, "kind: Deployment", top).is_none() {
-                continue;
-            }
-            let Some(name) = name_of(doc, top) else {
-                continue;
-            };
-            out.push(Workload {
-                file: file.clone(),
-                namespace: namespace_of(doc, top),
-                name,
-                env: env_values(doc),
-            });
         }
     }
     out
@@ -422,19 +437,19 @@ fn dockerfile_for(workload: &str) -> Option<(String, String)> {
 /// (namespace, name) -> ports, for every `Service` under `deploy/`.
 fn services() -> BTreeMap<(String, String), Vec<String>> {
     let mut out = BTreeMap::new();
-    for (_file, docs) in deploy_documents() {
-        for doc in &docs {
-            let top = top_indent(doc);
-            if find_key(doc, 0, "kind: Service", top).is_none() {
+    for (_file, text) in deploy_files() {
+        for doc in documents(&text) {
+            let top = top_indent(&doc);
+            if find_key(&doc, 0, "kind: Service", top).is_none() {
                 continue;
             }
-            let Some(name) = name_of(doc, top) else {
+            let Some(name) = name_of(&doc, top) else {
                 continue;
             };
-            let spec_at = find_key(doc, 0, "spec:", top);
+            let spec_at = find_key(&doc, 0, "spec:", top);
             let ports = spec_at
                 .map(|s| {
-                    block_after(doc, s)
+                    block_after(&doc, s)
                         .filter(|&j| {
                             // `port: 6379`, as a mapping entry or as a
                             // sequence item. Matching the bare key `port:`
@@ -453,7 +468,7 @@ fn services() -> BTreeMap<(String, String), Vec<String>> {
                         .collect()
                 })
                 .unwrap_or_default();
-            out.insert((namespace_of(doc, top), name), ports);
+            out.insert((namespace_of(&doc, top), name), ports);
         }
     }
     out
@@ -507,7 +522,7 @@ fn manifest_env_paths_match_the_image_and_its_copy_destinations() {
             match baked.get(var.as_str()) {
                 Some(image_value) if image_value == value => {}
                 Some(image_value) => problems.push(format!(
-                    "{}: {} = {value}, but {docker_rel} bakes {var}={image_value}. \
+                    "{file}: {var}={value}, but {docker_rel} bakes {var}={image_value}. \
                      The manifest's value wins at runtime, and nothing runs the \
                      image's default, so the two must agree.",
                     w.file
@@ -645,13 +660,13 @@ fn manifest_run_as_uid_matches_the_user_its_image_creates() {
     let mut checked = 0usize;
     let mut problems: Vec<String> = Vec::new();
 
-    for (file, docs) in deploy_documents() {
-        for doc in &docs {
-            let top = top_indent(doc);
-            if find_key(doc, 0, "kind: Deployment", top).is_none() {
+    for (file, text) in deploy_files() {
+        for doc in documents(&text) {
+            let top = top_indent(&doc);
+            if find_key(&doc, 0, "kind: Deployment", top).is_none() {
                 continue;
             }
-            let Some(name) = name_of(doc, top) else {
+            let Some(name) = name_of(&doc, top) else {
                 continue;
             };
             let Some((docker_rel, docker_text)) = dockerfile_for(&name) else {
@@ -660,7 +675,7 @@ fn manifest_run_as_uid_matches_the_user_its_image_creates() {
             let pairs = [("runAsUser:", "--uid"), ("runAsGroup:", "--gid")];
             for (manifest_key, docker_flag_name) in pairs {
                 let (Some(manifest_uid), Some(image_uid)) = (
-                    run_as(doc, manifest_key),
+                    run_as(&doc, manifest_key),
                     docker_flag(&docker_text, docker_flag_name),
                 ) else {
                     continue;
