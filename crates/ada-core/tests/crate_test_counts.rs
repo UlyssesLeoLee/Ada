@@ -63,7 +63,9 @@ fn count_test_attrs(text: &str) -> usize {
 }
 
 fn all_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let p = entry.path();
         if p.is_dir() {
@@ -117,7 +119,12 @@ fn claimed_unit_test_counts_match_the_tests_that_exist() {
             if digits.is_empty() {
                 return None;
             }
-            digits.chars().rev().collect::<String>().parse::<usize>().ok()
+            digits
+                .chars()
+                .rev()
+                .collect::<String>()
+                .parse::<usize>()
+                .ok()
         }) else {
             continue;
         };
