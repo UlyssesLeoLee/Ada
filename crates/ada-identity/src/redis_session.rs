@@ -193,7 +193,16 @@ impl SharedSessionBackend for RedisSessionBackend {
             pipe.cmd("DEL").arg(key_for(token)).ignore();
             pipe.cmd("ZREM").arg(EXPIRY_INDEX).arg(token).ignore();
         }
-        pipe.query_async(&mut conn).await.map_err(redis_err)?;
+        // `::<()>` is not decoration. `query_async` is generic over its decoded
+        // return type, and this statement's value is discarded, so without
+        // the annotation the type parameter has nothing to constrain it
+        // and falls back to the never type -- legal today, a hard error in
+        // edition 2024, and rejected outright by this workspace's
+        // `rust_2024_compatibility` deny. The compiler names this exact
+        // fix. The two other `query_async` calls in this file are tail
+        // expressions of `Result<()>` functions, so their type is already
+        // pinned and they are not affected.
+        pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
         Ok(batch)
     }
 }
@@ -208,13 +217,32 @@ fn redis_err(e: redis::RedisError) -> IdentityError {
     IdentityError::SessionBackend(format!("redis command failed: {}", classify(&e)))
 }
 
+/// Name the failure in the operator's terms, never in Redis's.
+///
+/// Variant names are `redis` 1.x's, read from its `errors::redis_error`
+/// rather than recalled. `ErrorKind` is `#[non_exhaustive]`, so the
+/// trailing `_` is mandatory and must stay last -- it is also what keeps
+/// this compiling when the crate adds a variant.
 fn classify(e: &redis::RedisError) -> &'static str {
-    use redis::ErrorKind::{ExtensionError, IoError, TypeError, Unreachable};
+    use redis::ErrorKind::{
+        AuthenticationFailed, Extension, Io, Parse, Server, UnexpectedReturnType,
+    };
     match e.kind() {
-        Unreachable => "server unreachable",
-        IoError => "io error",
-        TypeError => "wrong response type",
-        ExtensionError => "command extension error",
+        // There is no "unreachable" variant. A refused connection, a DNS
+        // failure, a reset socket and a timeout all arrive as `Io`, so the
+        // message says exactly that rather than claiming a precision the
+        // error does not carry.
+        Io => "io error (server unreachable or connection lost)",
+        Parse => "response could not be parsed",
+        UnexpectedReturnType => "wrong response type",
+        Extension => "command extension error",
+        // Worth its own line: an auth failure is an operator mistake
+        // (bad credentials on the URL), not a code defect, and lumping it
+        // in with "command error" would send the reader the wrong way.
+        AuthenticationFailed => "authentication failed",
+        // A `WRONGTYPE` or `NOSCRIPT` from the server: our command was
+        // well-formed and the server refused it.
+        Server(_) => "server rejected the command",
         _ => "command error",
     }
 }
@@ -229,8 +257,8 @@ mod tests {
     #[test]
     fn no_redis_error_message_can_carry_a_session_token() {
         for kind in [
-            redis::ErrorKind::TypeError,
-            redis::ErrorKind::ExtensionError,
+            redis::ErrorKind::UnexpectedReturnType,
+            redis::ErrorKind::Extension,
         ] {
             // Whatever Redis attached to the error, the message we build
             // comes from `classify` alone.
