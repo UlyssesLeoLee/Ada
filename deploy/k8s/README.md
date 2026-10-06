@@ -232,6 +232,13 @@ two disagree — a missing key, drifted content, or a key with no file
 behind it. The script exists to make the right thing easy; the gate is
 what makes it correct.
 
+The comparison folds line endings first. This repository has no
+`.gitattributes`, so a checkout with `core.autocrlf` set rewrites the
+committed LF blobs to CRLF: the runbooks read back with CRLF on a
+Windows checkout and with LF on a Linux one, from the same commit. CRLF
+versus LF is a property of the checkout rather than of either file, and
+the question the gate asks does not turn on it.
+
 One authoring rule falls out of the comparison: a runbook file must end
 with exactly one newline. The ConfigMap value is a literal block scalar,
 which always carries a trailing line break, so a file without one cannot

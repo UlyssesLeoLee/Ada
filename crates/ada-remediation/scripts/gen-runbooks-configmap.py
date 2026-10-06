@@ -185,8 +185,21 @@ def document_bounds(text: str) -> tuple[int, int]:
     return start, end
 
 
+def folded(text: str) -> str:
+    """Line endings folded to LF.
+
+    Mirrors `folded()` in crates/ada-core/tests/mounted_configmaps.rs. Python
+    text mode already normalises newlines on read, which is why this looks
+    redundant here -- it is stated explicitly so the two comparisons cannot
+    drift apart in intent. Git's Windows checkout rewrites the committed LF
+    blobs to CRLF, so a byte comparison of a checkout against a ConfigMap
+    passes on Linux and fails on Windows for the same commit.
+    """
+    return text.replace("\r\n", "\n")
+
+
 def self_verify(rendered: str, runbooks: dict[str, str]) -> None:
-    """Parse the rendered document and confirm it round-trips byte for byte."""
+    """Parse the rendered document and confirm it round-trips line for line."""
     try:
         import yaml
     except ImportError:
@@ -201,8 +214,8 @@ def self_verify(rendered: str, runbooks: dict[str, str]) -> None:
             f"FAIL: rendered keys {sorted(data)} != runbook files {sorted(runbooks)}"
         )
     for key, body in runbooks.items():
-        if data[key] != body:
-            sys.exit(f"FAIL: {key} did not round-trip byte for byte")
+        if folded(data[key]) != folded(body):
+            sys.exit(f"FAIL: {key} did not round-trip line for line")
 
 
 def diff_report(runbooks: dict[str, str]) -> int:
@@ -223,11 +236,13 @@ def diff_report(runbooks: dict[str, str]) -> int:
     data = parsed.get("data", {})
     missing = sorted(set(runbooks) - set(data))
     extra = sorted(set(data) - set(runbooks))
-    drifted = sorted(k for k in set(data) & set(runbooks) if data[k] != runbooks[k])
+    drifted = sorted(
+        k for k in set(data) & set(runbooks) if folded(data[k]) != folded(runbooks[k])
+    )
     unversioned = sorted(k for k in data if k not in runbooks)
 
     if not (missing or extra or drifted or unversioned):
-        print(f"in sync: {len(runbooks)} runbooks match the ConfigMap byte for byte")
+        print(f"in sync: {len(runbooks)} runbooks match the ConfigMap (line endings folded)")
         return 0
 
     print("STALE -- the committed ConfigMap does not match config/remediation/")

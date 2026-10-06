@@ -31,7 +31,8 @@
 //! 1. `every_mounted_configmap_is_defined_in_the_kustomization` -- the
 //!    mount resolves to something.
 //! 2. `every_runbook_on_disk_is_mounted_by_the_deployment` -- the thing it
-//!    resolves to is the runbooks in this repository, byte for byte.
+//!    resolves to is the runbooks in this repository, compared with line
+//!    endings folded (see [`folded`]).
 //!
 //! ## Why `optional: true` is reported as a failure of its own
 //!
@@ -341,6 +342,26 @@ fn mounted_configmaps() -> (Vec<Mounted>, usize) {
     (mounted, total)
 }
 
+/// Line endings folded to LF on both sides of a content comparison.
+///
+/// This gate spent a CI run on it. The repository has no `.gitattributes`,
+/// so a checkout with `core.autocrlf` set rewrites the committed LF blobs to
+/// CRLF: `config/remediation/*.json` reads back with CRLF on the Windows
+/// runner and with LF on the Linux one, from the same commit. Comparing the
+/// bytes therefore failed on windows-latest while passing on ubuntu-latest
+/// for an identical tree, and the failure message reported each runbook 21 to
+/// 33 bytes larger on disk -- numbers that were exactly the files' line
+/// counts.
+///
+/// A gate must not depend on ambient configuration, so both sides are folded
+/// before comparison. CRLF versus LF is a property of the checkout, not of
+/// either artifact, and the question this test asks -- does the deployment
+/// carry these runbooks -- does not turn on it. The key sets are still
+/// compared exactly, so a runbook that is present-but-different still fails.
+fn folded(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
 /// The lines belonging to the literal block scalar whose key is at `key_line`.
 ///
 /// Unlike [`block_after`], a comment at or above the key's own indent ends
@@ -626,12 +647,12 @@ fn every_runbook_on_disk_is_mounted_by_the_deployment() {
     let drifted: Vec<String> = disk
         .iter()
         .filter(|(k, _)| deployed.contains_key(*k))
-        .filter(|(k, v)| deployed[*k] != **v)
+        .filter(|(k, v)| folded(&deployed[*k]) != folded(v))
         .map(|(k, v)| {
             format!(
-                "{k}: on disk {}B, in ConfigMap {}B",
-                v.len(),
-                deployed[k].len()
+                "{k}: on disk {} lines, in ConfigMap {} lines",
+                folded(v).lines().count(),
+                folded(&deployed[k]).lines().count()
             )
         })
         .collect();
@@ -643,7 +664,8 @@ fn every_runbook_on_disk_is_mounted_by_the_deployment() {
          it was edited by hand after generation, or regenerated from an older \
          tree. What runs in the cluster is the ConfigMap, and what operators \
          review and edit is the file, so a difference is an alert rule that \
-         matches on the wrong trigger.",
+         matches on the wrong trigger. Line endings are folded before this \
+         comparison, so a difference here is a real one.",
         drifted.join("; ")
     );
 
