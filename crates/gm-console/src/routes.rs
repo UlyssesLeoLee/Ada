@@ -59,6 +59,11 @@ pub fn router(state: SharedState) -> Router {
         // seo surface (served as bundled files)
         .route("/robots.txt", get(robots_txt))
         .route("/sitemap.xml", get(sitemap_xml))
+        // the login page, as a route rather than only as a file, so `/login`
+        // is a real URL. It resolves through the same disk-then-bundled order
+        // as the shell: /srv/static/login.html when a document root is
+        // configured, the include_str! copy otherwise.
+        .route("/login", get(login_page))
         // api reverse proxy — wildcard catches any HTTP method
         .route(
             "/api/*path",
@@ -141,33 +146,49 @@ fn xml_response(body: &'static str) -> Response {
 /// streaming/large-file concern that should not hit the proxy.
 const MAX_PROXY_BODY: usize = 16 * 1024 * 1024;
 
-/// Reverse-proxy: rewrites `/api/<rest>` → `<upstream>/<rest>` and forwards the request body.
+/// Reverse-proxy: forwards `/api/<rest>` to `<upstream>/api/<rest>` along
+/// with the request body.
 ///
-/// Pure forward implementation — auth, authorization and observability live in
-/// api-gateway. That is no longer aspirational: the gateway mounts its whole
-/// `/api` subtree behind a bearer-token layer, and its tenant comes from the
-/// server-side session rather than from the `x-tenant-id` header forwarded
-/// below. Rate limiting is still not implemented on either side.
+/// ## The path is forwarded verbatim, and that is load-bearing
 ///
-/// Nothing here may start trusting `x-tenant-id` (or any other client header)
-/// for a decision. It is forwarded verbatim so the gateway can log what the
-/// client claimed; it is not a credential.
+/// `GM_CONSOLE_UPSTREAM` names the gateway's *root*
+/// (`http://ada-api-gateway:8080`), and the gateway mounts its API under
+/// the `/api` prefix — `/api/v1/ping`, `/api/v1/whoami`,
+/// `/api/v1/canvases/:id` (crates/ada-m13-api-gateway/src/router.rs:236).
+/// So the console's `/api/*` namespace and the gateway's are the same
+/// namespace, and the console is a pass-through in front of it.
+///
+/// This used to strip `/api` before forwarding, on the reading that
+/// `/api/<rest>` was a console-side mount prefix to be removed. That
+/// reading is wrong, and the result was that no browser call ever reached
+/// a real endpoint: `/api/v1/ping` was sent to the gateway as `/v1/ping`,
+/// which matches no route there, and the gateway's fallback answered
+/// `404 {"error":...}`. Nothing caught it because the proxy tests use a
+/// stub upstream keyed on the *stripped* paths, so the stub and the
+/// rewrite agreed with each other and neither agreed with the gateway.
+/// `tests/proxy_upstream_paths.rs` now pins the gateway's real spelling.
+///
+/// ## Pure forward, and it stays that way
+///
+/// Auth, authorization and observability live in the gateway, which
+/// mounts its whole `/api` subtree behind a bearer-token layer and takes
+/// its tenant from the server-side session. Nothing here may start
+/// trusting `x-tenant-id` (or any other client header) for a decision: it
+/// is forwarded verbatim so the gateway can log what the client claimed,
+/// and it is not a credential. Rate limiting is still not implemented on
+/// either side.
 async fn proxy(State(cfg): State<SharedState>, uri: Uri, req: Request) -> Result<Response> {
-    // Strip the `/api` prefix; preserve everything else (path + query).
+    // Path and query exactly as received. `path_and_query` is origin-form
+    // and always carries its leading `/`, so it is appended, not joined.
     let path_and_query = uri
         .path_and_query()
-        .map(|pq| {
-            pq.as_str()
-                .strip_prefix("/api")
-                .unwrap_or(pq.as_str())
-                .to_string()
-        })
+        .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| uri.path().to_string());
 
     let upstream = format!(
-        "{}/{}",
+        "{}{}",
         cfg.upstream_url.trim_end_matches('/'),
-        path_and_query.trim_start_matches('/')
+        path_and_query
     );
 
     // NEVER log the upstream URL (could carry secrets in query) or env values.
@@ -425,13 +446,14 @@ async fn try_disk(dir: &str, path: &str) -> Option<Response> {
     Some(resp)
 }
 
-/// Serve the bundled SPA index.html (rust-embed via include_str!).
+/// Serve the bundled SPA index.html (include_str!).
 fn serve_index() -> Response {
-    let body = include_str!("../../../apps/gm-console-web/dist/index.html");
     Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))
-        .body(Body::from(body.to_string()))
+        .body(Body::from(
+            include_str!("../../../apps/gm-console-web/dist/index.html").to_string(),
+        ))
         .unwrap_or_else(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -439,6 +461,32 @@ fn serve_index() -> Response {
             )
                 .into_response()
         })
+}
+
+/// Serve the login page: `login.html` from the configured document root,
+/// and the copy compiled into the binary when there is no document root or
+/// no file behind it.
+///
+/// The route exists so `/login` is the URL rather than `/login.html`.
+/// `dist/screenshots/INDEX.md` already documents `/login` as the route for
+/// the login screenshot, and an extensionless `login` file would be served
+/// as `application/octet-stream` by `mime_guess` -- a download, not a page.
+async fn login_page() -> Response {
+    if let Ok(dir) = std::env::var("GM_CONSOLE_STATIC_DIR") {
+        if let Some(resp) = try_disk(&dir, "/login.html").await {
+            return resp;
+        }
+    }
+    let mut resp = text_response(
+        include_str!("../../../apps/gm-console-web/dist/login.html"),
+        "text/html; charset=utf-8",
+    );
+    // `text_response` is the shared helper and does not set caching; this
+    // page must not sit in a shared cache for the `max-age=300` that
+    // `try_disk` puts on a static asset.
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    resp
 }
 
 // Re-export unused symbols to silence dead-code warnings when

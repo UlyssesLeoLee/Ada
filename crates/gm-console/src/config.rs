@@ -26,10 +26,18 @@ pub struct Config {
     /// hidden out, not to second-guess what belongs in a build output
     /// directory.
     ///
-    /// Unset in `deploy/k8s/gm-console.yaml`, so a deployed pod serves
-    /// the `index.html` compiled into the binary and has no directory
-    /// to get wrong. It exists for local iteration, where a `dist/` is
-    /// rebuilt constantly.
+    /// Set in `deploy/k8s/gm-console.yaml` to `/srv/static`, the document
+    /// root baked into the image by
+    /// `deploy/docker/gm-console.Dockerfile`. The deployed pod therefore
+    /// serves the committed `apps/gm-console-web/dist/` and needs no
+    /// volume for it, which is what lets that pod run
+    /// `readOnlyRootFilesystem: true`. It was previously unset, so a
+    /// deployed pod served the `index.html` compiled into the binary and
+    /// had no directory to get wrong — which also meant no CSS, no login
+    /// page, and nothing that looked like a console.
+    ///
+    /// Override it for local iteration, where a `dist/` is rebuilt
+    /// constantly: point it at a checkout's `dist/`.
     pub static_dir: Option<String>,
     pub log_level: String,
     pub enable_compression: bool,
