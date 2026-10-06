@@ -921,16 +921,20 @@ mod tests {
     /// The TTL and the retry window are related by a number, and the
     /// number is the whole safety argument: a key that expires while
     /// Stripe is still entitled to redeliver the event is a
-    /// double charge. Pin both values, and pin that the TTL covers the
-    /// window.
+    /// double charge. Pin both values, and pin that the TTL is exactly
+    /// the window.
     ///
     /// The TTL is 72 h and Stripe's automatic redelivery window is
     /// three days, so the TTL is *equal* to the window, not longer. It
     /// covers the window, and the last delivery inside the window lands
     /// on the expiry boundary — which is the residual risk this test
     /// documents rather than hides.
+    ///
+    /// Equality rather than "at least" is deliberate: a TTL longer than
+    /// the window would hold every key past the last moment Stripe can
+    /// redeliver within, which costs memory and buys nothing.
     #[test]
-    fn retention_ttl_covers_the_stripe_retry_window() {
+    fn retention_ttl_equals_the_stripe_retry_window() {
         assert_eq!(
             STRIPE_RETRY_WINDOW_SECS,
             3 * 24 * 60 * 60,
@@ -943,12 +947,30 @@ mod tests {
             "the TTL is the 72 h product decision; changing it is a product \
              change, not a refactor"
         );
-        assert!(
-            IDEMPOTENCY_TTL_SECS >= STRIPE_RETRY_WINDOW_SECS,
-            "a TTL shorter than the retry window re-admits a Stripe retry \
-             and charges the customer twice: TTL {}s < window {}s",
-            IDEMPOTENCY_TTL_SECS,
-            STRIPE_RETRY_WINDOW_SECS
+        // The relationship, asserted directly.
+        //
+        // This started life as `assert!(IDEMPOTENCY_TTL_SECS >=
+        // STRIPE_RETRY_WINDOW_SECS)`, which compares two `const`s, so the
+        // whole condition is a compile-time constant and clippy's
+        // `assertions_on_constants` rejects it. The two `assert_eq!`
+        // above already pin each constant's value on its own, so this
+        // third line exists purely as a tripwire: it fails if someone
+        // moves one constant without moving the other and breaks the
+        // safety argument between them.
+        //
+        // `assert_eq!` states the same relationship without asking clippy
+        // to evaluate a constant boolean, and it is the *stronger*
+        // claim -- equality, not merely ">=". That is what the module
+        // documents: the TTL is exactly Stripe's window, not longer than
+        // it. A TTL above the window would mean a key outliving the
+        // period Stripe can redeliver within, which is memory held for
+        // nothing and a discrepancy an operator would have to notice by
+        // reading two constants side by side.
+        assert_eq!(
+            IDEMPOTENCY_TTL_SECS, STRIPE_RETRY_WINDOW_SECS,
+            "a TTL that differs from the retry window re-admits or outlives \
+             Stripe retries: TTL {IDEMPOTENCY_TTL_SECS}s vs \
+             window {STRIPE_RETRY_WINDOW_SECS}s"
         );
     }
 
