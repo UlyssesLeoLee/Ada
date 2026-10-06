@@ -82,7 +82,7 @@ fn has_content(lines: &[&str]) -> bool {
 fn documents(text: &str) -> Vec<Vec<&str>> {
     let mut docs: Vec<Vec<&str>> = Vec::new();
     let mut current: Vec<&str> = Vec::new();
-    for line in text.splitlines() {
+    for line in text.lines() {
         if line.trim() == "---" {
             if has_content(&current) {
                 docs.push(std::mem::take(&mut current));
@@ -341,8 +341,7 @@ fn docker_copy_dests(text: &str) -> Vec<String> {
             let line = raw.trim();
             line.strip_prefix("COPY ").map(|rest| {
                 rest.split_whitespace()
-                    .filter(|t| !t.starts_with("--"))
-                    .next_back()
+                    .rfind(|t| !t.starts_with("--"))
                     .unwrap_or_default()
                     .to_string()
             })
@@ -401,16 +400,22 @@ fn run_as(doc: &[&str], key: &str) -> Option<String> {
     let top = top_indent(doc);
     let spec_at = find_key(doc, 0, "spec:", top)?;
     let pod = {
-        let (lo, hi) = block_after(doc, spec_at);
-        doc[lo..hi].iter().position(|l| l.trim() == "template:")? + lo
+        let spec = block_after(doc, spec_at);
+        doc[spec.clone()]
+            .iter()
+            .position(|l| l.trim() == "template:")
+            .map_or(0, |p| p + spec.start)
     };
-    let (tlo, thi) = block_after(doc, pod);
-    let inner = doc[tlo..thi].iter().position(|l| l.trim() == "spec:")? + tlo;
-    let (slo, shi) = block_after(doc, inner);
-    let sec = doc[slo..shi]
+    let template = block_after(doc, pod);
+    let inner = doc[template.clone()]
         .iter()
-        .position(|l| l.trim() == "securityContext:")?
-        + slo;
+        .position(|l| l.trim() == "spec:")
+        .map_or(0, |p| p + template.start);
+    let pod_spec = block_after(doc, inner);
+    let sec = doc[pod_spec.clone()]
+        .iter()
+        .position(|l| l.trim() == "securityContext:")
+        .map_or(0, |p| p + pod_spec.start);
     let sec_indent = indent_of(doc[sec]);
     // An explicit loop rather than `doc[block_after(..)].into_iter()`: that
     // indexes a slice to a place of unsized type, and asking such a place for
@@ -531,7 +536,7 @@ fn manifest_env_paths_match_the_image_and_its_copy_destinations() {
             match baked.get(var.as_str()) {
                 Some(image_value) if image_value == value => {}
                 Some(image_value) => problems.push(format!(
-                    "{file}: {var}={value}, but {docker_rel} bakes {var}={image_value}. \
+                    "{}: {var}={value}, but {docker_rel} bakes {var}={image_value}. \
                      The manifest's value wins at runtime, and nothing runs the \
                      image's default, so the two must agree.",
                     w.file
