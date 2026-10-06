@@ -27,6 +27,26 @@ on:
         required: false
         default: false
 
+# Superseded runs on a PR branch must not hold a runner slot.
+#
+# This workflow declared no concurrency policy, so pushing a new commit to an
+# open PR left the previous run sitting in `queued` indefinitely. Observed
+# directly: after pushing a fix to `fix/cooldown-claims`, run 37473436005
+# (commit d63b89d, superseded by d6de541) and run 37474029471 (d6de541) were
+# both `queued` with `updated_at` frozen -- GitHub had started neither -- for
+# 28 minutes, while every earlier run on this repository completed in under
+# eight. Cancelling the superseded run released the slot immediately and the
+# other run started within the same minute.
+#
+# `cancel-in-progress` is false for dev and main on purpose. Every merge
+# commit has to finish its own CI here -- confirming that a merge commit is
+# green before treating it as merged is the whole point of the review loop --
+# so a newer push landing on dev must not silently discard the older
+# merge's result. On a PR branch the older run is obsolete by construction.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
