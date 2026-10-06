@@ -558,7 +558,7 @@ impl LoginService {
     ///   wrong password alike, with an identical message.
     /// - [`ApiError::ServiceUnavailable`] when the session store is at
     ///   its ceiling.
-    pub fn authenticate(
+    pub async fn authenticate(
         &self,
         auth: &AuthContext,
         email: &str,
@@ -595,12 +595,14 @@ impl LoginService {
             return Err(ApiError::Unauthorized(DENIED.into()));
         }
 
-        let token = auth.mint_session(
-            &user.user_id,
-            &user.tenant_id,
-            user.roles.clone(),
-            self.session_ttl_secs,
-        )?;
+        let token = auth
+            .mint_session(
+                &user.user_id,
+                &user.tenant_id,
+                user.roles.clone(),
+                self.session_ttl_secs,
+            )
+            .await?;
         // The one place a subject is named, and it is the server-side
         // id rather than anything the client supplied.
         tracing::info!(event = "auth.login", outcome = "ok", user_id = %user.user_id);
@@ -641,6 +643,7 @@ pub async fn login_handler(
     state
         .login
         .authenticate(&state.auth, &request.email, &request.password)
+        .await
         .map(Json)
 }
 
@@ -659,6 +662,20 @@ mod tests {
             StoredUser::new("user-1", "tenant-a", vec!["viewer".into()], TEST_PASSWORD),
         );
         dir
+    }
+
+    /// An auth context over the in-process session double, not
+    /// [`AuthContext::bootstrap`].
+    ///
+    /// `bootstrap` deliberately refuses to start without a reachable
+    /// shared store, which is right for a pod and useless for a unit
+    /// test: it would make the whole login suite depend on a Redis that
+    /// no `cargo test` invocation starts. Swapping only the storage keeps
+    /// the real bundled policy set gating every minted session, so what
+    /// these tests still prove is the credential path, not the wiring.
+    fn test_auth() -> AuthContext {
+        AuthContext::with_bundled_policy(Arc::new(ada_identity::session::SessionStore::new()))
+            .expect("bundled policy set")
     }
 
     #[test]
@@ -704,14 +721,15 @@ mod tests {
     /// asserting equal status codes alone would pass against an
     /// implementation that returned 401 immediately, which is exactly
     /// the leak this guards.
-    #[test]
-    fn an_unknown_identity_still_runs_a_credential_comparison() {
+    #[tokio::test]
+    async fn an_unknown_identity_still_runs_a_credential_comparison() {
         let svc = LoginService::with_limits(directory_with_one_user(), 100, 1_000);
-        let auth = AuthContext::bootstrap().expect("bootstrap");
+        let auth = test_auth();
         let before = svc.comparison_count();
 
         let err = svc
             .authenticate(&auth, "nobody@example.invalid", TEST_PASSWORD)
+            .await
             .expect_err("an unknown identity must not authenticate");
 
         assert!(
@@ -728,16 +746,18 @@ mod tests {
     /// The two denials have to be the same error, not merely the same
     /// status. A client-visible difference here is a user-enumeration
     /// oracle even when both are 401.
-    #[test]
-    fn the_two_denial_reasons_produce_one_identical_error() {
+    #[tokio::test]
+    async fn the_two_denial_reasons_produce_one_identical_error() {
         let svc = LoginService::with_limits(directory_with_one_user(), 100, 1_000);
-        let auth = AuthContext::bootstrap().expect("bootstrap");
+        let auth = test_auth();
 
         let unknown = svc
             .authenticate(&auth, "nobody@example.invalid", TEST_PASSWORD)
+            .await
             .expect_err("unknown identity");
         let wrong = svc
             .authenticate(&auth, "user-1@example.invalid", "not-the-password")
+            .await
             .expect_err("wrong password");
 
         assert_eq!(
@@ -750,18 +770,21 @@ mod tests {
 
     /// A correct credential mints a working token. Without this the
     /// whole endpoint is a 401 generator.
-    #[test]
-    fn a_correct_credential_mints_a_token_that_resolves() {
+    #[tokio::test]
+    async fn a_correct_credential_mints_a_token_that_resolves() {
         let dir = directory_with_one_user();
-        let auth = AuthContext::bootstrap().expect("bootstrap");
+        let auth = test_auth();
         let svc = LoginService::new(Arc::clone(&dir));
 
         let issued = svc
             .authenticate(&auth, "user-1@example.invalid", TEST_PASSWORD)
+            .await
             .expect("login");
 
         let principal = auth
             .resolve(&issued.token)
+            .await
+            .expect("lookup")
             .expect("the token just issued must resolve");
         assert_eq!(principal.user_id, "user-1");
         assert_eq!(principal.tenant_id, "tenant-a");
@@ -770,20 +793,21 @@ mod tests {
 
     /// The attempt ceiling is the difference between a login endpoint
     /// and an offline guessing oracle.
-    #[test]
-    fn the_attempt_ceiling_is_enforced() {
+    #[tokio::test]
+    async fn the_attempt_ceiling_is_enforced() {
         let svc = LoginService::with_limits(directory_with_one_user(), 3, 1);
-        let auth = AuthContext::bootstrap().expect("bootstrap");
+        let auth = test_auth();
 
         for i in 0..3 {
             assert!(
-                svc.authenticate(&auth, "user-1@example.invalid", "wrong")
+                svc.authenticate(&auth, "user-1@example.invalid", "wrong").await
                     .is_err(),
                 "attempt {i} is within the burst allowance and must be refused on credential, not rate"
             );
         }
         let limited = svc
             .authenticate(&auth, "user-1@example.invalid", "wrong")
+            .await
             .expect_err("the fourth attempt exceeds a burst of three");
         assert!(
             matches!(limited, ApiError::TooManyRequests(_)),
@@ -793,18 +817,22 @@ mod tests {
 
     /// The rate-limit key has to be normalised, or the ceiling is
     /// defeated by changing the case of the address.
-    #[test]
-    fn the_attempt_ceiling_is_not_defeated_by_changing_case() {
+    #[tokio::test]
+    async fn the_attempt_ceiling_is_not_defeated_by_changing_case() {
         let svc = LoginService::with_limits(directory_with_one_user(), 2, 1);
-        let auth = AuthContext::bootstrap().expect("bootstrap");
+        let auth = test_auth();
 
         assert!(svc
             .authenticate(&auth, "user-1@example.invalid", "wrong")
+            .await
             .is_err());
         assert!(svc
             .authenticate(&auth, "USER-1@EXAMPLE.INVALID", "wrong")
+            .await
             .is_err());
-        let third = svc.authenticate(&auth, " User-1@Example.Invalid ", "wrong");
+        let third = svc
+            .authenticate(&auth, " User-1@Example.Invalid ", "wrong")
+            .await;
         assert!(
             matches!(third, Err(ApiError::TooManyRequests(_))),
             "a differently-cased retry must land in the same bucket, got {third:?}"
@@ -813,27 +841,37 @@ mod tests {
 
     /// The global bucket has to exist independently of the per-identity
     /// one, or a spray across many addresses is unbounded.
-    #[test]
-    fn spraying_distinct_identities_is_still_bounded() {
+    #[tokio::test]
+    async fn spraying_distinct_identities_is_still_bounded() {
         let svc = LoginService::with_limits(directory_with_one_user(), 3, 1);
-        let auth = AuthContext::bootstrap().expect("bootstrap");
+        let auth = test_auth();
 
-        let refused = (0..10)
-            .filter(|i| {
-                svc.authenticate(
+        // A `for` loop, not `Iterator::filter`: `authenticate` is `async`,
+        // and a closure passed to `filter` cannot await. Collecting first
+        // and counting afterwards would be equivalent but would read as if
+        // the spray were concurrent when it is deliberately sequential —
+        // each attempt has to consume a token before the next one does.
+        let mut refused = 0usize;
+        for i in 0..10 {
+            let attempt = svc
+                .authenticate(
                     &auth,
                     &format!("spray-{i}@example.invalid"),
                     "not-the-password",
                 )
-                .is_err()
-            })
-            .count();
+                .await;
+            if attempt.is_err() {
+                refused += 1;
+            }
+        }
         assert!(
             refused > 0,
             "every attempt must be refused on the credential"
         );
 
-        let after_spray = svc.authenticate(&auth, "spray-0@example.invalid", "not-the-password");
+        let after_spray = svc
+            .authenticate(&auth, "spray-0@example.invalid", "not-the-password")
+            .await;
         assert!(
             matches!(after_spray, Err(ApiError::TooManyRequests(_))),
             "the global bucket must still have tokens left, got {after_spray:?}"

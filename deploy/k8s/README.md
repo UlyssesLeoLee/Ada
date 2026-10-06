@@ -13,10 +13,16 @@ the deployed topology.
 - `kustomization.yaml` — kustomize entry point, and the single place
   the image registry is named
 
-## The images cannot be built: there is no Dockerfile
+This directory holds **only images this repository publishes**, and
+`crates/ada-core/tests/deploy_images.rs` fails the build if one of them
+resolves to a different registry or a different tag convention. That is
+why the gateway's session store is not here: `deploy/infra/ada-session-redis.yaml`
+holds it, alongside the other operator-supplied prerequisites below.
+
+## The images build, but nothing publishes them
 
 **Applying these manifests produces three Deployments that never start.**
-All three images are referenced, and none of them exists:
+All three images are referenced, and none of them can be pulled:
 
 ```text
 ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
@@ -24,21 +30,24 @@ ghcr.io/ulyssesleolee/ada-remediation:v0.7.1
 ghcr.io/ulyssesleolee/gm-console:v0.1.0
 ```
 
-The repository contains **no Dockerfile for any of the three**, and none
-of the four workflows in `.github/workflows/` builds or pushes an image —
-there is no `docker` or `buildx` step anywhere in CI. So there is no
-reproducible build path for any image this directory references, and a
-fresh `kubectl apply -k deploy/k8s/` lands every pod in
-`ImagePullBackOff` with no local cause.
+The Dockerfile gap that used to cause this is closed — there are now
+three, under `deploy/docker/`, and the `images` CI job builds each one
+and starts it to confirm it serves its probe path. What is still missing
+is publication: that job runs with `push: false`, and `release.yml` cuts
+a GitHub release from a compiled `gm-console-server` binary rather than
+from an image. So `ghcr.io/ulyssesleolee/*` is empty, and a fresh
+`kubectl apply -k deploy/k8s/` lands every pod in `ImagePullBackOff`.
 
 Two details that make this awkward to diagnose:
 
 - The three services are Rust workspace members, so a build needs the
   whole workspace, not one crate directory. `ada-remediation` in
   particular only produces its binary with `--features bin`.
-- `gm-console` has no frontend at all in this repository — only `src`,
-  `tests` and `Cargo.toml`. `GM_CONSOLE_STATIC_DIR` has nothing to point
-  at, so the console serves no UI even once it is running.
+- `gm-console` ships its UI. The SPA is a committed, hand-authored
+  `dist/` (there is no bundler in this repository), and the image copies
+  it to `/srv/static` and points `GM_CONSOLE_STATIC_DIR` there, with a
+  build-time completeness check that refuses to publish an image whose
+  `/srv/static` is missing files the committed dist has.
 
 This is recorded rather than fixed here because writing three
 Dockerfiles that cannot be built is the same mistake as the webhook
@@ -107,6 +116,7 @@ Everything under `/api` requires `Authorization: Bearer <token>`:
 | `GET /health` | no | — |
 | `GET /health/live` | no | — |
 | `GET /health/ready` | no | — |
+| `POST /api/v1/auth/login` | no (this is the credential exchange) | — |
 | `GET /api/v1/ping` | bearer | none (smoke endpoint) |
 | `GET /api/v1/whoami` | bearer | none (echoes the principal) |
 | `GET /api/v1/canvases/:id` | bearer | `Read` on `canvas` |
@@ -122,11 +132,18 @@ is enforced by a test.
 `mint_jwt` and `verify_jwt_stub` both fail closed for **every** input.
 A verifier that merely *decodes* a token would let a caller mint their
 own `roles` and their own `tenant_id`, and `tenant_id` is the isolation
-key for the whole multi-tenant model. So the gateway uses
-`ada_identity::session::SessionStore` instead: `mint` → opaque token →
-`lookup` → `Session { user_id, tenant_id, roles, expires_at }`, with
-immediate revocation and no new crypto dependency. Stateless
-verification is future work and must not be faked by decoding.
+key for the whole multi-tenant model. So the gateway issues an opaque
+session token instead and looks it up server-side:
+`mint` → opaque token → `lookup` → `Session { user_id, tenant_id,
+roles, expires_at }`.
+
+The store behind that lookup is `SharedSessionStore`, over Redis, so a
+session minted on one replica is a credential on all of them and survives
+a restart. The in-process `SessionStore` is **test-only** and is behind a
+`cfg`/feature gate, so a production build cannot even name it —
+`crates/ada-identity/src/session.rs` carries a `compile_fail` doctest that
+fails if that gate is ever removed. Stateless verification is future work
+and must not be faked by decoding.
 
 ### The tenant is never taken from a header
 
@@ -137,21 +154,58 @@ changes nothing. This is pinned by two tests — one on `/whoami`, one
 on a business route — because a single test on the echo endpoint would
 not show that the business path is also safe.
 
-### A fresh pod answers 401 to everything
+### A fresh pod will not start at all
 
-`SessionStore` is process-local and in-memory, and **there is no login
-flow**, so nothing ever mints a session. Every `/api` request is a 401
-until a login endpoint exists. That is the correct posture — a backend
-that authorizes nothing yet must not pretend to authorize everyone — but
-it does mean this manifests are not yet a working product. The
-remaining gap is a login flow, and `SessionStore`'s in-memory state
-does not survive a restart.
+`AuthContext::bootstrap` connects to `ADA_SESSION_REDIS_URL` and treats
+"cannot reach it" as fatal. There is no in-process fallback and no
+`SessionStore` you can fall back to, because a per-process table would
+401 a valid credential the moment a request landed on the other replica
+and would invalidate every outstanding session on restart. An
+authentication service that cannot check a credential must not serve.
+
+`ada-api-gateway.yaml` sets the variable to `redis://ada-session-redis:6379`,
+but **that Service is not defined in this directory** — see
+`deploy/infra/ada-session-redis.yaml`. Applying only `deploy/k8s/` gives
+you a gateway in `CrashLoopBackOff`, which is the intended outcome rather
+than a silent one. For a running reference topology:
+
+```bash
+kubectl apply -f deploy/infra/ada-session-redis.yaml
+kubectl apply -k deploy/k8s/
+```
+
+The store that ships there is a placeholder — one replica, no
+persistence, no auth, no TLS. Sessions are the credential authority for
+the whole multi-tenant model, so point `ADA_SESSION_REDIS_URL` at a
+managed instance for anything real.
+
+### Even started, it authenticates nobody until you configure it
+
+`POST /api/v1/auth/login` exists and issues an opaque session token, but
+the credential directory it reads comes from `ADA_GATEWAY_LOGIN_USERS`,
+which no manifest in this directory sets. Unset means the directory is
+empty, which means every login is a 401 — and the gateway logs a warning
+at startup and serves anyway, because "no credentials configured" and
+"credentials configured and all wrong" must be indistinguishable from
+outside.
+
+So a green rollout of these manifests is a gateway that is genuinely
+fail-closed, not one that has been given a way in.
 
 ## Prerequisites
 
 - k8s cluster (tested against 1.27+; 1.24+ should also work)
 - `kubectl` configured with cluster admin in the `observability` namespace
 - An existing `observability` namespace (or change `namespace:` in `kustomization.yaml`)
+- **A reachable Redis for `ada-api-gateway`.** Without it the gateway
+  refuses to start. Apply `deploy/infra/ada-session-redis.yaml` for a
+  placeholder, or set `ADA_SESSION_REDIS_URL` to a managed instance.
+- **A credential directory for the login endpoint** — set
+  `ADA_GATEWAY_LOGIN_USERS` to the JSON array described in
+  `crates/ada-m13-api-gateway/src/login.rs` (`USERS_ENV_VAR`). Without
+  it the gateway serves but authenticates nobody.
+- Images published to `ghcr.io/ulyssesleolee/*` (see above — nothing
+  publishes them yet)
 - For hot-reload: a CSI-backed RWX volume (or a `Reloader`-style sidecar watching the ConfigMap)
 - For real secrets: sealed-secrets, external-secrets-operator, or a similar tool
 

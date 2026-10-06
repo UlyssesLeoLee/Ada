@@ -20,12 +20,19 @@
 //!   verified against the published test vectors.
 //! - [`passkey`] — `WebAuthn` resident-key flow (re-export of webauthn).
 //! - [`recovery`] — single-use recovery code generation + redemption.
-//! - [`session`] — opaque session token + cookie management.
+//! - [`session`] — opaque session token + cookie management, and the
+//!   [`SessionStorage`](session::SessionStorage) trait a backend
+//!   implements.
+//! - [`shared_session`] — the production backend: session state in a
+//!   store every replica can reach.
 //! - [`rate_limit`] — token-bucket rate limiter for `/login`.
 //!
 //! ## Feature flags
 //!
 //! - default (no feature): real wire-format deps active.
+//! - `inproc-sessions`: the per-process `SessionStore` double, for
+//!   tests only. Not enabled by default, because it is not a thing a
+//!   production build should be able to reach.
 //! - `stub`: restore the v0.4.0 in-house primitive implementations
 //!   for downgrade safety. Build without `openidconnect` /
 //!   `samael` / `webauthn-rs` / `totp-rs`.
@@ -42,8 +49,10 @@ pub mod oidc;
 pub mod passkey;
 pub mod rate_limit;
 pub mod recovery;
+pub mod redis_session;
 pub mod saml;
 pub mod session;
+pub mod shared_session;
 pub mod totp;
 pub mod webauthn;
 

@@ -115,5 +115,14 @@ http-body-util = "0.1"
 # the `reconcile_canvas_state` API; without it the test file
 # would not compile.
 ada-m12-canvas-editor = { path = "../ada-m12-canvas-editor", features = ["server"], version = "0.1.0" }
+# The in-process session store, for this crate's tests only.
+#
+# `ada-identity` keeps `SessionStore` behind `inproc-sessions` precisely so a
+# production build cannot reach it — a session in process memory is unknown to
+# the next replica and dies with the pod. That rule would make every test here
+# need a Redis, so the feature is enabled from `[dev-dependencies]`, where it
+# applies to test targets only and never to `cargo build` of the lib or bin.
+# The one place it must not be enabled is `[dependencies]`.
+ada-identity = { path = "../ada-identity", features = ["inproc-sessions"], version = "0.1.0" }
 [lints]
 workspace = true

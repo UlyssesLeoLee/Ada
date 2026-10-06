@@ -56,15 +56,15 @@ impl AppState {
     /// for `db`; production builds will pass a wrapper that probes the
     /// real DB / peer pool.
     ///
-    /// `auth` comes from [`AuthContext::bootstrap`], which is the
-    /// freshly-started shape: an empty session store and an enforcer
-    /// built from the bundled policy. There is no way to reach
-    /// `/api/*` until a session is minted, which is deliberate.
-    pub fn new(name: impl Into<String>, db: Arc<dyn HealthCheck>) -> crate::Result<Self> {
+    /// `auth` comes from [`AuthContext::bootstrap`], which needs the shared
+    /// session store named by `ADA_SESSION_REDIS_URL` and therefore cannot
+    /// be built offline. There is no way to reach `/api/*` without a session,
+    /// which is deliberate.
+    pub async fn new(name: impl Into<String>, db: Arc<dyn HealthCheck>) -> crate::Result<Self> {
         Ok(Self {
             name: name.into(),
             db,
-            auth: AuthContext::bootstrap()?,
+            auth: AuthContext::bootstrap().await?,
             login: Arc::new(LoginService::new(Arc::new(CredentialDirectory::new()))),
         })
     }
@@ -101,27 +101,46 @@ mod tests {
     use super::*;
     use crate::health::MemoryHealthCheck;
 
-    #[test]
-    fn new_takes_name_and_db() {
-        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new()))
-            .expect("bootstrap auth context");
+    /// An [`AppState`] built the way a test can build one.
+    ///
+    /// Not [`AppState::new`]: that one bootstraps from
+    /// [`REDIS_URL_ENV`] and refuses to exist without a reachable shared
+    /// store, which is the correct posture for a pod and makes every test
+    /// below depend on infrastructure no `cargo test` run provides.
+    /// [`Self::with_auth`] is the seam for exactly this, and it still
+    /// loads the real bundled policy set — only the storage is swapped.
+    fn state_with_isolated_sessions(name: &str) -> AppState {
+        let auth =
+            AuthContext::with_bundled_policy(Arc::new(ada_identity::session::SessionStore::new()))
+                .expect("bundled policy set");
+        AppState::with_auth(name, Arc::new(MemoryHealthCheck::new()), auth)
+    }
+
+    #[tokio::test]
+    async fn new_takes_name_and_db() {
+        let state = state_with_isolated_sessions("ada-gateway");
         assert_eq!(state.name, "ada-gateway");
     }
 
-    #[test]
-    fn new_accepts_string_and_str() {
-        let s = AppState::new(String::from("a"), Arc::new(MemoryHealthCheck::new())).unwrap();
+    #[tokio::test]
+    async fn new_accepts_string_and_str() {
+        let s = state_with_isolated_sessions("a");
         assert_eq!(s.name, "a");
-        let s = AppState::new("b", Arc::new(MemoryHealthCheck::new())).unwrap();
+        let s = state_with_isolated_sessions("b");
         assert_eq!(s.name, "b");
     }
 
-    #[test]
-    fn a_bootstrapped_state_denies_every_token() {
+    #[tokio::test]
+    async fn a_bootstrapped_state_denies_every_token() {
         // The freshly-started shape. If this ever starts resolving a
         // token, something is minting sessions without a login flow.
-        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).unwrap();
-        assert!(state.auth.resolve("any-token").is_none());
+        let state = state_with_isolated_sessions("ada-gateway");
+        assert!(state
+            .auth
+            .resolve("any-token")
+            .await
+            .expect("lookup")
+            .is_none());
     }
 
     /// The default construction must not become a back door. Before
@@ -129,9 +148,24 @@ mod tests {
     /// answer; if a default-constructed `AppState` came with a
     /// credential directory, this crate would ship a way in that no
     /// test and no operator had asked for.
-    #[test]
-    fn a_bootstrapped_state_has_no_configured_credentials() {
-        let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).unwrap();
+    #[tokio::test]
+    async fn a_bootstrapped_state_has_no_configured_credentials() {
+        let state = state_with_isolated_sessions("ada-gateway");
         assert!(!state.login.is_enabled());
+    }
+
+    /// `String` and `&str` are both accepted, because the two
+    /// constructors below a test are the ones a caller actually has.
+    #[tokio::test]
+    async fn with_auth_accepts_both_string_and_str_names() {
+        let auth =
+            AuthContext::with_bundled_policy(Arc::new(ada_identity::session::SessionStore::new()))
+                .expect("bundled policy set");
+        let owned = AppState::with_auth(
+            String::from("owned"),
+            Arc::new(MemoryHealthCheck::new()),
+            auth,
+        );
+        assert_eq!(owned.name, "owned");
     }
 }

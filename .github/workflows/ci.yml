@@ -185,6 +185,40 @@ jobs:
       - name: cargo clippy (mock server capture)
         run: cargo clippy -p ada-mock --features server --all-targets --locked -- -D warnings
 
+      # ada-identity gained an `inproc-sessions` feature that re-exposes the
+      # per-process session store, and this lane is the only thing that
+      # builds it. It exists for a sharper reason than "coverage".
+      #
+      # The in-process store is the double the rest of the workspace uses in
+      # its tests, and it is deliberately unreachable from a production
+      # build. A `#[cfg(test)]`-only item would not be visible to another
+      # crate's tests, so it is a feature instead -- which means it can
+      # also be switched on by accident, and nothing else in CI would notice.
+      # `inproc-sessions` in a real build is a session minted in one process
+      # and unknown to the next, i.e. a user logged out on every request
+      # that lands on a different replica.
+      #
+      # The *negative* half of the rule -- that no production dependency
+      # edge turns the feature on -- is asserted by
+      # `no_production_dependency_enables_a_test_only_feature` in
+      # crates/ada-core/tests/ci_feature_coverage.rs. It was previously
+      # a `compile_fail` doctest on `SessionStore::new()`, which was
+      # vacuous where it ran: under `cargo test --workspace`, Cargo
+      # unifies features across members and the gateway's dev-dependency
+      # has already switched `inproc-sessions` on, so the doctest saw a
+      # build *with* the feature and CI failed it with "Test compiled
+      # successfully, but it's marked compile_fail". A feature flag cannot
+      # demonstrate its own absence from a build that has it enabled.
+      #
+      # This lane is the positive half: it keeps the feature compiling,
+      # tested and linted, so the coverage gate beside it can keep
+      # asserting that no non-default feature is built by nothing.
+      - name: cargo test (identity in-proc sessions)
+        run: cargo test -p ada-identity --features inproc-sessions --locked
+
+      - name: cargo clippy (identity in-proc sessions)
+        run: cargo clippy -p ada-identity --features inproc-sessions --all-targets --locked -- -D warnings
+
       # ada-remediation's binary is the payload of the k8s Deployment in
       # deploy/k8s/ada-remediation.yaml (replicas: 2, port 9100, an
       # HMAC-authenticated webhook and a NetworkPolicy). Its `[[bin]]`
@@ -376,10 +410,45 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+      - name: Start a shared session store for the gateway
+        if: ${{ matrix.service == 'ada-api-gateway' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The gateway's `bootstrap` refuses to start without a reachable
+          # shared session store -- there is deliberately no in-process
+          # fallback, because a per-process map 401s every credential the
+          # moment a request lands on another replica. That makes a Redis
+          # a *startup requirement*, not a nice-to-have, so an image gate
+          # that ran the container without one would be testing a
+          # configuration nobody deploys.
+          #
+          # A real Redis on a real network, not a stub: the point of this
+          # job is that the published image starts and answers its probe
+          # with the configuration its own code demands.
+          docker network create ada-smoke
+          docker run -d --name ada-smoke-redis --network ada-smoke \
+            redis:7-alpine redis-server --save '' --appendonly no
+          # Wait for it to accept connections. The gateway connects once
+          # during bootstrap, so a race here would surface as a flaky
+          # image gate rather than as anything real.
+          for _ in $(seq 1 30); do
+            if docker exec ada-smoke-redis redis-cli ping 2>/dev/null | grep -q PONG; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec ada-smoke-redis redis-cli ping | grep -q PONG
+
       - name: The image runs and serves its probe path
         shell: bash
         run: |
           set -euo pipefail
+          net_args=()
+          if [ "${{ matrix.service }}" = "ada-api-gateway" ]; then
+            net_args=(--network ada-smoke
+                      -e ADA_SESSION_REDIS_URL=redis://ada-smoke-redis:6379)
+          fi
           env_args=()
           if [ -n "${{ matrix.env }}" ]; then
             # One `-e KEY=VALUE` per matrix entry, split on whitespace.
@@ -387,10 +456,17 @@ jobs:
             for pair in "${pairs[@]}"; do env_args+=(-e "$pair"); done
           fi
           cid=$(docker run -d --name smoke \
+            "${net_args[@]}" \
             "${env_args[@]}" \
             -p 127.0.0.1:${{ matrix.port }}:${{ matrix.port }} \
             ci/${{ matrix.service }}:local)
-          trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
+          cleanup() {
+            docker logs "$cid" || true
+            docker rm -f "$cid" || true
+            docker rm -f ada-smoke-redis || true
+            docker network rm ada-smoke || true
+          }
+          trap cleanup EXIT
           code=000
           for _ in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' \
