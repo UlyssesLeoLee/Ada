@@ -555,10 +555,18 @@ mod tests {
         // A dead row written after the live ones is not collected by
         // the sweep the next mint performed, which is what leaves
         // something for the manual sweep to do.
-        assert!(backend.rows() > 1, "precondition: dead rows are resident");
+        //
+        // Captured *before* the sweep. It used to be read inline in the
+        // assertion below, where it measures the post-sweep state: by
+        // then `rows()` is already 1, so `rows() - 1` is 0 and the
+        // assertion demanded that a sweep which correctly reclaimed three
+        // rows had reclaimed none. It failed on CI with `left: 1,
+        // right: 0` -- the count and the arithmetic, not the sweep.
+        let resident_before = backend.rows();
+        assert!(resident_before > 1, "precondition: dead rows are resident");
 
         let reclaimed = store.sweep_expired().await.expect("sweep");
-        assert_eq!(reclaimed, backend.rows() - 1, "only the dead go");
+        assert_eq!(reclaimed, resident_before - 1, "only the dead go");
         assert_eq!(backend.rows(), 1);
         assert_eq!(
             store.sweep_expired().await.expect("sweep again"),

@@ -169,6 +169,12 @@ impl SessionRecord {
         // saturate rather than wrap into the past and expire the
         // session the moment it is stored.
         let remaining = i64::try_from(remaining).unwrap_or(i64::MAX);
+        // Truncation note: `as_millis()` floors, so the stored deadline
+        // can be up to 1 ms shorter than the true expiry. That is the
+        // safe direction for a session -- never longer than intended --
+        // and it is far below the clock skew this field already assumes
+        // between replicas (see `SessionRecord`'s docs). The contract
+        // test carries the matching 1 ms slack.
         Self {
             user_id: session.user_id.clone(),
             tenant_id: session.tenant_id.clone(),
@@ -727,9 +733,26 @@ mod contract_tests {
         let after = unix_millis_now();
         let deadline = record.expires_at_unix_ms;
 
+        // One millisecond of slack on the lower bound, because that is the
+        // precision `from_session` actually has: it converts the remaining
+        // lifetime with `as_millis()`, which truncates, so the stored
+        // deadline can land up to 1 ms *short* of the true expiry.
+        //
+        // The bound as it stood -- `deadline >= before + 60_000` -- asserted
+        // a precision the field does not carry, and failed on CI by exactly
+        // one millisecond (deadline 1791282363194 against now 1791282303195,
+        // i.e. 59 999 ms out rather than 60 000). A session expiring a
+        // millisecond early is not a defect worth changing behaviour over:
+        // the deadline is already wall-clock and therefore already assumes
+        // the pods' clocks agree, which `SessionRecord`'s own docs state.
+        // Claiming sub-millisecond exactness here only tested the rounding
+        // mode of a conversion.
+        const TRUNCATION_SLACK_MS: i64 = 1;
         assert!(
-            deadline >= before + 60_000 && deadline <= after + 60_000,
-            "deadline must sit ~60s past the epoch, got {deadline} against now {after}"
+            deadline + TRUNCATION_SLACK_MS >= before + 60_000 && deadline <= after + 60_000,
+            "deadline must sit ~60s past now (+/-{TRUNCATION_SLACK_MS}ms \
+             for the truncation in as_millis), got {deadline} against \
+             now {after}"
         );
     }
 
