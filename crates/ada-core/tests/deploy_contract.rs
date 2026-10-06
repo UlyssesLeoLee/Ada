@@ -412,10 +412,19 @@ fn run_as(doc: &[&str], key: &str) -> Option<String> {
         .position(|l| l.trim() == "securityContext:")?
         + slo;
     let sec_indent = indent_of(doc[sec]);
-    doc[block_after(doc, sec)]
-        .into_iter()
-        .find(|&j| indent_of(doc[j]) == sec_indent + 2 && doc[j].trim_start().starts_with(key))
-        .map(|j| scalar(doc[j].trim_start().strip_prefix(key).unwrap_or_default()))
+    // An explicit loop rather than `doc[block_after(..)].into_iter()`: that
+    // indexes a slice to a place of unsized type, and asking such a place for
+    // an iterator is not something the compiler resolves the way the same
+    // expression over an array would be. A file that cannot be compiled
+    // locally is not the place to be clever.
+    for j in block_after(doc, sec) {
+        if indent_of(doc[j]) == sec_indent + 2 && doc[j].trim_start().starts_with(key) {
+            return Some(scalar(
+                doc[j].trim_start().strip_prefix(key).unwrap_or_default(),
+            ));
+        }
+    }
+    None
 }
 
 fn dockerfile_for(workload: &str) -> Option<(String, String)> {
