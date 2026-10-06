@@ -209,7 +209,7 @@ fn redis_err(e: redis::RedisError) -> IdentityError {
 }
 
 fn classify(e: &redis::RedisError) -> &'static str {
-    use redis::ErrorKind::{IoError, TypeError, Unreachable, ExtensionError};
+    use redis::ErrorKind::{ExtensionError, IoError, TypeError, Unreachable};
     match e.kind() {
         Unreachable => "server unreachable",
         IoError => "io error",

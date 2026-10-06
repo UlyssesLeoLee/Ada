@@ -706,7 +706,6 @@ mod tests {
     /// the leak this guards.
     #[tokio::test]
     async fn an_unknown_identity_still_runs_a_credential_comparison() {
-    fn an_unknown_identity_still_runs_a_credential_comparison() {
         let svc = LoginService::with_limits(directory_with_one_user(), 100, 1_000);
         let auth = AuthContext::bootstrap().await.expect("bootstrap");
         let before = svc.comparison_count();
@@ -731,7 +730,6 @@ mod tests {
     /// oracle even when both are 401.
     #[tokio::test]
     async fn the_two_denial_reasons_produce_one_identical_error() {
-    fn the_two_denial_reasons_produce_one_identical_error() {
         let svc = LoginService::with_limits(directory_with_one_user(), 100, 1_000);
         let auth = AuthContext::bootstrap().await.expect("bootstrap");
 
@@ -754,7 +752,6 @@ mod tests {
     /// whole endpoint is a 401 generator.
     #[tokio::test]
     async fn a_correct_credential_mints_a_token_that_resolves() {
-    fn a_correct_credential_mints_a_token_that_resolves() {
         let dir = directory_with_one_user();
         let auth = AuthContext::bootstrap().await.expect("bootstrap");
         let svc = LoginService::new(Arc::clone(&dir));
@@ -775,7 +772,6 @@ mod tests {
     /// and an offline guessing oracle.
     #[tokio::test]
     async fn the_attempt_ceiling_is_enforced() {
-    fn the_attempt_ceiling_is_enforced() {
         let svc = LoginService::with_limits(directory_with_one_user(), 3, 1);
         let auth = AuthContext::bootstrap().await.expect("bootstrap");
 
@@ -799,7 +795,6 @@ mod tests {
     /// defeated by changing the case of the address.
     #[tokio::test]
     async fn the_attempt_ceiling_is_not_defeated_by_changing_case() {
-    fn the_attempt_ceiling_is_not_defeated_by_changing_case() {
         let svc = LoginService::with_limits(directory_with_one_user(), 2, 1);
         let auth = AuthContext::bootstrap().await.expect("bootstrap");
 
@@ -820,7 +815,6 @@ mod tests {
     /// one, or a spray across many addresses is unbounded.
     #[tokio::test]
     async fn spraying_distinct_identities_is_still_bounded() {
-    fn spraying_distinct_identities_is_still_bounded() {
         let svc = LoginService::with_limits(directory_with_one_user(), 3, 1);
         let auth = AuthContext::bootstrap().await.expect("bootstrap");
 

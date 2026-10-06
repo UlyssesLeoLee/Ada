@@ -106,7 +106,6 @@ mod tests {
 
     #[tokio::test]
     async fn new_takes_name_and_db() {
-    fn new_takes_name_and_db() {
         let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).await
             .expect("bootstrap auth context");
         assert_eq!(state.name, "ada-gateway");
@@ -114,7 +113,6 @@ mod tests {
 
     #[tokio::test]
     async fn new_accepts_string_and_str() {
-    fn new_accepts_string_and_str() {
         let s = AppState::new(String::from("a"), Arc::new(MemoryHealthCheck::new())).await.unwrap();
         assert_eq!(s.name, "a");
         let s = AppState::new("b", Arc::new(MemoryHealthCheck::new())).await.unwrap();
@@ -123,7 +121,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_bootstrapped_state_denies_every_token() {
-    fn a_bootstrapped_state_denies_every_token() {
         // The freshly-started shape. If this ever starts resolving a
         // token, something is minting sessions without a login flow.
         let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).await.unwrap();
@@ -137,7 +134,6 @@ mod tests {
     /// test and no operator had asked for.
     #[tokio::test]
     async fn a_bootstrapped_state_has_no_configured_credentials() {
-    fn a_bootstrapped_state_has_no_configured_credentials() {
         let state = AppState::new("ada-gateway", Arc::new(MemoryHealthCheck::new())).await.unwrap();
         assert!(!state.login.is_enabled());
     }
