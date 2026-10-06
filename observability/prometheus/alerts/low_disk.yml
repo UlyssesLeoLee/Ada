@@ -34,5 +34,7 @@ groups:
             {{ $labels.instance }} has only
             {{ $value | humanizePercentage }} free space.
             Capacity < 10% risks kernel write refusal.
-          runbook: "https://wiki.example/runbooks/low-disk"
+          # See app_down.yml: `wiki.example` is an RFC 2606 reserved
+          # host and never resolves. No external runbook wiki exists.
+          runbook: "docs/observability/07-alert-policy.md"
           dashboard: "http://localhost:3000/d/app-overview"

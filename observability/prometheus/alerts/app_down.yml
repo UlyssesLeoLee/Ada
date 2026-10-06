@@ -26,5 +26,11 @@ groups:
               1. Is the Pod / container running?
               2. Is the exporter / scrape endpoint listening?
               3. Is the NetworkPolicy blocking the scrape?
-          runbook: "https://wiki.example/runbooks/service-down"
+          # No external runbook wiki exists for this project. This used
+          # to point at https://wiki.example/runbooks/service-down --
+          # `example.com` is reserved by RFC 2606 and never resolves, so
+          # the one link an on-call engineer gets at 3am was a DNS
+          # failure indistinguishable from "the runbook is broken".
+          # Until a real corpus exists, point at the document that does.
+          runbook: "docs/observability/07-alert-policy.md"
           dashboard: "http://localhost:3000/d/app-overview"
