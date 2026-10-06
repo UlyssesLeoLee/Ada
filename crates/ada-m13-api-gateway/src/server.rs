@@ -22,6 +22,7 @@ use tower_http::trace::TraceLayer;
 use crate::{
     error::{ApiError, Result},
     health::MemoryHealthCheck,
+    login::{CredentialDirectory, LoginService},
     router::build_router,
     state::AppState,
 };
@@ -42,7 +43,19 @@ pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(25);
 /// through a oneshot, which is what lets the timeout start when the
 /// signal arrives rather than when the server does.
 pub async fn serve(bind: SocketAddr, name: &str) -> Result<()> {
-    let state = AppState::new(name, Arc::new(MemoryHealthCheck::new()))?;
+    // Loaded here rather than inside `AppState::new` so that no
+    // constructor reads the environment, and so a malformed credential
+    // set refuses to start instead of serving 401 to every real user
+    // with nothing in the log to explain it. The value is never logged:
+    // it holds passwords.
+    let directory = CredentialDirectory::from_env()?;
+    if directory.is_empty() {
+        tracing::warn!(
+            "no login credentials configured; POST /api/v1/auth/login will refuse every request"
+        );
+    }
+    let state = AppState::new(name, Arc::new(MemoryHealthCheck::new()))?
+        .with_login(Arc::new(LoginService::new(Arc::new(directory))));
     let app = build_router(state).layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(bind)

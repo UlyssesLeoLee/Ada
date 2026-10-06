@@ -32,6 +32,22 @@
 //! A freshly started pod has an empty session store and no login flow,
 //! so every `/api` request is a 401. That is the intended posture.
 //!
+//! ## Login
+//!
+//! [`login`] adds `POST /api/v1/auth/login`, the route that closes that
+//! loop: it verifies an email + password and mints the same opaque
+//! session token the rest of the crate already validates. It is mounted
+//! outside the authentication layer, because it is the one route a
+//! caller reaches without a credential.
+//!
+//! The token is **not** a JWT. `ada_identity::mint::mint_jwt` fails
+//! closed for every input because no RS256 signer is wired in, and
+//! `verify_jwt_stub` refuses every token for the same reason, so
+//! issuing one here would mean shipping the unsigned-token forgery the
+//! `ada-identity` tests exist to prevent. The client is unaffected: it
+//! reads `token` off the response and sends it back as a bearer, and
+//! both halves of that are unchanged.
+//!
 //! CORS / HSTS remain unwired. See
 //! [`DOC-MOD-013`](../docs/modules/M-13-api-gateway.md) §3.1 for the
 //! intended full chain and `../docs/api/error-codes.md` for the
@@ -43,12 +59,14 @@
 pub mod auth;
 mod error;
 mod health;
+pub mod login;
 mod router;
 pub mod server;
 mod state;
 
 pub use error::{ApiError, Result};
 pub use health::{HealthCheck, HealthStatus, MemoryHealthCheck};
+pub use login::{CredentialDirectory, LoginService, StoredUser};
 pub use router::{build_router, HealthSnapshot};
 pub use state::AppState;
 

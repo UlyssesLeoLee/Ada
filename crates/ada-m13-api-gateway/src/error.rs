@@ -12,6 +12,7 @@
 //! | `NotFound`          | 404         |
 //! | `BadRequest`        | 400         |
 //! | `Unauthorized`      | 401         |
+//! | `TooManyRequests`   | 429         |
 //! | `ServiceUnavailable`| 503         |
 //! | `Internal`          | 500         |
 //!
@@ -42,6 +43,16 @@ pub enum ApiError {
     #[error("unauthorized: {0}")]
     Unauthorized(String),
 
+    /// The caller exceeded a rate limit.
+    ///
+    /// Added with the login endpoint. A login surface with no attempt
+    /// ceiling is an offline password-guessing oracle, so the refusal
+    /// needs a status a client can tell apart from "your credential is
+    /// wrong" -- 429 and 401 are different facts and collapsing them
+    /// would make a backoff strategy impossible to implement.
+    #[error("too many requests: {0}")]
+    TooManyRequests(String),
+
     /// A backing service is unavailable (DB, upstream, peer).
     #[error("service unavailable: {0}")]
     ServiceUnavailable(String),
@@ -59,6 +70,7 @@ impl ApiError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
             Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -112,6 +124,10 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
         assert_eq!(
+            ApiError::TooManyRequests("x".into()).status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
             ApiError::ServiceUnavailable("x".into()).status(),
             StatusCode::SERVICE_UNAVAILABLE
         );
@@ -161,6 +177,9 @@ mod tests {
         for e in [
             ApiError::NotFound("x".into()),
             ApiError::BadRequest("x".into()),
+            // A 429 is a rate-limit refusal, not a credential challenge:
+            // telling the client to retry with `Bearer` would be wrong.
+            ApiError::TooManyRequests("x".into()),
             ApiError::ServiceUnavailable("x".into()),
             ApiError::Internal("x".into()),
         ] {
