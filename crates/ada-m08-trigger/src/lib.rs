@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! Minimum skeleton for the trigger / scheduling facilities
-//! defined in [`DOC-MOD-008`](../docs/modules/M-08-trigger.md).
+//! defined in [`DOC-MOD-008`](../docs/modules/M-08-trigger-service.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`TriggerKind`] — four kinds
@@ -20,11 +20,11 @@
 //! 5-field cron parser (minute / hour / dom / month / dow).
 //! B7+ will swap in the `cron` crate for the full spec.
 //!
-//! See `docs/modules/M-08-trigger.md` (DOC-MOD-008) for the
+//! See `docs/modules/M-08-trigger-service.md` (DOC-MOD-008) for the
 //! full design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-08-trigger.md (DOC-MOD-008)
+//! 設計書: docs/modules/M-08-trigger-service.md (DOC-MOD-008)
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]

@@ -22,7 +22,7 @@
 //!   (実装着手判定) is approved.
 //! - 5-variant [`TenantError`] (MissingContext, InvalidTenant,
 //!   CrossTenantAccess, ContextNotInitialized, BackendError)
-//! - 8 unit tests + 4 integration tests
+//! - 28 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!

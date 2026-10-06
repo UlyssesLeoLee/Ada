@@ -25,7 +25,7 @@
 //!   no new dependencies; the gRPC binding lands in B5+.
 //! - 5-variant [`ExporterError`] (SerializationError,
 //!   TransportError, InvalidMetric, BackendError, ShuttingDown)
-//! - 9 unit tests + 4 integration tests + 7 OtlpPushExporter
+//! - 34 unit tests + 4 integration tests + 7 OtlpPushExporter
 //!   tests (Phase 0-1 addition)
 //!
 //! ## What v0.1.0 explicitly does **not** do

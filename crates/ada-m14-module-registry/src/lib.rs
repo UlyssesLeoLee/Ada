@@ -18,7 +18,7 @@
 //! - 5-variant [`RegistryError`] (`AlreadyRegistered`,
 //!   `NotFound`, `InvalidDescriptor`, `HealthCheckFailed`,
 //!   `BackendError`)
-//! - 11 unit tests + 4 integration tests
+//! - 31 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
