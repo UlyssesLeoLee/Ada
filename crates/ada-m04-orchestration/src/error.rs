@@ -17,7 +17,7 @@
 //! Production builds will map these to the canonical API
 //! error codes defined in `docs/api/error-codes.md`; the
 //! skeleton keeps the surface minimal. See
-//! [`DOC-MOD-004`](../docs/modules/M-04-orchestration.md)
+//! [`DOC-MOD-004`](../docs/modules/M-04-orchestration-engine.md)
 //! §3.4 for the full validation pipeline.
 
 use thiserror::Error;

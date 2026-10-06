@@ -13,7 +13,7 @@
 //! | `Timeout`               | The execution exceeded the configured time budget.   |
 //! | `BackendError`          | Underlying store / driver / scheduler failed.        |
 //!
-//! See [`DOC-MOD-005`](../docs/modules/M-05-control-flow.md)
+//! See [`DOC-MOD-005`](../docs/modules/M-05-control-flow-executor.md)
 //! §3.4 for the full validation pipeline.
 
 use thiserror::Error;

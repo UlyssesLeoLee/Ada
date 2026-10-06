@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! Minimum skeleton for the canvas editor defined in
-//! [`DOC-MOD-012`](../docs/modules/M-12-canvas-editor.md). The
+//! [`DOC-MOD-012`](../docs/modules/M-12-canvas-editor-frontend.md). The
 //! v0.1.0 surface is:
 //!
 //! - [`NodeKind`] — three kinds (`Block / Connector / Note`)
@@ -17,11 +17,11 @@
 //!   `VersionConflict`, `InvalidEdge`, `HistoryEmpty`,
 //!   `BackendError`)
 //!
-//! See `docs/modules/M-12-canvas-editor.md` (DOC-MOD-012) for
+//! See `docs/modules/M-12-canvas-editor-frontend.md` (DOC-MOD-012) for
 //! the full design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-12-canvas-editor.md (DOC-MOD-012)
+//! 設計書: docs/modules/M-12-canvas-editor-frontend.md (DOC-MOD-012)
 //!
 //! ## Feature flags
 //!

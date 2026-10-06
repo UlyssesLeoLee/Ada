@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! This crate is the **minimum skeleton** for the cross-module
-//! plugin system defined in [`DOC-MOD-006`](../docs/modules/M-06-plugin-sdk.md).
+//! plugin system defined in [`DOC-MOD-006`](../docs/modules/M-06-node-runtime-plugin-sdk.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`PluginKind`] — three canonical kinds
@@ -17,7 +17,7 @@
 //!   resource limits (max_memory_mb, max_cpu_ms_per_call)
 //! - 5-variant [`SdkError`] (`PluginNotFound`, `ManifestInvalid`,
 //!   `CapabilityDenied`, `HashMismatch`, `BackendError`)
-//! - 10 unit tests + 4 integration tests
+//! - 31 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
@@ -29,11 +29,11 @@
 //! - Signature verification (the field is reserved; the v0.1.0
 //!   stores it but does not enforce it)
 //!
-//! See `docs/modules/M-06-plugin-sdk.md` (DOC-MOD-006) for the
+//! See `docs/modules/M-06-node-runtime-plugin-sdk.md` (DOC-MOD-006) for the
 //! full design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-06-plugin-sdk.md (DOC-MOD-006)
+//! 設計書: docs/modules/M-06-node-runtime-plugin-sdk.md (DOC-MOD-006)
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]

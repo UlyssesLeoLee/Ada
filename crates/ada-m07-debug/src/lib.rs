@@ -3,7 +3,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! Minimum skeleton for the cross-module debug facilities
-//! defined in [`DOC-MOD-007`](../docs/modules/M-07-debug.md).
+//! defined in [`DOC-MOD-007`](../docs/modules/M-07-debug-service.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`Breakpoint`] — id, location, kind, state
@@ -19,11 +19,11 @@
 //! - Source-map aware breakpoints
 //! - Distributed trace export (OTLP / Jaeger)
 //!
-//! See `docs/modules/M-07-debug.md` (DOC-MOD-007) for the full
+//! See `docs/modules/M-07-debug-service.md` (DOC-MOD-007) for the full
 //! design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-07-debug.md (DOC-MOD-007)
+//! 設計書: docs/modules/M-07-debug-service.md (DOC-MOD-007)
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]

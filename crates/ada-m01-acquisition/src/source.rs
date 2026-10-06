@@ -21,7 +21,7 @@
 //! - `batch_size` — upper bound on records per `fetch` call.
 //!   Connectors may return fewer.
 //!
-//! See [`DOC-MOD-001`](../docs/modules/M-01-acquisition.md) §3.2
+//! See [`DOC-MOD-001`](../docs/modules/M-01-acquisition-adapter.md) §3.2
 //! for the full schema.
 
 use std::fmt;

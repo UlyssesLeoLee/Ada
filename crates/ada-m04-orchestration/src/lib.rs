@@ -5,7 +5,7 @@
 //!
 //! This crate is a **minimum skeleton** for the
 //! cross-module orchestrator defined in
-//! [`DOC-MOD-004`](../docs/modules/M-04-orchestration.md).
+//! [`DOC-MOD-004`](../docs/modules/M-04-orchestration-engine.md).
 //! The v0.1.0 surface is the in-process [`Scheduler`]
 //! contract that downstream crates (the API gateway, the
 //! control-flow executor, the M-08 trigger manager) program
@@ -25,7 +25,7 @@
 //! - [`InMemoryScheduler`] — FIFO queue with state machine
 //! - 5-variant [`OrchError`] (`JobNotFound`, `InvalidState`,
 //!   `QueueFull`, `BackendError`, `Cancelled`)
-//! - 12 unit tests + 4 integration tests
+//! - 42 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
@@ -37,11 +37,11 @@
 //!   `ada-m08-trigger`)
 //! - Enforce RBAC on `enqueue` (M-11 wiring is B7+)
 //!
-//! See `docs/modules/M-04-orchestration.md` (DOC-MOD-004)
+//! See `docs/modules/M-04-orchestration-engine.md` (DOC-MOD-004)
 //! for the full design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-04-orchestration.md (DOC-MOD-004)
+//! 設計書: docs/modules/M-04-orchestration-engine.md (DOC-MOD-004)
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]

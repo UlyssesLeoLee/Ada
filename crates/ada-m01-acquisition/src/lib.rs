@@ -22,7 +22,7 @@
 //! - 5-variant [`AcquisitionError`] (SourceUnavailable,
 //!   AuthenticationFailed, RateLimited, InvalidPayload,
 //!   BackendError)
-//! - 8 unit tests + 4 integration tests
+//! - 30 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
@@ -36,11 +36,11 @@
 //!   (the production poller will use `tokio::spawn` to
 //!   fan-out)
 //!
-//! See `docs/modules/M-01-acquisition.md` (DOC-MOD-001) for
+//! See `docs/modules/M-01-acquisition-adapter.md` (DOC-MOD-001) for
 //! the full design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-01-acquisition.md (DOC-MOD-001)
+//! 設計書: docs/modules/M-01-acquisition-adapter.md (DOC-MOD-001)
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]
