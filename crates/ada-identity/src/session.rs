@@ -1,6 +1,9 @@
 //! Opaque session token + cookie management. Session IDs are
-//! random 256-bit values; storage is left to the api-gateway
-//! (Postgres `session` table per RFC 8693 §5.2).
+//! random 256-bit values; multi-replica storage is the api-gateway's job and is
+//! Redis, not a database table: it builds `RedisSessionBackend`
+//! from `ADA_SESSION_REDIS_URL` and refuses to start when that is
+//! unset, so there is no in-process fallback to 401 a credential
+//! that landed on another replica.
 //!
 //! ## Retention
 //!
