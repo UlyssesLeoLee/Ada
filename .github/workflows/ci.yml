@@ -498,6 +498,79 @@ jobs:
   # deliberately not included: it implies `bevy`, which is a native ECS
   # integration and is not part of the WASM bundle.
   # ----------------------------------------------------------------------
+  # ----------------------------------------------------------------------
+  # db-migrations: apply every migration to a real Postgres.
+  #
+  # No workflow referenced `db/` at all -- no postgres service, no
+  # DATABASE_URL, no migration step. Three migrations and 13 tables existed
+  # with nothing able to run them, so a migration that did not apply was
+  # indistinguishable from one that did, and V001's tables had no test
+  # coverage even locally.
+  #
+  # `db/run-tests.sh` was already a complete runner (apply migrations, run
+  # the SQL tests, exit non-zero on failure). It only ever needed a
+  # database.
+  # ----------------------------------------------------------------------
+  db-migrations:
+    name: db migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ada
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ada_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migrations and run the SQL tests
+        env:
+          # run-tests.sh reads $USER, $HOST and $PORT before their PG*
+          # fallbacks, and GitHub runners export USER=runner. Without
+          # these it authenticates as `runner` and dies before applying
+          # a single migration -- a failure that looks like a broken
+          # migration.
+          USER: ada
+          PGUSER: ada
+          HOST: localhost
+          PGHOST: localhost
+          PORT: 5432
+          PGPORT: 5432
+          PGPASSWORD: postgres
+          DB: ada_test
+        run: bash db/run-tests.sh --verbose
+
+      - name: The schema actually exists
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          # Anti-vacuity. "run-tests.sh exited 0" is not proof the
+          # migrations did anything -- a migration that silently created
+          # nothing would still exit 0. V001 declares 11 tables, V003
+          # adds 2 more; V002 declares 6 functions and V003 adds 2.
+          tables=$(psql -h localhost -U ada -d ada_test -tAc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
+          funcs=$(psql -h localhost -U ada -d ada_test -tAc \
+            "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'")
+          echo "public tables=$tables functions=$funcs"
+          if [ "$tables" -lt 13 ]; then
+            echo "expected at least 13 tables from V001+V003, got $tables"
+            exit 1
+          fi
+          if [ "$funcs" -lt 8 ]; then
+            echo "expected at least 8 functions from V002+V003, got $funcs"
+            exit 1
+          fi
+
   wasm32:
     name: wasm32 build
     runs-on: ubuntu-latest

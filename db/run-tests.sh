@@ -86,6 +86,7 @@ fi
 cyan "==> running tests"
 PASS=0
 FAIL=0
+TOTAL_PASS=0
 FAILED_FILES=()
 for f in "$TESTS_DIR"/V*.sql; do
     [ -f "$f" ] || continue
@@ -98,16 +99,28 @@ for f in "$TESTS_DIR"/V*.sql; do
         continue
     }
     # PASS / FAIL カウント
-    pcount=$(echo "$out" | grep -c '^NOTICE:.*PASS:' || true)
-    fcount=$(echo "$out" | grep -cE '^\[t_|FAIL:.*TEST FAIL|EXCEPTION:' || true)
+    # psql は server からの通知行に "psql:<file>:<line>: " を付ける。
+    # そのため '^NOTICE:' で行頭を固定すると必ず 0 件になり、この runner は
+    # 全テスト通過時も "0 PASS notices" を報告していた (数えられない検査)。
+    # 行頭固定を外す。
+    pcount=$(echo "$out" | grep -c 'NOTICE:.*PASS:' || true)
+    # `NOTICE:.*FAIL:` matters as much as `ERROR:.*[t_`: a test could announce
+    # a failure with RAISE NOTICE and not raise, in which case psql still exits
+    # 0 and only this counter would catch it.
+    fcount=$(echo "$out" | grep -cE 'ERROR:.*\[t_|NOTICE:.*FAIL:|EXCEPTION:' || true)
     if [ "$VERBOSE" = "1" ]; then
-        echo "$out" | grep -E '^NOTICE:|^ERROR:|^FAIL:' || true
+        echo "$out" | grep -E 'NOTICE:|ERROR:|FAIL:' || true
     else
-        echo "      $(echo "$out" | grep -E '^NOTICE:.*PASS:' | wc -l) PASS notices"
+        echo "      $(echo "$out" | grep -E 'NOTICE:.*PASS:' | wc -l) PASS notices"
     fi
+    TOTAL_PASS=$((TOTAL_PASS + pcount))
     if [ "$fcount" -gt 0 ]; then
         red "    FAILED: $f ($fcount error(s))"
-        echo "$out" | grep -E '^\[t_|FAIL:.*TEST FAIL|EXCEPTION:' | head -5
+        # || true is load-bearing: under `set -e` + `pipefail`, a grep that
+        # matches nothing exits non-zero and would kill the script here --
+        # before the summary printed -- turning a reportable failure into a
+        # silent exit with no explanation.
+        echo "$out" | grep -E 'ERROR:.*\[t_|NOTICE:.*FAIL:|EXCEPTION:' | head -5 || true
         FAIL=$((FAIL+1))
         FAILED_FILES+=("$f")
     else
@@ -128,5 +141,29 @@ if [ "$FAIL" -gt 0 ]; then
     done
     exit 1
 fi
+
+# 5b. 反空転 (anti-vacuity)
+#
+# ON_ERROR_STOP=1 なので DO ブロックが例外を投げれば psql は非 0 で落ちる。
+# 逆向きの穴は残る: テスト本文を丸ごと削除しても psql は 0 で終了し、
+# "2 file(s) passed" 報告のままだ和政策 5 の定義 (数えられない検査) に該当する。
+# そこで 2 つを突き合わせる:
+#   (a) 実際に出た PASS notice 数 == テストソースが宣言している PASS 数
+#   (b) 宣言数が MIN_PASS_NOTES を下回らない
+# (b) があるため、テストを消して期待値も一緒に下げる操作は通らない。
+MIN_PASS_NOTES=23
+EXPECTED_PASS=$(grep -h -o "RAISE NOTICE 'PASS:" "$TESTS_DIR"/V*.sql 2>/dev/null | wc -l | tr -d ' ')
+echo "    PASS notices: ran=$TOTAL_PASS declared=$EXPECTED_PASS floor=$MIN_PASS_NOTES"
+if [ "$TOTAL_PASS" -ne "$EXPECTED_PASS" ]; then
+    red "    vacuous run: expected $EXPECTED_PASS PASS notices, got $TOTAL_PASS"
+    echo "    a test body was skipped or emptied, or a PASS notice stopped matching the counter"
+    exit 1
+fi
+if [ "$EXPECTED_PASS" -lt "$MIN_PASS_NOTES" ]; then
+    red "    coverage regressed: $EXPECTED_PASS PASS notices declared, floor is $MIN_PASS_NOTES"
+    echo "    if a test was deliberately removed, lower MIN_PASS_NOTES here and say why"
+    exit 1
+fi
+
 green "==> all tests passed"
 exit 0

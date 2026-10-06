@@ -36,15 +36,42 @@
 //!            exhausted)                 → back to Idle)
 //! ```
 //!
-//! Cooldown is enforced in two layers:
+//! Cooldown is enforced in **one** layer, and it is not durable:
 //!
-//!  1. **In-process** (this crate, [`MemoryStore`]) — fast path that gates
-//!     `evaluate()` from re-firing a recently executed action while the
-//!     persistent row is being written.
-//!  2. **Persistent** (PL/pgSQL `remediation_check_cooldown()` plus
-//!     `remediation_cooldowns` table) — durable source of truth across
-//!     process restarts and replicas. Replicas that boot mid-window must
-//!     see the cooldown, not silently re-fire.
+//!  - **In-process** ([`MemoryStore`]) — a `HashMap` in this binary. It
+//!    gates `evaluate()` from re-firing a recently executed action for as
+//!    long as the pod lives.
+//!
+//! # There is no persistent cooldown layer
+//!
+//! An earlier version of this comment described a second layer:
+//! PL/pgSQL `remediation_check_cooldown()` plus a `remediation_cooldowns`
+//! table, as "durable source of truth across process restarts and
+//! replicas ... replicas that boot mid-window must see the cooldown, not
+//! silently re-fire".
+//!
+//! **That layer does not exist.** `remediation_check_cooldown` is
+//! *defined* by `db/migrations/V003__phase8_remediation.sql` and is
+//! called from nowhere in this workspace; the only store wired by
+//! `main.rs` is `MemoryStore`.
+//!
+//! Three consequences an operator must plan for, given that
+//! `deploy/k8s/ada-remediation.yaml` runs **two replicas**:
+//!
+//!  1. **Replicas do not share cooldowns.** An alert reaches one replica
+//!     through the `ClusterIP` Service; it records the cooldown there. A
+//!     second alert inside the same window can land on the other replica,
+//!     which has no record and re-executes the remediation.
+//!  2. **A restart forgets everything.** Cooldowns do not survive a pod
+//!     restart, a rollout, or a reschedule.
+//!  3. **The shipped runbooks are not all safe to run twice.**
+//!     `config/remediation/disk-space-low.json` includes
+//!     `find /var/log -type f -name '*.gz' -mtime +7 -delete`.
+//!
+//! Until the persistent store is wired, either run a single replica or
+//! accept that the cooldown is advisory. Fixing the comment was not
+//! optional; it was the only thing standing between an operator and a
+//! false guarantee.
 //!
 //! # Quick start
 //!

@@ -395,12 +395,19 @@ impl StepExecutor for RealExecutor {
                 )
             }
             ActionStep::PgFunction { name, args, .. } => {
-                // v0.7.0: PG calls route through the same
-                // HTTP path against the in-cluster
-                // `remediation_execute_function` shim
-                // (per db/migrations/V003 §5). v0.7.1 swaps
-                // this for a direct `sqlx::query` call
-                // against the pool.
+                // The `pg://` URL below is a placeholder handed to the
+                // configured `NetworkClient`. **No such shim exists.**
+                // The previous comment here said PG calls route "against
+                // the in-cluster `remediation_execute_function` shim
+                // (per db/migrations/V003 §5)" -- there is no function
+                // of that name in any migration, and V003 has no §5. It
+                // defines exactly two: `remediation_record_execution`
+                // and `remediation_check_cooldown`.
+                //
+                // With the shipped `LoggingClient` this records the call
+                // and returns success, which is why the misleading
+                // comment mattered: the outcome records "pg function X
+                // -> ..." as though a database had been called.
                 let mut body_map = serde_json::Map::new();
                 body_map.insert("function".into(), serde_json::Value::String(name.clone()));
                 body_map.insert(
