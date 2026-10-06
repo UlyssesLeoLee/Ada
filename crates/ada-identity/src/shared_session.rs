@@ -6,12 +6,16 @@
 //! a deploy that logs out every user. This module is the production
 //! answer, and it is split in two on purpose:
 //!
-//! - [`SharedSessionBackend`] is the wire. It is five operations
-//!   against whatever the deployment already runs — a Redis `HASH`/`SCAN`,
-//!   a Postgres `session` table per RFC 8693 §5.2. This crate does not
-//!   pick a client, because the deployment has one and because a second
-//!   client in a shared workspace is a lockfile conflict waiting to
-//!   happen.
+//! - [`SharedSessionBackend`] is the wire: five operations against shared storage. The
+//!   production implementation is
+//!   [`RedisSessionBackend`](crate::redis_session::RedisSessionBackend),
+//!   built by the api-gateway from `ADA_SESSION_REDIS_URL`, which
+//!   fails closed when unset. `Cargo.toml` records that decision and
+//!   its reason. A Postgres `session` table was named here when this
+//!   module shipped as a bare trait and was never built: no such
+//!   table exists in `db/migrations`, and this crate has no Postgres
+//!   client in its dependency tree. A second backend can still be
+//!   added by implementing the trait; nothing here assumes one.
 //! - [`SharedSessionStore`] is the session semantics: token minting,
 //!   expiry, the ceiling, and the refusal to report a storage failure as
 //!   a missing session. Those live here so both backends are tested
