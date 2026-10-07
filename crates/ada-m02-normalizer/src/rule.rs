@@ -20,7 +20,7 @@
 //!   `field_path`s in order and pick the first non-null
 //!   value (assigns it to the rule's primary `field_path`).
 //!
-//! See [`DOC-MOD-002`](../docs/modules/M-02-normalizer.md) §3.3
+//! See [`DOC-MOD-002`](../../../docs/modules/M-02-normalizer.md) §3.3
 //! for the full rule schema.
 
 use std::fmt;

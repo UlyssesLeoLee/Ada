@@ -491,7 +491,7 @@ fn the_include_str_set_and_the_baked_set_agree() {
 /// CI image of this service failed with
 ///
 /// ```text
-/// error: couldn't read `crates/gm-console/src/../../../docs/commercial/TERMS.md`
+/// error: couldn't read `crates/gm-console/src/../../../../../docs/commercial/TERMS.md`
 /// ```
 ///
 /// which no local build can reproduce, because locally the file is there.

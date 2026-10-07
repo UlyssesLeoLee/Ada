@@ -14,7 +14,7 @@
 //!   representation without churning call sites that pass
 //!   the value through the engine.
 //!
-//! See [`DOC-MOD-003`](../docs/modules/M-03-data-flow-engine.md)
+//! See [`DOC-MOD-003`](../../../docs/modules/M-03-data-flow-engine.md)
 //! §3.2 for the canonical NJSON schema.
 
 use serde::{Deserialize, Serialize};

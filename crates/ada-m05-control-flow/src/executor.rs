@@ -17,7 +17,7 @@
 //!   context (`HashMap<String, Value>`) and a trace
 //!   (`Vec<String>` of step ids in execution order).
 //!
-//! See [`DOC-MOD-005`](../docs/modules/M-05-control-flow-executor.md)
+//! See [`DOC-MOD-005`](../../../docs/modules/M-05-control-flow-executor.md)
 //! §3.5 for the full execution pipeline.
 
 use std::collections::HashMap;

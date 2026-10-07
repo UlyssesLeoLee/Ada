@@ -13,7 +13,7 @@
 //! let _guard = init(cfg).expect("init");
 //! ```
 //!
-//! Per [`DOC-OBS-002 §3`](../docs/observability/02-architecture.md)
+//! Per [`DOC-OBS-002 §3`](../../../docs/observability/02-architecture.md)
 //! the endpoint defaults to `http://localhost:4317` (the
 //! otel-collector gRPC port). Override with the
 //! `OTEL_EXPORTER_OTLP_ENDPOINT` env var or the

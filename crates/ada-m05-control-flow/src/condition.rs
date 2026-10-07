@@ -18,7 +18,7 @@
 //! context. Numeric coercion is **not** performed; `"7"` is
 //! a string, not the number 7.
 //!
-//! See [`DOC-MOD-005`](../docs/modules/M-05-control-flow-executor.md)
+//! See [`DOC-MOD-005`](../../../docs/modules/M-05-control-flow-executor.md)
 //! §3.3 for the canonical condition grammar.
 
 use std::cmp::Ordering;

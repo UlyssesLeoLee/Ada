@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! Minimum skeleton for the canvas editor defined in
-//! [`DOC-MOD-012`](../docs/modules/M-12-canvas-editor-frontend.md). The
+//! [`DOC-MOD-012`](../../../docs/modules/M-12-canvas-editor-frontend.md). The
 //! v0.1.0 surface is:
 //!
 //! - [`NodeKind`] — three kinds (`Block / Connector / Note`)

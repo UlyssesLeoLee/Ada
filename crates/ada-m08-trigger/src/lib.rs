@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! Minimum skeleton for the trigger / scheduling facilities
-//! defined in [`DOC-MOD-008`](../docs/modules/M-08-trigger-service.md).
+//! defined in [`DOC-MOD-008`](../../../docs/modules/M-08-trigger-service.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`TriggerKind`] — four kinds

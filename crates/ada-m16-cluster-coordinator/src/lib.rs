@@ -15,7 +15,7 @@
 //!   distribution (real builds will use a tenant-id-hashed ring).
 //! - [`CoordError`] — single error enum (5 variants).
 //!
-//! See [`DOC-MOD-016`](../docs/modules/M-16-cluster-coordinator.md)
+//! See [`DOC-MOD-016`](../../../docs/modules/M-16-cluster-coordinator.md)
 //! for the full design (DB-backed `leader_lease` + PL/pgSQL
 //! `acquire_lease()`).
 //!

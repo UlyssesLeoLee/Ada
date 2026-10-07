@@ -15,7 +15,7 @@
 //! production build swap in a remote execution backend
 //! (WebAssembly, gRPC) without changing the call site.
 //!
-//! See [`DOC-MOD-003`](../docs/modules/M-03-data-flow-engine.md)
+//! See [`DOC-MOD-003`](../../../docs/modules/M-03-data-flow-engine.md)
 //! §3.4 for the full execution pipeline.
 
 use std::collections::{HashMap, HashSet, VecDeque};

@@ -8,7 +8,7 @@
 //! (`ada-m13-api-gateway`, `ada-m14-module-registry`,
 //! `ada-m16-cluster-coordinator`) will program against. The
 //! production deployment (PostgreSQL `event_log` + NOTIFY/LISTEN +
-//! Redis durable queue, see [`DOC-MOD-015`](../docs/modules/M-15-central-event-bus.md)
+//! Redis durable queue, see [`DOC-MOD-015`](../../../docs/modules/M-15-central-event-bus.md)
 //! §3.4 and the `append_event()` PL/pgSQL procedure in §3.5) is
 //! scheduled for B4+.
 //!

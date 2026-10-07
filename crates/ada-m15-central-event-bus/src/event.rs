@@ -1,7 +1,7 @@
 //! Event envelope, [`Event`] trait, and [`Topic`] newtype.
 //!
 //! This is the data shape that flows through the central event bus.
-//! See [`DOC-MOD-015`](../docs/modules/M-15-central-event-bus.md) §3.2
+//! See [`DOC-MOD-015`](../../../docs/modules/M-15-central-event-bus.md) §3.2
 //! and §3.3 for the canonical schema (event_id, topic, tenant_id,
 //! payload, headers, trace_id, produced_at).
 //!
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 /// Event topic — a string-shaped identifier matching the
 /// `<category>.<entity>.<action>` convention from
-/// [`DOC-MOD-015`](../docs/modules/M-15-central-event-bus.md) §3.1
+/// [`DOC-MOD-015`](../../../docs/modules/M-15-central-event-bus.md) §3.1
 /// (e.g. `module.registered`, `cluster.node_joined`).
 ///
 /// We keep the topic as a `String` newtype so we can:
@@ -189,7 +189,7 @@ pub trait Event: Send + Sync + 'static {
 
 /// The canonical event envelope carried over the bus.
 ///
-/// See [`DOC-MOD-015`](../docs/modules/M-15-central-event-bus.md) §3.3
+/// See [`DOC-MOD-015`](../../../docs/modules/M-15-central-event-bus.md) §3.3
 /// for the JSON shape and §3.5 for the PL/pgSQL `append_event`
 /// stored procedure that the production build persists this as.
 #[derive(Debug, Clone, Serialize, Deserialize)]

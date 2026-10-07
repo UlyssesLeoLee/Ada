@@ -10,7 +10,7 @@
 //! - `value` is finite (no NaN / infinity)
 //! - labels are an unordered key/value bag (no duplicate keys)
 //!
-//! See [`DOC-MOD-009`](../docs/modules/M-09-exporter.md) §3.2
+//! See [`DOC-MOD-009`](../../../docs/modules/M-09-exporter.md) §3.2
 //! for the canonical schema.
 
 use std::collections::HashMap;

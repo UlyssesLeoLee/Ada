@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B4)
 //!
 //! This crate is a **minimum skeleton** for the multi-tenant
-//! isolation layer defined in [`DOC-MOD-010`](../docs/modules/M-10-tenant-middleware.md).
+//! isolation layer defined in [`DOC-MOD-010`](../../../docs/modules/M-10-tenant-middleware.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`TenantContext`] — per-request `(tenant_id, user_id, request_id)`

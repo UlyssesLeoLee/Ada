@@ -49,8 +49,8 @@
 //! both halves of that are unchanged.
 //!
 //! CORS / HSTS remain unwired. See
-//! [`DOC-MOD-013`](../docs/modules/M-13-api-gateway.md) §3.1 for the
-//! intended full chain and `../docs/api/error-codes.md` for the
+//! [`DOC-MOD-013`](../../../docs/modules/M-13-api-gateway.md) §3.1 for the
+//! intended full chain and `../../../docs/api/error-codes.md` for the
 //! canonical error-code mapping.
 
 #![warn(missing_docs)]

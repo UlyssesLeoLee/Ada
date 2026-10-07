@@ -13,7 +13,7 @@
 //! | `InvalidPayload`      | The payload could not be decoded into `RawRecord`s.    |
 //! | `BackendError`        | Underlying store / driver / file system failed.        |
 //!
-//! See [`DOC-MOD-001`](../docs/modules/M-01-acquisition-adapter.md) §3.4
+//! See [`DOC-MOD-001`](../../../docs/modules/M-01-acquisition-adapter.md) §3.4
 //! for the full validation pipeline.
 
 use thiserror::Error;

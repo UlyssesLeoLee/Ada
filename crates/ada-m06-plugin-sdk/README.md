@@ -4,7 +4,7 @@ M-06: Plugin SDK. 3 `PluginKind` (`Wasm` / `Native` / `Script`),
 `PluginManifest`, `PluginHost` trait, `InMemoryHost` impl, and
 a declarative capability-based `SandboxPolicy`.
 
-See `docs/modules/M-06-plugin-sdk.md` (DOC-MOD-006) for the
+See `docs/modules/M-06-node-runtime-plugin-sdk.md` (DOC-MOD-006) for the
 full design.
 
 ## v0.1.0 status

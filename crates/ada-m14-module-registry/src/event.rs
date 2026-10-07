@@ -10,7 +10,7 @@
 //! Every event is wrapped in a [`BusEvent`](ada_m15_central_event_bus::BusEvent)
 //! with the canonical topic `module.<kind>` so subscribers can use
 //! the M-15 glob filter. See
-//! [`DOC-MOD-014`](../docs/modules/M-14-module-registry.md) §3.3
+//! [`DOC-MOD-014`](../../../docs/modules/M-14-module-registry.md) §3.3
 //! for the topic convention.
 
 use std::collections::BTreeMap;

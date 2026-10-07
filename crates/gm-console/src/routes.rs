@@ -103,11 +103,11 @@ async fn license() -> Json<serde_json::Value> {
 }
 
 async fn terms() -> &'static str {
-    include_str!("../../../docs/commercial/TERMS.md")
+    include_str!("../../../../../docs/commercial/TERMS.md")
 }
 
 async fn privacy() -> &'static str {
-    include_str!("../../../docs/commercial/PRIVACY.md")
+    include_str!("../../../../../docs/commercial/PRIVACY.md")
 }
 
 /// SEO helpers: robots.txt + sitemap.xml.

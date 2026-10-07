@@ -25,7 +25,7 @@
 //! step ids) so the executor can walk it without
 //! re-allocating.
 //!
-//! See [`DOC-MOD-005`](../docs/modules/M-05-control-flow-executor.md)
+//! See [`DOC-MOD-005`](../../../docs/modules/M-05-control-flow-executor.md)
 //! §3.2 for the canonical step schema.
 
 use serde::{Deserialize, Serialize};

@@ -3,7 +3,7 @@
 //! ## v0.1.0 scope (B6)
 //!
 //! Minimum skeleton for the cross-module debug facilities
-//! defined in [`DOC-MOD-007`](../docs/modules/M-07-debug-service.md).
+//! defined in [`DOC-MOD-007`](../../../docs/modules/M-07-debug-service.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`Breakpoint`] — id, location, kind, state

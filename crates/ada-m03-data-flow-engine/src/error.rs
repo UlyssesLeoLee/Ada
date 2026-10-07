@@ -13,7 +13,7 @@
 //! | `TypeMismatch`    | A node expected a JSON type the input did not have.  |
 //! | `BackendError`    | Underlying store / driver / scheduler failed.        |
 //!
-//! See [`DOC-MOD-003`](../docs/modules/M-03-data-flow-engine.md)
+//! See [`DOC-MOD-003`](../../../docs/modules/M-03-data-flow-engine.md)
 //! §3.4 for the full validation pipeline.
 
 use thiserror::Error;
