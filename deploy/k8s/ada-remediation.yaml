@@ -1,5 +1,5 @@
 ---
-# k8s deployment manifest for ada-remediation (v0.7.1)
+# k8s deployment manifest for ada-remediation (v0.1.0)
 #
 # Apply: kubectl apply -f deploy/k8s/ada-remediation.yaml
 #
@@ -17,7 +17,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/name: ada-remediation
-    app.kubernetes.io/version: v0.7.1
+    app.kubernetes.io/version: v0.1.0
 data:
   # runbook directory mounted from a ConfigMap or a CSI volume
   # (mounting from ConfigMap keeps runbooks read-only and
@@ -45,7 +45,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/name: ada-remediation
-    app.kubernetes.io/version: v0.7.1
+    app.kubernetes.io/version: v0.1.0
 data:
   db-connection-pool-exhausted.json: |
     {
@@ -193,7 +193,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/name: ada-remediation
-    app.kubernetes.io/version: v0.7.1
+    app.kubernetes.io/version: v0.1.0
 type: Opaque
 stringData:
   # PLACEHOLDER: replace with `kubectl create secret
@@ -225,7 +225,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/name: ada-remediation
-    app.kubernetes.io/version: v0.7.1
+    app.kubernetes.io/version: v0.1.0
 spec:
   replicas: 2
   selector:
@@ -240,7 +240,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: ada-remediation
-        app.kubernetes.io/version: v0.7.1
+        app.kubernetes.io/version: v0.1.0
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9100"
@@ -255,7 +255,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ada-remediation
-          image: ghcr.io/ulyssesleolee/ada-remediation:v0.7.1
+          image: ghcr.io/ulyssesleolee/ada-remediation:v0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -362,7 +362,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/name: ada-remediation
-    app.kubernetes.io/version: v0.7.1
+    app.kubernetes.io/version: v0.1.0
 spec:
   type: ClusterIP
   selector:
@@ -380,7 +380,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/name: ada-remediation
-    app.kubernetes.io/version: v0.7.1
+    app.kubernetes.io/version: v0.1.0
 spec:
   podSelector:
     matchLabels:
