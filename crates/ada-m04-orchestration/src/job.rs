@@ -18,7 +18,7 @@
 //!   Cancelled -> (terminal)
 //! ```
 //!
-//! See [`DOC-MOD-004`](../docs/modules/M-04-orchestration-engine.md)
+//! See [`DOC-MOD-004`](../../../docs/modules/M-04-orchestration-engine.md)
 //! §3.2 for the full lifecycle.
 
 use std::fmt;
@@ -67,7 +67,7 @@ impl From<Uuid> for JobId {
 /// machine.
 ///
 /// The six states are the canonical set agreed in
-/// [`DOC-MOD-004`](../docs/modules/M-04-orchestration-engine.md) §3.2.
+/// [`DOC-MOD-004`](../../../docs/modules/M-04-orchestration-engine.md) §3.2.
 /// `Pending` means "created but not yet visible to a worker";
 /// `Queued` means "visible to a worker pool and waiting for a
 /// slot"; `Running` means "a worker has claimed the job and is

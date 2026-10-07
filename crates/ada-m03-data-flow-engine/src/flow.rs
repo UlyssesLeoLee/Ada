@@ -13,7 +13,7 @@
 //! `Transform { function: ... }`) without churning the
 //! [`FlowNode`] struct.
 //!
-//! See [`DOC-MOD-003`](../docs/modules/M-03-data-flow-engine.md)
+//! See [`DOC-MOD-003`](../../../docs/modules/M-03-data-flow-engine.md)
 //! §3.3 for the full schema.
 
 use std::fmt;

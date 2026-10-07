@@ -13,7 +13,7 @@
 //! | `InvalidRegex`         | A `Regex` rule's pattern failed to compile.            |
 //! | `BackendError`         | Underlying store / driver / parser failed.             |
 //!
-//! See [`DOC-MOD-002`](../docs/modules/M-02-normalizer.md) §3.4
+//! See [`DOC-MOD-002`](../../../docs/modules/M-02-normalizer.md) §3.4
 //! for the full validation pipeline.
 
 use thiserror::Error;

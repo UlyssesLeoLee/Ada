@@ -16,7 +16,7 @@
 //! | `ServiceUnavailable`| 503         |
 //! | `Internal`          | 500         |
 //!
-//! See [`DOC-MOD-013`](../docs/modules/M-13-api-gateway.md) §3.1 中間
+//! See [`DOC-MOD-013`](../../../docs/modules/M-13-api-gateway.md) §3.1 中間
 //! ウェアチェーン and `docs/api/error-codes.md` §2 for the canonical
 //! error-code table that this mapping is a subset of.
 

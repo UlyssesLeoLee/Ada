@@ -52,4 +52,4 @@ for B5+ once G4 (実装着手判定) is approved.
 
 ## 設計書
 
-`docs/modules/M-05-control-flow.md` (DOC-MOD-005)
+`docs/modules/M-05-control-flow-executor.md` (DOC-MOD-005)

@@ -19,7 +19,7 @@
 //! `Running` slot) lands in B7+ once the G4 (実装着手判定)
 //! is approved.
 //!
-//! See [`DOC-MOD-004`](../docs/modules/M-04-orchestration-engine.md)
+//! See [`DOC-MOD-004`](../../../docs/modules/M-04-orchestration-engine.md)
 //! §3.3 for the full lifecycle.
 
 use std::collections::HashMap;

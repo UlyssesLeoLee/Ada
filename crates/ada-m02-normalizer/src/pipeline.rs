@@ -8,7 +8,7 @@
 //! rules so callers fail fast on a bad config rather than
 //! at apply time.
 //!
-//! See [`DOC-MOD-002`](../docs/modules/M-02-normalizer.md) §3.5
+//! See [`DOC-MOD-002`](../../../docs/modules/M-02-normalizer.md) §3.5
 //! for the full lifecycle.
 
 use crate::error::{NormalizerError, Result};

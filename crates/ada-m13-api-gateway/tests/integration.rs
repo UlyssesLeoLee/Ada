@@ -3,7 +3,7 @@
 //! These tests drive the router via `tower::ServiceExt::oneshot`, so
 //! they exercise the full axum stack (routing, middleware, handler,
 //! response shape) without binding a real TCP socket. See
-//! [`DOC-MOD-013`](../docs/modules/M-13-api-gateway.md) §3 for the
+//! [`DOC-MOD-013`](../../../docs/modules/M-13-api-gateway.md) §3 for the
 //! endpoint contracts.
 //!
 //! The `/api/*` tests are the interesting ones: they are the first

@@ -2,10 +2,10 @@
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
 //! 設計書:
-//! - [`docs/observability/02-architecture.md`](../docs/observability/02-architecture.md) — 4-シグナル統合
-//! - [`docs/observability/03-metrics-design.md`](../docs/observability/03-metrics-design.md) — RED/USE
-//! - [`docs/observability/04-logging-design.md`](../docs/observability/04-logging-design.md) — JSON + 脱敏
-//! - [`docs/observability/05-tracing-design.md`](../docs/observability/05-tracing-design.md) — W3C + OTLP
+//! - [`docs/observability/02-architecture.md`](../../../docs/observability/02-architecture.md) — 4-シグナル統合
+//! - [`docs/observability/03-metrics-design.md`](../../../docs/observability/03-metrics-design.md) — RED/USE
+//! - [`docs/observability/04-logging-design.md`](../../../docs/observability/04-logging-design.md) — JSON + 脱敏
+//! - [`docs/observability/05-tracing-design.md`](../../../docs/observability/05-tracing-design.md) — W3C + OTLP
 //!
 //! # Quick start
 //!

@@ -28,7 +28,7 @@
 //! so a future DB-backed connector can hold open a connection
 //! without changing the call sites.
 //!
-//! See [`DOC-MOD-001`](../docs/modules/M-01-acquisition-adapter.md) §3.3
+//! See [`DOC-MOD-001`](../../../docs/modules/M-01-acquisition-adapter.md) §3.3
 //! for the full connector contract.
 
 use std::fmt;

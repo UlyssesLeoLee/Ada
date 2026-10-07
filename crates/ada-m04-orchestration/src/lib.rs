@@ -5,7 +5,7 @@
 //!
 //! This crate is a **minimum skeleton** for the
 //! cross-module orchestrator defined in
-//! [`DOC-MOD-004`](../docs/modules/M-04-orchestration-engine.md).
+//! [`DOC-MOD-004`](../../../docs/modules/M-04-orchestration-engine.md).
 //! The v0.1.0 surface is the in-process [`Scheduler`]
 //! contract that downstream crates (the API gateway, the
 //! control-flow executor, the M-08 trigger manager) program

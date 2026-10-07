@@ -3,7 +3,7 @@
 //! The production bus is a long-lived service that combines
 //! `tokio::sync::broadcast` with a PostgreSQL-backed `event_log`
 //! table and a NOTIFY/LISTEN dispatcher
-//! (see [`DOC-MOD-015`](../docs/modules/M-15-central-event-bus.md) §3.4
+//! (see [`DOC-MOD-015`](../../../docs/modules/M-15-central-event-bus.md) §3.4
 //! and the `append_event()` PL/pgSQL procedure in §3.5).
 //!
 //! The v0.1.0 skeleton replaces the DB half with an in-process

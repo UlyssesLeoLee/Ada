@@ -17,7 +17,7 @@
 //! explicit-map approach so the trait surface is the same shape
 //! we will ship to production.
 //!
-//! See [`DOC-MOD-010`](../docs/modules/M-10-tenant-middleware.md)
+//! See [`DOC-MOD-010`](../../../docs/modules/M-10-tenant-middleware.md)
 //! §3.3 for the full lifecycle.
 
 use std::collections::HashMap;
