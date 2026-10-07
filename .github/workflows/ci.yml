@@ -591,6 +591,49 @@ jobs:
             exit 1
           fi
 
+  # ----------------------------------------------------------------------
+  # Every file under observability/ has to parse.
+  #
+  # Nothing in this workflow referenced observability/ before this job:
+  # 34 tracked config files (Prometheus, Alertmanager, Loki, Promtail,
+  # Jaeger, the OTel collector, Tempo, Grafana provisioning and 11
+  # dashboards) were parsed by nobody. The script that exists to parse
+  # them, observability/scripts/validate-configs.py, was not wired to
+  # any workflow and had been exiting 1 -- see the script's own header.
+  #
+  # This job is deliberately independent of `rust`: it needs no
+  # toolchain, no container build and no database, so it starts
+  # immediately and finishes in seconds instead of queueing behind the
+  # build it does not depend on.
+  # ----------------------------------------------------------------------
+  observability-configs:
+    name: observability configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        # A pinned version, not a range: this is the only PyPI package
+        # any workflow installs, and the `security` job exists precisely
+        # to keep unpinned supply chain out of the build. Bump the pin
+        # deliberately rather than widening it.
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.2"
+
+      - name: Every observability config parses
+        # Exit codes are load-bearing:
+        #   0 = every discovered file parsed
+        #   1 = a config is malformed
+        #   2 = the discovery walk is broken (sentinels missing, or the
+        #       tree has no observability/ at all)
+        # A run that validates nothing must not be able to look green,
+        # which is what exit 2 is for.
+        run: python observability/scripts/validate-configs.py
+
   wasm32:
     name: wasm32 build
     runs-on: ubuntu-latest
