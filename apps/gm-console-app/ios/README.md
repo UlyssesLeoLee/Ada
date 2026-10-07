@@ -40,7 +40,7 @@ These keys must be present when `flutter create` produces `ios/Runner/Info.plist
 ## Permissions (NSUsageDescription)
 
 gm-console Mobile's first release does NOT request:
-- Camera, Photos, Microphone — not needed at v0.3.0.
+- Camera, Photos, Microphone — not needed at v0.1.0.
 - Location — N/A for the runbook features shipped.
 - Contacts / Calendar / Health — N/A.
 
@@ -62,7 +62,7 @@ Reserved domain: `gm-console.kanvas.dev`
   manual profile checked into a password manager — never into git).
 - Capabilities: Push (initial), App Groups (later), Sign in with Apple (deferred).
 - Keychain Sharing group: `dev.kanvas.gmconsole.shared` (forward-compat only — not
-  enabled at v0.3.0).
+  enabled at v0.1.0).
 
 ## Bring-up commands
 

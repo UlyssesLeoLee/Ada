@@ -1,6 +1,6 @@
 {
   "$schema": "https://support.google.com/googleplay/android-developer/answer/10787469",
-  "_draft": "DRAFT — NOT SUBMITTED. Declared version v0.3.0 while the workspace is at 0.1.0 (apps/gm-console-app/pubspec.yaml); asserted a managed SOC2-Type-II sub-processor that does not exist. Corrected here. Do not submit until the Android platform project is in the repository — the tracked tree has no build.gradle and no AndroidManifest.xml, so CI cannot produce an AAB. See docs/commercial/COMPLIANCE_SELFCHECK.md.",
+  "_draft": "DRAFT — NOT SUBMITTED. Declared version v0.3.0 while the workspace is at 0.1.0 (apps/gm-console-app/pubspec.yaml); asserted a managed SOC2-Type-II sub-processor that does not exist. Corrected here. Do not submit until the Android platform project is in the repository — the tracked tree has no build.gradle and no AndroidManifest.xml, so CI cannot produce an AAB. See docs/commercial/COMPLIANCE_SELFCHECK.md. Second pass corrected three further claims this file's own self-check had already identified and left in place: the sub-processor rationale, the at-rest encryption flag, and the deletion method (including a v0.4.0 build and a docs/upstream/ path that does not exist). The retention window has been aligned with observability/loki/loki-config.yaml. Remaining blocker: privacy@kanvas.dev is unconfirmed.",
   "version_policy": "v0.1.0 — gm-console Mobile (Flutter)",
   "data_collection": {
     "declaration": "The app collects only the minimum data required to provide its declared functionality. No third-party advertising SDKs are bundled.",
@@ -14,7 +14,7 @@
             "type": "Email address",
             "purpose": "App functionality (sign-in identifier)",
             "user_choice_required": false,
-            "data_handling": "Encrypted in transit (TLS 1.3); encrypted at rest; retained while account is active."
+            "data_handling": "Encrypted in transit for the app-to-API hop: the shipped default GM_API_BASE is https://gm-console.kanvas.dev/api. NOT encrypted at rest by anything this repository configures -- see docs/commercial/PRIVACY.md section 8, which strikes through the earlier AES-256 claim for that reason. Retained while the account is active."
           },
           {
             "type": "Display name",
@@ -60,17 +60,21 @@
   },
   "data_sharing": {
     "shared_with_third_parties": false,
-    "rationale": "All data stays within the gm-console deployment you operate. No third-party advertisers. Sub-processors are listed at docs/commercial/SUB_PROCESSORS.md (Cloudflare edge, AWS k8s control plane in ap-northeast-1, GitHub source hosting, Sentry error tracking opt-in only, Postmark transactional email)."
+    "_note": "The previous rationale here restated the rows of docs/commercial/SUB_PROCESSORS.md as the answer to this question -- 'Cloudflare edge, AWS k8s control plane in ap-northeast-1, GitHub source hosting, Sentry error tracking opt-in only, Postmark transactional email'. Four of those five are not integrated anywhere in this repository: Sentry and Postmark appear in no dependency and no configuration, and Cloudflare and AWS are neither configured nor deployed. Naming them to Google Play as the sub-processor set was a declaration the tree does not support, and it contradicted the 'Crash logs' scope above, which says no crash-reporting SDK ships.",
+    "rationale": "All data collected by the app stays within the gm-console deployment the operator runs: the Flutter client ships no advertising, analytics or crash-reporting SDK, so it has no telemetry channel of its own. The three third parties its surrounding code can reach -- Stripe, PagerDuty and Slack -- are billing, paging and notification paths in server-side services, none of which the mobile app calls, and none of which appears in deploy/k8s/. They are recorded in docs/commercial/SUB_PROCESSORS.md under 'Integrated in this repository' with their conditions."
   },
   "data_handling": {
     "encrypted_in_transit": true,
-    "encrypted_at_rest": true,
+    "_encrypted_in_transit_note": "True for the app-to-API hop only: the shipped default GM_API_BASE is an https:// URL. This repository configures no TLS inside the deployment -- deploy/ has no Ingress, the Services are ClusterIP, and PRIVACY.md section 8 records that the in-cluster Redis link is unauthenticated and unencrypted (deploy/infra/ada-session-redis.yaml). Termination inside the cluster is the operator's choice and is outside this repository.",
+    "encrypted_at_rest": false,
+    "_encrypted_at_rest_note": "No volume encryption, managed-key encryption or application-level envelope encryption is configured anywhere in this repository. The previous value of true was not supported by any manifest; PRIVACY.md section 8 strikes through the earlier AES-256 claim for this reason.",
     "user_can_request_deletion": true,
-    "deletion_method": "Email privacy@kanvas.dev OR self-service in a future v0.4.0 build (path tracked in docs/upstream/).",
+    "deletion_method": "By email to privacy@kanvas.dev. That address is UNCONFIRMED -- docs/commercial/COMPLIANCE_SELFCHECK.md records it as not published anywhere in the repository -- so this field currently names a channel nobody has verified. There is no self-service deletion endpoint. The earlier text here offered 'self-service in a future v0.4.0 build (path tracked in docs/upstream/)': the workspace is 0.1.0, so v0.4.0 is a version this codebase has not reached, and docs/upstream/ tracks no deletion item at all -- its 12-entry issue list (docs/upstream/05-issue-list.md) has none. Resolve the mailbox before submitting.",
+    "_retention_note": "365 days appears in this file for app_activity. The shipped Loki retention is 30 days (observability/loki/loki-config.yaml); 365 days exists only as an Enterprise plan entitlement in crates/ada-billing/src/plan.rs, and there is no paid tier to grant it. Align these three numbers before submitting.",
     "data_retention": {
       "account_info": "While the account is active + 30 days after deletion request.",
-      "app_activity": "365 days rolling window.",
-      "crash_logs": "30 days rolling window in managed deployments; can be set shorter in self-hosted."
+      "app_activity": "30 days rolling window in the shipped configuration (observability/loki/loki-config.yaml). 365 days is an Enterprise entitlement in crates/ada-billing/src/plan.rs, not the default.",
+      "crash_logs": "Not collected -- the app ships no crash-reporting SDK. The retention stated here is vestigial."
     }
   },
   "compliance": {
