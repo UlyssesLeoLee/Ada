@@ -23,7 +23,8 @@
 
 | バージョン | 日付 | 変更内容 | 起草 | レビュー | 承認 |
 |---|---|---|---|---|---|
-| v1.0.0 | 2026-08-19 | 初版制定（13 モジュール × 169 ケース） | Ada プロジェクトチーム | TBD | TBD |
+| v1.0.0 | 2026-08-19 | 初版制定 | Ada プロジェクトチーム | TBD | TBD |
+| v1.0.1 | 2026-10-07 | 订正：初版记为「13 モジュール × 169 ケース」，实际覆盖 M-01–M-16 共 214 ケース；§14/§15 原将尚未接入的覆盖率门禁写成已在阻塞合并；§0 工具链标注覆盖率工具尚未接入 | Ada プロジェクトチーム | TBD | TBD |
 
 ---
 
@@ -59,8 +60,9 @@
   - 数据库：`sqlx::test` + 临时 SQLite（轻量） 或 `testcontainers`（PostgreSQL）
   - 浏览器（Playwright）：使用 `playwright` 的 headless 模式访问内嵌静态 HTML
   - LLM：使用 mock HTTP server 返回固定响应
-- **运行**：`cargo test --workspace --all-features`
-- **报告**：`cargo-llvm-cov` 生成 HTML 报告；CI 集成 `cargo-tarpaulin`
+- **运行**：`cargo test --workspace --all-features`（当前 CI 实际为
+  `cargo test --workspace --locked --exclude gm-console`）
+- **报告**：`cargo-llvm-cov` / `cargo-tarpaulin`（**尚未接入**，见 §14）
 
 ---
 
@@ -434,20 +436,48 @@
 
 ---
 
-## 14. 覆盖率与质量门禁
+## 14. 覆盖率与质量门禁（目标，尚未实现）
 
-- **行覆盖**：≥ 80%（CI 卡点）
-- **分支覆盖**：≥ 70%（CI 卡点）
-- **P0 用例通过率**：100%（CI 卡点，任意 P0 失败阻塞合并）
+以下阈值为目标值。**当前 CI 未实现其中任何一项**。本节此前把目标阈值直接标注为
+已生效的合并阻塞条件，读起来像是已经在 CI 里执行。经核对
+`.github/workflows/ci.yml`：全文没有 `cargo-llvm-cov`、没有 `cargo-tarpaulin`、
+没有 `schedule:`，`Cargo.toml` 与 `deny.toml` 里也没有任何覆盖率工具依赖。
+现状是：`cargo test --workspace` 会跑（§15 已实现项），覆盖率数据不产生，
+因此没有覆盖率门禁。
+
+- **行覆盖**：≥ 80%（目标，未实现）
+- **分支覆盖**：≥ 70%（目标，未实现）
+- **P0 用例通过率**：100%（目标，未实现；当前任何 P0 失败都不会被单独识别）
 - **P1 用例通过率**：100%（合并后可放行，但下个迭代必须修复）
 - **M-10（多租户）专项**：P0 用例执行时长 < 5 分钟（含 DB 容器启动）
 
+### 14.5 门禁清单（机器可读）
+
+本表是 §14/§15 的权威来源。**状态列为「已实现」的，其强制工具必须能在
+`.github/workflows/` 中找到**；`crates/ada-core/tests/ut_design_gates_exist.rs`
+逐行校验这一点。散文里提到某个工具不算数，只有这张表算数。
+
+| 门禁 | 强制工具 | 状态 |
+|---|---|---|
+| 每次 PR 运行 workspace 测试 | `cargo test --workspace --locked --exclude gm-console` | 已实现 |
+| 行覆盖率 ≥ 80% | `cargo-tarpaulin` | 计划中，未实现 |
+| 分支覆盖率 ≥ 70% | `cargo-llvm-cov` | 计划中，未实现 |
+| P0 用例 100% 通过 | 无 | 计划中，未实现 |
+| 每日定时回归 | `schedule:` | 计划中，未实现 |
+| 覆盖率报告产物 | `coverage/html/index.html` | 计划中，未实现 |
+
 ## 15. 持续集成
 
-- 每次 PR 触发 `cargo test --workspace`
-- 每日定时任务执行完整 UT 套件 + 覆盖率报告
-- 不通过 PR 阻塞：行覆盖 < 80% / 任意 P0 失败
-- 报告产物：`coverage/html/index.html` + `coverage/summary.txt`
+已实现：
+
+- 每次 PR 触发 `cargo test --workspace --locked --exclude gm-console`
+  （`.github/workflows/ci.yml`）
+
+未实现（目标）：
+
+- 每日定时任务执行完整 UT 套件 + 覆盖率报告 —— 当前无 `schedule:` 定时任务
+- 不通过 PR 阻塞：行覆盖 < 80% / 任意 P0 失败 —— 见 §14，覆盖率数据尚不存在
+- 报告产物：`coverage/html/index.html` + `coverage/summary.txt` —— 尚无产出路径
 
 ---
 
