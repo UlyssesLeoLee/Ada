@@ -46,6 +46,20 @@
 //! commercial-disclosure gate walked into when it read its own prose as
 //! evidence. The doc comment above is therefore the gate's own test case:
 //! if it ever names a document that does not exist, this test fails.
+//!
+//! ## The resolver may not leave the repository
+//!
+//! A previous version of this gate walked up however many `../` markers a
+//! reference carried and accepted the first file it found. A repair script
+//! that rewrites paths as a plain substring replace turned a correct
+//! three-level reference into a five-level one — and the gate passed it,
+//! because five levels up from a worktree is the sibling checkout of this
+//! same repository, which has the file. The compiler, resolving the same
+//! `include_str!` inside this checkout, could not read it and the build
+//! failed.
+//!
+//! A resolver that can walk out of its subject will validate against whatever
+//! happens to be next door, and next door always looks right.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -117,7 +131,15 @@ fn crate_root_of(path: &Path) -> Option<PathBuf> {
 /// A leading `../` walks up from the referring file. A bare `docs/...` is
 /// tried against the repository root first and then against the containing
 /// crate.
+///
+/// The walk stops at the repository root. A sibling checkout of this same
+/// tree sits one level above a worktree, so a reference that climbs one
+/// level too far resolves perfectly against the neighbour and reads as
+/// correct — while the compiler, which resolves `include_str!` against the
+/// file's own directory inside this checkout, cannot read it at all. A
+/// resolver that can leave its subject is not resolving.
 fn resolves(reference: &str, from: &Path, crate_root: Option<&Path>) -> bool {
+    let root = repo_root();
     if reference.starts_with("../") {
         // `PathBuf::pop` returns whether it popped, not the popped value, so
         // the walk-up has to mutate in place.
@@ -130,11 +152,14 @@ fn resolves(reference: &str, from: &Path, crate_root: Option<&Path>) -> bool {
             if !current.pop() {
                 return false;
             }
+            if !current.starts_with(&root) {
+                return false;
+            }
             rest = stripped;
         }
         return dir.is_some_and(|d| d.join(rest).exists());
     }
-    if repo_root().join(reference).exists() {
+    if root.join(reference).exists() {
         return true;
     }
     crate_root.is_some_and(|c| c.join(reference).exists())
