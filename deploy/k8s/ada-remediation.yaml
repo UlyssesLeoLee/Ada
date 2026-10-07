@@ -211,10 +211,11 @@ stringData:
   # an unset key shows up as a failed remediation rather than as a
   # silent one.
   #
-  # `crates/ada-core/tests/remediation_secrets.rs` fails if a step
+  # `every_step_credential_is_declared_in_the_manifest_secret`
+  # in crates/ada-core/tests/remediation_honesty.rs fails if a step
   # kind in a shipped runbook reads a key this Secret does not
   # declare, so adding a step that needs a new credential is a
-  # compile-time-visible change here rather than a runtime surprise.
+  # change CI refuses rather than a runtime surprise.
   SLACK_WEBHOOK_URL: "PLACEHOLDER_SLACK_WEBHOOK_URL_REPLACE_ME"
   PAGERDUTY_ROUTING_KEY: "PLACEHOLDER_PAGERDUTY_ROUTING_KEY_REPLACE_ME"
 ---
