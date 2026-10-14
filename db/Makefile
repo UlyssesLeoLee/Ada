@@ -63,6 +63,7 @@ clean:
 		event_log, consumer_offset, event_subscription, event_topic, \
 		module_upgrade_history, module_instance, module_registry, \
 		leader_lease, shard_assignment, cluster_node, \
+		remediation_history, remediation_cooldowns, \
 		tenant RESTART IDENTITY CASCADE;" || exit 1
 	@echo "==> truncated (sequence reset)"
 
@@ -72,9 +73,10 @@ drop:
 		module_instance, module_upgrade_history, module_registry, \
 		event_log, consumer_offset, event_subscription, event_topic, \
 		leader_lease, shard_assignment, cluster_node, \
+		remediation_history, remediation_cooldowns, \
 		tenant CASCADE; \
 		DROP SEQUENCE IF EXISTS event_seq_global;" || exit 1
-	@echo "==> dropped (functions retained - re-run V002 to recreate)"
+	@echo "==> dropped (functions retained - re-run V002 and V003 to recreate)"
 
 status:
 	@$(PSQL) -c "\dt+ public.*" 2>&1 | head -40
