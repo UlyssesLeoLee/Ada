@@ -32,7 +32,7 @@
 
 ## Permissions (AndroidManifest.xml)
 
-gm-console Mobile v0.3.0 ships with:
+gm-console Mobile v0.1.0 ships with:
 
 ```xml
 <uses-permission android:name="android.permission.INTERNET"/>
@@ -40,8 +40,8 @@ gm-console Mobile v0.3.0 ships with:
 ```
 
 We do NOT request:
-- `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE` — UNUSED at v0.3.0.
-- `CAMERA`, `RECORD_AUDIO` — UNUSED at v0.3.0.
+- `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE` — UNUSED at v0.1.0.
+- `CAMERA`, `RECORD_AUDIO` — UNUSED at v0.1.0.
 - `POST_NOTIFICATIONS` — Phase 2 (incidents feed push). When added, runtime permission
   prompt must be gated behind explicit user action (RN-friendly Flutter `permission_handler`
   flow).
@@ -93,7 +93,7 @@ flutter build appbundle --release
 | What                                          | Why                                                |
 |-----------------------------------------------|----------------------------------------------------|
 | `android/.gradle/`, `android/local.properties` | local SDK paths                                    |
-| `android/app/google-services.json`            | Firebase config (v0.3.0: N/A; phase 2)            |
+| `android/app/google-services.json`            | Firebase config (v0.1.0: N/A; phase 2)            |
 | `*.jks`, `*.keystore`                         | uploaded to Google Play App Signing, sealed-secret elsewhere |
 
 CI integration lives in `.github/workflows/mobile-build.yml` (worker-G target).
