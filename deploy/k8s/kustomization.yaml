@@ -33,6 +33,20 @@ resources:
   - ada-remediation.yaml
   - gm-console.yaml
 
+# This directory holds only images this repository publishes, and
+# crates/ada-core/tests/deploy_images.rs fails the build if one of them
+# resolves to another registry or another tag convention. That is why the
+# gateway's session store is NOT here: `ada-session-redis` is an upstream
+# image and a stateful dependency, both of which belong with the other
+# operator-supplied prerequisites listed in README.md.
+#
+# Applying only this directory leaves the gateway unable to start, on
+# purpose: it refuses to serve without a reachable shared session store.
+# For a running reference topology, apply the store first:
+#
+#   kubectl apply -f deploy/infra/ada-session-redis.yaml
+#   kubectl apply -k deploy/k8s/
+
 # Shared platform labels, applied to resource **metadata only**.
 #
 # `includeSelectors` is deliberately left off. With it on, kustomize

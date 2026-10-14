@@ -21,7 +21,7 @@
 //! - 7-variant [`RbacError`] (UnknownUser, UnknownResource,
 //!   AlreadyGranted, NotGranted, LockHeld, LockNotHeld,
 //!   InsufficientPermission)
-//! - 9 unit tests + 4 integration tests (`tests/integration.rs`)
+//! - 35 unit tests + 4 integration tests (`tests/integration.rs`)
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!

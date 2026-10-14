@@ -4,7 +4,7 @@ M-08: Trigger manager. 4 `TriggerKind` (`Cron / Webhook /
 Event / Manual`), `TriggerRule`, `TriggerManager` with
 in-process storage and event-topic glob matching.
 
-See `docs/modules/M-08-trigger.md` (DOC-MOD-008) for the full
+See `docs/modules/M-08-trigger-service.md` (DOC-MOD-008) for the full
 design.
 
 ## v0.1.0 status

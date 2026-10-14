@@ -8,7 +8,7 @@
 //! subscriber when it pulls in `ada-telemetry` for the macro
 //! surface.
 //!
-//! Per [`DOC-OBS-004 §2.1`](../docs/observability/04-logging-design.md)
+//! Per [`DOC-OBS-004 §2.1`](../../../docs/observability/04-logging-design.md)
 //! the production format is JSON Lines; the `ADA_LOG_FORMAT=pretty`
 //! env var switches to the human-readable formatter for
 //! development.

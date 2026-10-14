@@ -3,7 +3,7 @@
 //! The v0.1.0 skeleton keeps the context type minimal: a triple of
 //! `(tenant_id, user_id, request_id)`. Real builds will extend it
 //! with `trace_id`, `span_id`, and the role bundle from
-//! `ada-m11-rbac-collab` (see [`DOC-MOD-010`](../docs/modules/M-10-tenant-middleware.md)
+//! `ada-m11-rbac-collab` (see [`DOC-MOD-010`](../../../docs/modules/M-10-tenant-middleware.md)
 //! §3.2 for the full schema).
 //!
 //! ## Why a trait and not a concrete type?

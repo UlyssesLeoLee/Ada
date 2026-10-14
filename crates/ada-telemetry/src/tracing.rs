@@ -10,7 +10,7 @@
 //! here compile down to no-ops so the rest of the crate can
 //! still build in feature-minimal configurations.
 //!
-//! Per [`DOC-OBS-005 §9`](../docs/observability/05-tracing-design.md)
+//! Per [`DOC-OBS-005 §9`](../../../docs/observability/05-tracing-design.md)
 //! the resource attributes every span carries are
 //! `service.name`, `service.version`, and
 //! `deployment.environment`.

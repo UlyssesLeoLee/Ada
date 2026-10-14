@@ -16,7 +16,7 @@
 //! Production builds will map these to richer diagnostics
 //! (correlation ids, retry advisories); the skeleton keeps the
 //! surface minimal. See
-//! [`DOC-MOD-015`](../docs/modules/M-15-central-event-bus.md) §3.4
+//! [`DOC-MOD-015`](../../../docs/modules/M-15-central-event-bus.md) §3.4
 //! for the full publish pipeline.
 
 use thiserror::Error;

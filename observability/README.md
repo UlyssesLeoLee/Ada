@@ -63,13 +63,26 @@ curl -sf http://localhost:3000/api/health && echo "grafana ok"
 # 5. OTLP collector ヘルス
 curl -sf http://localhost:13133/ && echo "otel-collector ok"
 
-# 6. 5 つの alert rule が読み込まれている
+# 6. 3 つの alert rule が読み込まれている
 curl -s http://localhost:9090/api/v1/rules | jq '.data.groups[].name'
-# 期待値: app_down / high_error_rate / high_latency / low_disk / scaling_alert
+# 期待値: app_down / low_disk / scaling_alert
+#
+# high_error_rate / high_latency / slo_burn_rate_fast / slo_burn_rate_slow /
+# trace_high_error_rate の 5 つは `alerts-disabled/` にある。`prometheus.yml`
+# の `rule_files` は `alerts/*.yml` と `rules/*.yml` だけを glob するので
+# これらは読み込まれない。読み込まれない理由と再有効化の前提条件は
+# `prometheus/alerts-disabled/README.md` を参照。
 
-# 7. 3 つの dashboard が provisioning されている
+# 7. 11 個の dashboard が provisioning されている
 curl -s http://localhost:3000/api/search?query=& | jq '.[].title'
-# 期待値: "App Overview (30-01)" / "Rust Runtime (70-03)" / "DB Overview (40-01)"
+# 期待値: `grafana/dashboards/` 配下の JSON 11 個がすべて登録される
+#   App Overview (30-01) / Business Overview (90-04) / DB Overview (40-01) /
+#   Infrastructure Overview (10-02) / Network Overview (60-03) /
+#   Auto-remediation Overview (80-01) / Rust Runtime (70-03) /
+#   SLO Availability (50-03) / SLO Burn Rate (50-02) / SLO Overview (50-01) /
+#   Trace Overview (40-01)
+# 数は `grafana/dashboards/*.json` のファイル数から機械的に決まる。
+# `crates/ada-core/tests/observability_configs.rs` がこの数字を導出する。
 
 # 8. Alertmanager が Prometheus と接続されている
 curl -s http://localhost:9090/api/v1/alertmanagers | jq
@@ -111,10 +124,12 @@ observability/
 │   ├── provisioning/
 │   │   ├── datasources/datasources.yml  ← Prometheus / Loki / Jaeger / Postgres / Alertmanager
 │   │   └── dashboards/dashboards.yml    ← 自動配 dashboards
-│   └── dashboards/
+│   └── dashboards/                    ← 11 個。すべて provisioning で自動登録される
 │       ├── app-overview.json          ← 30-01 (RPS / Errors / Latency / CPU / Mem)
 │       ├── rust-runtime.json          ← 70-03 (CPU / RSS / FDs / threads)
-│       └── db-overview.json           ← 40-01 (pg_up / conns / cache hit / locks)
+│       ├── db-overview.json           ← 40-01 (pg_up / conns / cache hit / locks)
+│       └── (他 8 個 — SLO / Trace / Network / Business /
+│                    Infrastructure / Auto-remediation)
 ├── jaeger/
 │   ├── jaeger-config.yaml             ← Jaeger v1 all-in-one env (doc)
 │   └── otel-collector-config.yaml     ← OTel collector ingress config
@@ -122,14 +137,14 @@ observability/
     ├── init.sh                        ← Linux / macOS 1-key-up
     ├── init.ps1                       ← Windows 1-key-up
     ├── init-prometheus-remote-write.sh ← MinIO + Prometheus remote_write 結線 helper
-    └── validate-configs.py            ← YAML/JSON lint
+    └── validate-configs.py            ← YAML/JSON lint (observability/ を走査して全ファイルを検証。CI の `observability configs` ジョブが実行)
 ```
 
 ## 設計マッピング
 
 | 実装                              | 設計ドキュメント                          |
 |-----------------------------------|-------------------------------------------|
-| 4 つの alert rule                 | `07-alert-policy.md` §4 + `11-phased-rollout.md` §3 (G1 ゲート) |
+| 3 つの alert rule                  | `07-alert-policy.md` §4 + `11-phased-rollout.md` §3 (G1 ゲート) |
 | `prometheus.yml` の scrape job   | `02-architecture.md` §2.3 + `11-phased-rollout.md` §3.2  |
 | dashboard の PromQL パネル        | `06-dashboard-catalog.md` §3-12  |
 | OTel collector ルート             | `02-architecture.md` §1 + §4.1  |

@@ -1,5 +1,9 @@
 # Terms of Service — gm-console / Ada Platform
 
+> **DRAFT — NOT PUBLISHED.** This Terms document references a managed SLA
+> published at an external URL and a licensing contact that the repository
+> does not publish. Do not publish until those exist and are monitored.
+
 **Last updated**: 2026-09-19
 **Effective date**: 2026-09-19
 

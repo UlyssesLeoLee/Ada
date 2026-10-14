@@ -5,8 +5,10 @@
 //! variants are kept narrow: the crate is a thin wrapper over the
 //! Stripe REST API, and the only failure modes we surface to
 //! upstream callers are (a) the things Stripe itself returns, (b)
-//! the security-relevant events (signature, idempotency), and (c)
-//! the misconfigurations we can detect at startup.
+//! the security-relevant events (signature, idempotency), (c) the
+//! misconfigurations we can detect at startup, and (d) a persistence
+//! I/O failure on a path where failing closed and failing open are
+//! both money bugs.
 //!
 //! See `auth-billing-arch.md` §5 and §6 for the threat model that
 //! drives the signature / idempotency / config variants.
@@ -48,6 +50,16 @@ pub enum BillingError {
     /// surfaced to upstream.
     #[error("event already processed: event.id + tenant_id")]
     DuplicateEvent,
+
+    /// The idempotency table could not be read or written.
+    ///
+    /// Surfaced instead of a silent empty store, and instead of an
+    /// `Accepted` the caller would not be able to make durable: an
+    /// event that is dispatched but not recorded is dispatched twice
+    /// after a restart. The wrapped value is the failing step and the
+    /// OS message — never the event id, the tenant, or the path.
+    #[error("idempotency persistence failed: {0}")]
+    IdempotencyPersist(String),
 
     /// Stripe returned a non-success HTTP status. The status code is
     /// preserved; the body is **not** echoed back to the caller (it

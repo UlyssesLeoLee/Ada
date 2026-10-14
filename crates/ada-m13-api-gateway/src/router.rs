@@ -31,6 +31,13 @@
 //! principal, so a route added later cannot accidentally ship
 //! unauthenticated: it is mounted inside the layer, not beside it.
 //!
+//! One `/api` route is deliberately *not* in that subtree:
+//!
+//! - `POST /api/v1/auth/login` — exchanges an email and a password for
+//!   a session token. It is the only route reachable without a
+//!   credential, because it is the one that issues them. See
+//!   [`crate::login`] for its security posture.
+//!
 //! Note the two are not the same guarantee. The layer proves a
 //! *credential* was presented; only the per-handler `require` call
 //! proves the policy permitted the *action*. Authentication without
@@ -39,7 +46,7 @@
 
 use ada_m11_rbac_collab::{Action, ResourceType};
 use axum::{
-    extract::{Extension, FromRequestParts, Path, Request, State},
+    extract::{DefaultBodyLimit, Extension, FromRequestParts, Path, Request, State},
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
@@ -52,6 +59,7 @@ use crate::{
     auth::{self, AuthContext, Principal},
     error::ApiError,
     health::{HealthStatus, MemoryHealthCheck},
+    login::{self, LOGIN_BODY_LIMIT_BYTES},
     state::AppState,
 };
 
@@ -242,10 +250,21 @@ pub fn build_router(state: AppState) -> Router {
             require_principal,
         ));
 
+    // Mounted on the *outer* router, not inside `api`. It has to be:
+    // this is the one route a caller reaches without a credential, and
+    // putting it in the subtree that `require_principal` wraps would
+    // make login require a session it is supposed to issue. The
+    // `DefaultBodyLimit` is the one part of the production chain that
+    // does apply here — see `LOGIN_BODY_LIMIT_BYTES`.
+    let login = Router::new()
+        .route("/api/v1/auth/login", post(login::login_handler))
+        .layer(DefaultBodyLimit::max(LOGIN_BODY_LIMIT_BYTES));
+
     Router::new()
         .route("/health", get(health_handler))
         .route("/health/live", get(live_handler))
         .route("/health/ready", get(ready_handler))
+        .merge(login)
         .merge(api)
         .fallback(not_found)
         .layer(Extension(auth))

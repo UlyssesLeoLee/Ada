@@ -122,8 +122,10 @@ record or a TruffleHog finding flags a secret as compromised.
    new IPA must arrive in TestFlight within 15 min.
 6. After the new cert is live, revoke the old one in App Store Connect
    (`Users and Access → Keys → Certificates → Revoke`).
-7. File an `INCIDENT_2026-XX.md` (use `INCIDENT_TEMPLATES/INCIDENT_TEMPLATE.md`)
-   if the rotation was incident-driven.
+7. File an `INCIDENT_2026-XX.md` if the rotation was incident-driven.
+   No generic template exists — `INCIDENT_TEMPLATES/` contains only
+   `leaked-signing-key.md`, which covers a narrower case. Use it if it
+   fits, or write the file directly.
 
 ### 6.2 Apple Provisioning Profile
 
@@ -174,6 +176,10 @@ record or a TruffleHog finding flags a secret as compromised.
 
 For all security incidents related to signing material (leaked cert, leaked
 keystore, suspicious TestFlight upload, etc.), copy
-`docs/commercial/INCIDENT_TEMPLATES/INCIDENT_TEMPLATE.md` to
+`docs/commercial/INCIDENT_TEMPLATES/leaked-signing-key.md` to
 `docs/commercial/INCIDENT_2026-YY-MM-DD.md`, fill it in, and follow the
-runbook at the top of the template.
+runbook at the top of that template.
+
+There is no generic `INCIDENT_TEMPLATE.md`; this paragraph previously
+cited one that was never written. For an incident that is not a leaked
+signing key, start a new file and follow §6.1 above.

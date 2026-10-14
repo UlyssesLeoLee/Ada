@@ -22,7 +22,7 @@
 //!   is the `otel-collector` service in
 //!   `observability/docker-compose.yml`.
 //!
-//! See [`DOC-MOD-009`](../docs/modules/M-09-exporter.md) §3.5
+//! See [`DOC-MOD-009`](../../../docs/modules/M-09-exporter.md) §3.5
 //! for the full export pipeline, and
 //! `docs/observability/02-architecture.md` §4.1 for the
 //! in-cluster data flow.

@@ -1,0 +1,19 @@
+# Normalise text to LF, in the repository and in the working tree.
+#
+# Measured before this file existed (597 tracked files, core.autocrlf=false):
+# 592 were already LF and exactly five Markdown files carried CRLF --
+# docs/CHANGELOG.md, docs/observability/14-auto-remediation.md,
+# docs/modules/M-12-canvas-editor-frontend.md,
+# docs/observability/11-phased-rollout.md and
+# crates/ada-m12-canvas-editor/CRDT.md. So this is a small, reviewable change,
+# not the repo-wide renormalisation it was assumed might be.
+#
+# `text=auto` rather than `text`: Git decides per file whether the content is
+# text, so binary assets are left untouched without needing an explicit list
+# of extensions to maintain.
+#
+# `eol=lf` rather than `text` alone: with only `text`, a Windows checkout with
+# core.autocrlf=true would still write CRLF back into the working tree, and
+# this repository tracks ten .sh files that break under CRLF. The working-tree
+# guarantee matters as much as the repository one.
+* text=auto eol=lf

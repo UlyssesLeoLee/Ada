@@ -24,15 +24,27 @@
 #
 # WHAT THIS SERVICE IS NOT
 #
-# This manifest makes the deployed topology coherent. It does NOT make
-# the API authenticated. As of this commit the gateway mounts four
-# routes — /health, /health/live, /health/ready, /api/v1/ping — and none
-# of them require a credential. ada-identity, ada-rbac-casbin and
-# ada-billing are still not dependencies of this crate, and gm-console
-# still forwards the client's `authorization` and `x-tenant-id` headers
-# verbatim. Wiring the authentication and authorization middleware is
-# tracked as the next step; do not read a green deployment as a secured
-# one.
+# This manifest makes the deployed topology coherent and gives the
+# gateway the session store it refuses to start without. It does not
+# configure any credential.
+#
+# `/api/*` has been behind `require_principal` middleware since the
+# authentication boundary landed, and `POST /api/v1/auth/login` is the
+# only route that mints a session. Both sides of that still need operator
+# input to be useful:
+#
+#   - `ADA_GATEWAY_LOGIN_USERS` -- unset means the directory is empty,
+#     which means every login is a 401. The gateway logs a warning at
+#     startup and serves anyway, because "no credentials configured" and
+#     "credentials configured and all wrong" must be indistinguishable
+#     from outside.
+#   - `ADA_SESSION_REDIS_URL` -- set here to the placeholder
+#     `ada-session-redis` Service below.
+#
+# So a green deployment of this file is a gateway that is genuinely
+# fail-closed, not one that has been given a way in. Do not read a
+# successful rollout as an authenticated one; check that
+# `ADA_GATEWAY_LOGIN_USERS` is populated in the target namespace.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -85,6 +97,34 @@ spec:
             # policy files to in deploy/docker/ada-api-gateway.Dockerfile.
             - name: ADA_RBAC_POLICY_DIR
               value: "/etc/ada-rbac/policies"
+            # The shared session store. `AuthContext::bootstrap` refuses
+            # to start without a reachable one, and there is deliberately
+            # no in-process fallback: a per-process map 401s every valid
+            # credential the moment a request lands on the other replica
+            # (this Deployment runs `replicas: 2`), and a restart
+            # invalidates every outstanding session.
+            #
+            # **The Service named here is not defined in this directory.**
+            # `ada-session-redis` ships as a separate reference manifest
+            # at `deploy/infra/ada-session-redis.yaml`, because
+            # `deploy/k8s/` means "services this repository publishes" --
+            # `crates/ada-core/tests/deploy_images.rs` asserts that every
+            # image in it resolves to one registry with a `v`-prefixed
+            # semver tag, and `redis:7-alpine` is neither. A stateful
+            # dependency is operator-supplied infrastructure here, exactly
+            # like the namespace, the CSI volume and the secrets operator.
+            #
+            # So `kubectl apply -k deploy/k8s/` alone gives you a gateway
+            # that refuses to start. That is the correct failure: an
+            # authentication service that cannot check a credential must
+            # not serve. To get a running reference topology:
+            #
+            #   kubectl apply -f deploy/infra/ada-session-redis.yaml
+            #   kubectl apply -k deploy/k8s/
+            #
+            # A real deployment points this at a managed Redis instead.
+            - name: ADA_SESSION_REDIS_URL
+              value: "redis://ada-session-redis:6379"
           # /health/live is the liveness probe target: it is the only
           # handler that cannot depend on a backing service, so a
           # dependency outage must not cause a restart loop.
@@ -120,12 +160,22 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-      volumes:
-        - name: tmp
-          emptyDir: {}
+          # On the container, not the pod spec. It was previously nested
+          # inside the `volumes:` entry below, which made it a key of an
+          # emptyDir volume rather than of the container: every apply
+          # succeeded, `kubectl kustomize` rendered without complaint, and
+          # the pod came up with no requests and no limits at all -- the
+          # one field that tells the scheduler what this workload costs
+          # and tells the kubelet when to throttle it. Silence is what a
+          # dropped key looks like; this was only caught by parsing the
+          # *rendered* output and asking where `resources` actually
+          # ended up.
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits:   { cpu: 500m, memory: 256Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

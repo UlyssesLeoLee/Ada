@@ -3,7 +3,7 @@
 use crate::action::{ActionOutcome, ActionStep, RemediationAction, StepResult};
 use crate::alert::{AlertEvent, AlertStatus};
 use crate::error::{RemediationError, Result};
-use crate::executor::{DryRunExecutor, ExecutionContext, StepExecutor};
+use crate::executor::{DryRunExecutor, ExecutionContext, ExecutorMode, StepExecutor};
 use crate::state::EngineState;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -231,6 +231,17 @@ impl RemediationEngine {
         step: &ActionStep,
         ctx: &ExecutionContext,
     ) -> (bool, String, u64) {
+        // The engine's own mode is the outer limit, and the step's
+        // declared `executor` field the inner one. This is checked
+        // here, before dispatch, because `run_command` is executed
+        // by the engine directly rather than through the executor:
+        // without this gate a dry-run engine still ran commands,
+        // so a runbook's `find ... -delete` ran for real while
+        // every other step reported a rehearsed no-op.
+        if !ExecutorMode::runs_for_real(self.executor.mode(), step.executor()) {
+            let kind = step_kind_name(step);
+            return (true, format!("dry-run {kind} (no side effects)"), 0);
+        }
         match step {
             ActionStep::RunCommand {
                 cmd,
@@ -450,7 +461,16 @@ mod tests {
             cooldown: Duration::from_secs(60),
             max_retries: 0,
         };
-        let engine = RemediationEngine::with_runbooks(vec![action]);
+        let engine = RemediationEngine::with_runbooks(vec![action])
+            // A real executor, because this test is about
+            // short-circuiting *after a failure*: the first step has
+            // to actually fail for that to mean anything. The
+            // dry-run engine deliberately runs no commands at all,
+            // which `dry_run_engine_does_not_execute_run_command`
+            // covers instead.
+            .with_executor(std::sync::Arc::new(
+                crate::executor::RealExecutor::with_logging_client(),
+            ));
         let outcome = engine
             .execute(&engine.evaluate(&AlertEvent::new("Test"))[0])
             .await
@@ -461,5 +481,59 @@ mod tests {
         ));
         // Only the first step should have been attempted.
         assert_eq!(outcome.step_results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn dry_run_engine_does_not_execute_run_command() {
+        // The command does not exist, so it cannot succeed. A step
+        // that reports success is therefore a step that was never
+        // executed, and the message has to say so.
+        let action = RemediationAction {
+            id: "test".into(),
+            name: "test".into(),
+            trigger: crate::action::Trigger::Exact("Test".into()),
+            severities: vec![],
+            steps: vec![ActionStep::RunCommand {
+                cmd: "this-command-does-not-exist-xyz".into(),
+                args: vec![],
+                timeout_secs: 5,
+            }],
+            cooldown: Duration::from_secs(60),
+            max_retries: 0,
+        };
+
+        // Default wiring, i.e. what `main.rs` builds.
+        let engine = RemediationEngine::with_runbooks(vec![action.clone()]);
+        let outcome = engine
+            .execute(&engine.evaluate(&AlertEvent::new("Test"))[0])
+            .await
+            .unwrap();
+        assert!(matches!(
+            outcome.status,
+            crate::action::OutcomeStatus::Succeeded
+        ));
+        assert!(
+            outcome.step_results[0]
+                .message
+                .contains("dry-run run_command"),
+            "a rehearsed step must say so, got: {}",
+            outcome.step_results[0].message
+        );
+
+        // Same step, engine wired real: now it really tries, and a
+        // command that does not exist fails. Without this half the
+        // assertion above could pass for the wrong reason -- a
+        // broken engine that runs nothing at all.
+        let live = RemediationEngine::with_runbooks(vec![action]).with_executor(
+            std::sync::Arc::new(crate::executor::RealExecutor::with_logging_client()),
+        );
+        let live_outcome = live
+            .execute(&live.evaluate(&AlertEvent::new("Test"))[0])
+            .await
+            .unwrap();
+        assert!(matches!(
+            live_outcome.status,
+            crate::action::OutcomeStatus::Failed
+        ));
     }
 }

@@ -16,7 +16,7 @@
 //! better under read-heavy contention and is already used
 //! elsewhere in the workspace (see `ada-m11-rbac-collab`).
 //!
-//! See [`DOC-MOD-014`](../docs/modules/M-14-module-registry.md)
+//! See [`DOC-MOD-014`](../../../docs/modules/M-14-module-registry.md)
 //! §3.5 for the full lifecycle.
 
 use std::collections::HashMap;

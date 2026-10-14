@@ -13,7 +13,7 @@
 //! | `BackendError`       | The underlying store (file, DB, TSDB) failed.           |
 //! | `ShuttingDown`       | `export` was called on an exporter that was closed.     |
 //!
-//! See [`DOC-MOD-009`](../docs/modules/M-09-exporter.md) §3.4
+//! See [`DOC-MOD-009`](../../../docs/modules/M-09-exporter.md) §3.4
 //! for the full validation pipeline.
 
 use thiserror::Error;

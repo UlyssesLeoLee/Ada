@@ -399,13 +399,20 @@ BEGIN
         v_effective_ttl := 30;
     END IF;
 
-    v_new_expires := now() + (v_effective_ttl || ' seconds')::INTERVAL;
+    -- 必ず clock_timestamp() を使う。now() はトランザクション開始時刻で
+    -- トランザクション内で一定のため、同じトランザクション内で acquire →
+    -- renew すると expires_at が延長されず TTL が効かない。
+    v_new_expires := clock_timestamp() + (v_effective_ttl || ' seconds')::INTERVAL;
 
     -- 1. 既存 holder 確認 (行ロック → 同一トランザクション内で重複取得防止)
-    SELECT holder_node_id, expires_at
+    --    注意: RETURNS TABLE(expires_at) は OUT パラメータ expires_at を暗黙に
+    --    導入するため、素の expires_at は OUT パラメータと同名列の両方に一致し
+    --    "column reference \"expires_at\" is ambiguous" となる。
+    --    OUT パラメータと同名の列は、必ずテーブル別名 + 列名で修飾すること。
+    SELECT ll.holder_node_id, ll.expires_at
         INTO v_existing_node, v_existing_expires
-        FROM leader_lease
-        WHERE lease_key = p_lease_key
+        FROM leader_lease AS ll
+        WHERE ll.lease_key = p_lease_key
         FOR UPDATE;
 
     -- 2. 取得判定:
@@ -528,7 +535,9 @@ BEGIN
         WHERE node_id = p_node_id;
 
     -- 3. current_load 計算: 当該 node_id の Active module_instance 数 / capacity
-    SELECT (COUNT(*) FILTER (WHERE state = 'Active')::NUMERIC
+    --    注意: module_instance と cluster_node はどちらも state 列を持つため、
+    --    JOIN 内で素の state は "column reference \"state\" is ambiguous" となる。
+    SELECT (COUNT(*) FILTER (WHERE mi.state = 'Active')::NUMERIC
             / GREATEST(cn.capacity, 1))::NUMERIC
         INTO v_load
         FROM module_instance mi

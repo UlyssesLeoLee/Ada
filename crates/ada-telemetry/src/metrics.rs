@@ -12,7 +12,7 @@
 //! downstream crates that don't actually need the
 //! metrics endpoint.
 //!
-//! Per [`DOC-OBS-003 §2`](../docs/observability/03-metrics-design.md)
+//! Per [`DOC-OBS-003 §2`](../../../docs/observability/03-metrics-design.md)
 //! the canonical metric name format is
 //! `ada.{layer}.{component}.{metric}_{unit}`. The helper
 //! [`canonical_name`] enforces the `ada.` prefix.

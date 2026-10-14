@@ -3,7 +3,7 @@
 M-07: Debug tools. Breakpoints (3 kinds × 3 states), stack
 inspector, and a bounded in-process trace recorder.
 
-See `docs/modules/M-07-debug.md` (DOC-MOD-007) for the full
+See `docs/modules/M-07-debug-service.md` (DOC-MOD-007) for the full
 design.
 
 ## v0.1.0 status

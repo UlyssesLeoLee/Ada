@@ -44,11 +44,23 @@ fn node_with_id(id: NodeId, label: &str, x: i32, y: i32) -> CanvasNode {
 /// cleanly to catch a feature-gating regression.
 #[test]
 fn appstate_builds_without_reconcile_payload() {
-    // `AppState::new` is fallible because it builds the RBAC enforcer:
-    // a pod whose policy set does not validate must refuse to start
-    // rather than serve with an enforcer that decides arbitrarily.
-    let state = AppState::new("ada-gateway-recon", Arc::new(MemoryHealthCheck::new()))
-        .expect("bundled policy set must validate");
+    // The state is built from an explicit auth context rather than
+    // `AppState::new`: that constructor bootstraps the shared session
+    // store from `ADA_SESSION_REDIS_URL` and fails closed without one,
+    // which would make this smoke test require a Redis that no
+    // `cargo test` run starts. `with_bundled_policy` is the same code
+    // path `AppState::new` uses for the enforcer, and it is still
+    // fallible because a policy set that does not validate must refuse
+    // to build rather than decide arbitrarily.
+    let auth = ada_m13_api_gateway::auth::AuthContext::with_bundled_policy(Arc::new(
+        ada_identity::session::SessionStore::new(),
+    ))
+    .expect("bundled policy set must validate");
+    let state = AppState::with_auth(
+        "ada-gateway-recon",
+        Arc::new(MemoryHealthCheck::new()),
+        auth,
+    );
     let _router = ada_m13_api_gateway::build_router(state);
 }
 

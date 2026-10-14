@@ -18,7 +18,7 @@
 //! - 5-variant [`NormalizerError`] (UnknownField,
 //!   RuleExecutionFailed, TypeMismatch, InvalidRegex,
 //!   BackendError)
-//! - 9 unit tests + 4 integration tests
+//! - 33 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!

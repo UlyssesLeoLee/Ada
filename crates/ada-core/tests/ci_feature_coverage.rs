@@ -580,3 +580,112 @@ fn the_lane_parser_finds_the_lanes_this_gate_relies_on() {
         );
     }
 }
+
+/// Every dependency edge in a workspace manifest that names `feature`,
+/// with the manifest table it was found in.
+///
+/// Only *dependency tables* are considered. `ada-identity`'s own
+/// `[features]` table declares `inproc-sessions = []`, which is the
+/// declaration of the flag and not an edge that turns it on; treating it
+/// as an edge would make this gate fail on correct configuration, which
+/// is the failure mode this file already documents for
+/// `matrix_expansion_is_actually_resolved`.
+///
+/// Comments are stripped before the match, because several manifests
+/// mention the feature in prose precisely to explain the rule — a comment
+/// must not be able to trip the gate.
+///
+/// The table name is kept raw so a target-specific table arrives as
+/// `target.'cfg(...)'.dependencies`, and callers match the whole string
+/// rather than a prefix.
+fn feature_enablement_sites(root: &Path, feature: &str) -> Vec<(String, String, String)> {
+    const DEP_TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+
+    fn is_dependency_table(section: &str) -> bool {
+        DEP_TABLES.iter().any(|t| {
+            section == *t
+                || section
+                    .strip_suffix(t)
+                    .is_some_and(|prefix| prefix.ends_with('.'))
+        })
+    }
+
+    let mut sites = Vec::new();
+    for dir in workspace_members(root) {
+        let manifest = dir.join("Cargo.toml");
+        let text = fs::read_to_string(&manifest)
+            .unwrap_or_else(|e| panic!("read {}: {e}", manifest.display()));
+        let pkg = read_package(&dir).name;
+
+        let mut section = String::new();
+        for line in text.lines() {
+            let t = line.trim();
+            if t.starts_with('[') && t.ends_with(']') {
+                section = t.trim_matches(|c| c == '[' || c == ']').to_string();
+                continue;
+            }
+            let code = t.split('#').next().unwrap_or("").trim();
+            if code.contains(feature) && is_dependency_table(&section) {
+                sites.push((pkg.clone(), section.clone(), code.to_string()));
+            }
+        }
+    }
+    sites
+}
+
+#[test]
+fn no_production_dependency_enables_a_test_only_feature() {
+    // The defect this guards: `ada-identity`'s per-process `SessionStore`
+    // is `#[cfg(any(test, feature = "inproc-sessions"))]`, and it exists
+    // only as a test double. A session in process memory is unknown to
+    // the next replica and dies with the pod, so a production build that
+    // can name it can ship a login that works on one pod and 401s on the
+    // next request that lands elsewhere.
+    //
+    // The crate's own manifest says "The one place it must not be
+    // enabled is `[dependencies]`". That sentence was correct and
+    // unenforced — nothing read it.
+    //
+    // This replaces a `compile_fail` doctest that tried to assert the same
+    // thing from the wrong side. A doctest runs inside the workspace test
+    // build, where Cargo's feature unification has already switched
+    // `inproc-sessions` on via the gateway's dev-dependency, so it saw a
+    // build with the feature *enabled* and could not observe its absence.
+    // Checking the dependency graph is the only place the absence is
+    // visible at all.
+    let root = repo_root();
+    let feature = "inproc-sessions";
+    let sites = feature_enablement_sites(&root, feature);
+
+    // Anti-vacuity: if the scanner stopped finding anything, the loop below
+    // would pass while checking nothing. There is at least one legitimate
+    // site today — the gateway's `[dev-dependencies]` edge — so its absence
+    // means the parser broke, not that the property became trivial.
+    assert!(
+        sites.iter().any(|(_, section, _)| {
+            section == "dev-dependencies" || section.ends_with(".dev-dependencies")
+        }),
+        "no `[dev-dependencies]` site enables `{feature}` anywhere in the \
+         workspace; this gate is no longer seeing the configuration it \
+         exists to check (found {sites:?})"
+    );
+
+    let production: Vec<String> = sites
+        .iter()
+        .filter(|(_, section, _)| {
+            section != "dev-dependencies" && !section.ends_with(".dev-dependencies")
+        })
+        .map(|(pkg, section, line)| format!("{pkg}: [{section}] {line}"))
+        .collect();
+
+    assert!(
+        production.is_empty(),
+        "`{feature}` is a test-only feature and must only ever be enabled \
+         from a `[dev-dependencies]` table. These edges make it part of a \
+         normal build, so production code can name the in-process session \
+         store: {}\n\
+         Move the edge to `[dev-dependencies]`, where it applies to test \
+         targets only.",
+        production.join("\n         ")
+    );
+}

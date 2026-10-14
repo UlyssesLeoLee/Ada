@@ -1,0 +1,145 @@
+---
+# ada-session-redis — a reference session store for ada-api-gateway.
+#
+# WHY THIS IS NOT IN deploy/k8s/
+#
+# `AuthContext::bootstrap` connects to `ADA_SESSION_REDIS_URL` at startup
+# and treats "cannot reach it" as a fatal error. That fail-closed choice
+# is what makes the gateway's sessions valid across replicas — a
+# per-process store would 401 every credential the moment a request
+# landed on the other pod, and a restart would invalidate every
+# outstanding session. See crates/ada-m13-api-gateway/src/auth.rs.
+#
+# It also means the gateway has an external dependency, and this file is
+# where that dependency is provided. It is deliberately *outside*
+# `deploy/k8s/` because that directory means "services this repository
+# publishes": `crates/ada-core/tests/deploy_images.rs` asserts that every
+# image under it resolves to one registry with a `vMAJOR.MINOR.PATCH` tag.
+# `redis:7-alpine` is neither, and pretending otherwise by carving out an
+# exemption would weaken a gate that exists to catch exactly this kind of
+# drift.
+#
+# A stateful dependency is operator-supplied infrastructure, the same way
+# the `observability` namespace, the CSI-backed RWX volume and the
+# secrets operator are — all listed as prerequisites in
+# `deploy/k8s/README.md`, none of them shipped in `deploy/k8s/`. This
+# file follows that convention rather than inventing a second one.
+#
+# WHAT THIS IS NOT
+#
+# A placeholder that makes the reference topology run. It has:
+#
+#   - no persistence (sessions vanish on restart — every user re-logs in)
+#   - no authentication and no TLS (in-cluster only)
+#   - one replica, so it is a single point of failure
+#   - no eviction policy, so it can OOM rather than shed cold sessions
+#
+# A real deployment points `ADA_SESSION_REDIS_URL` at a managed instance
+# and does not apply this file at all. Sessions are the credential
+# authority for the whole multi-tenant model, so the storage behind them
+# is not the place to save on engineering.
+#
+# START ORDER
+#
+# The gateway does not wait for this. Kubernetes has no ordering between
+# two separate applies, so on a cold cluster the gateway may exit first
+# and be restarted by CrashLoopBackOff's exponential backoff until Redis
+# answers. That is correct-by-restart rather than ordered: the
+# alternative — a gateway that starts without a store and answers 401 —
+# is the bug this whole change exists to remove. Apply this file first if
+# you want to avoid the backoff entirely.
+#
+# USAGE
+#
+#   kubectl apply -f deploy/infra/ada-session-redis.yaml
+#   kubectl apply -k deploy/k8s/
+#
+# The Service name here is what `ADA_SESSION_REDIS_URL` in
+# `deploy/k8s/ada-api-gateway.yaml` points at. Change one and you must
+# change the other; a mismatch is a gateway that refuses to start, which
+# is the intended behaviour rather than a silent one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ada-session-redis
+  labels:
+    app: ada-session-redis
+    tier: infrastructure
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ada-session-redis
+  template:
+    metadata:
+      labels:
+        app: ada-session-redis
+    spec:
+      securityContext:
+        # redis:7-alpine runs as uid 999. Pinned explicitly for the same
+        # reason the three Deployments in deploy/k8s pin 65532: whatever
+        # the base image happens to allocate would make this manifest
+        # non-deterministic across a base-image bump.
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          # `--save ''` and `--appendonly no`: the upstream image's
+          # defaults are tuned for a cache. For a credential store the
+          # honest options are "durable" or "explicitly not", and this
+          # picks the latter rather than inheriting an RDB dump on a
+          # timer nobody chose.
+          args:
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+          livenessProbe:
+            tcpSocket: { port: 6379 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ada-session-redis
+  labels:
+    app: ada-session-redis
+    tier: infrastructure
+spec:
+  type: ClusterIP
+  selector:
+    app: ada-session-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

@@ -48,4 +48,4 @@ single-process dev builds.
 
 ## 設計書
 
-`docs/modules/M-04-orchestration.md` (DOC-MOD-004)
+`docs/modules/M-04-orchestration-engine.md` (DOC-MOD-004)

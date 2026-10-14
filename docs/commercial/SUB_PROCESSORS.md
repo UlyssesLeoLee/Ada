@@ -1,5 +1,16 @@
 # Sub-processors
 
+> **DRAFT — NOT PUBLISHED.** The table below is unverified placeholder
+> data. Searching the rest of the repository: `Sentry` and `Postmark`
+> appear **nowhere** outside this file (no dependency, no configuration,
+> no code path), and `Cloudflare` appears only as a hostname in a CORS
+> allow-list. The Flutter client ships no crash-reporting SDK at all, so
+> the Sentry row describes a data flow that does not exist. GitHub and
+> AWS are plausible for a hosted deployment but are not configured by
+> this repository either. Do not publish this list, and do not use it to
+> answer a customer's data-processing question, until each row is backed
+> by an actual integration and a signed DPA.
+
 A sub-processor is a third party that processes Customer Data on behalf of Ada project team
 to deliver the gm-console / Ada platform Service.
 

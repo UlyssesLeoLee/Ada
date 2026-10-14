@@ -26,6 +26,23 @@ use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 /// Minimal upstream that echoes/returns what we want for each test case.
+///
+/// ## The routing table is gateway-shaped, deliberately
+///
+/// These keys are the paths the *gateway* serves, prefix included:
+/// `/api/v1/...`, per `build_router` in
+/// `crates/ada-m13-api-gateway/src/router.rs`. They used to be the stripped
+/// spellings (`/v1/pipelines`, `/v1/missing`, `/v1/echo`), because the
+/// proxy used to strip `/api` before forwarding. That made this stub and
+/// the proxy wrong in the same direction at the same time, so neither could
+/// catch the other: every case below passed while the console sent the
+/// gateway a path its router does not serve, and every real browser call
+/// got a 404 from the gateway's fallback.
+///
+/// The keys now match the gateway, and a regression in the rewrite turns
+/// this stub's `other` arm into a 500 and fails the assertion in the case
+/// that provoked it. `proxy_upstream_paths.rs` covers the same property
+/// against a stub that 404s unknown routes the way the real gateway does.
 #[derive(Clone, Default)]
 #[allow(dead_code)]
 struct Upstream {
@@ -42,14 +59,14 @@ async fn upstream_handler(req: Request) -> Response {
 
     let path = req.uri().path().to_string();
     match path.as_str() {
-        "/v1/pipelines" => (
+        "/api/v1/pipelines" => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
             r#"{"pipelines":[{"id":"p1","status":"ok"}]}"#,
         )
             .into_response(),
-        "/v1/missing" => (StatusCode::NOT_FOUND, "upstream not found").into_response(),
-        "/v1/echo" => {
+        "/api/v1/missing" => (StatusCode::NOT_FOUND, "upstream not found").into_response(),
+        "/api/v1/echo" => {
             let body = req.into_body().collect().await.unwrap().to_bytes();
             (
                 StatusCode::OK,

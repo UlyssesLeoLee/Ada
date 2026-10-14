@@ -1,6 +1,7 @@
 {
   "$schema": "https://support.google.com/googleplay/android-developer/answer/10787469",
-  "version_policy": "v0.3.0 — gm-console Mobile (Flutter)",
+  "_draft": "DRAFT — NOT SUBMITTED. Declared version v0.3.0 while the workspace is at 0.1.0 (apps/gm-console-app/pubspec.yaml); asserted a managed SOC2-Type-II sub-processor that does not exist. Corrected here. Do not submit until the Android platform project is in the repository — the tracked tree has no build.gradle and no AndroidManifest.xml, so CI cannot produce an AAB. See docs/commercial/COMPLIANCE_SELFCHECK.md.",
+  "version_policy": "v0.1.0 — gm-console Mobile (Flutter)",
   "data_collection": {
     "declaration": "The app collects only the minimum data required to provide its declared functionality. No third-party advertising SDKs are bundled.",
     "user_data_categories": [
@@ -45,7 +46,7 @@
             "type": "Crash logs",
             "purpose": "Analytics (anonymized)",
             "user_choice_required": true,
-            "data_handling": "Self-hosted deployments may disable entirely. Managed deployments use a SOC2-Type-II sub-processor."
+            "data_handling": "Not collected. The app ships no crash-reporting SDK (no sentry, firebase or analytics dependency in apps/gm-console-app/pubspec.yaml, no telemetry code under lib/). The previous text here claimed a managed SOC2-Type-II sub-processor; no managed tier exists -- docs/commercial/PRESS_KIT.md records it as roadmap."
           },
           {
             "type": "Performance diagnostics",

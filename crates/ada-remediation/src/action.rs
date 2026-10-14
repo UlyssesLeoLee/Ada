@@ -93,7 +93,7 @@ impl Trigger {
 
 /// One executable step inside a runbook. Six variants — chosen
 /// to cover ~all of the runbook actions described in
-/// `docs/observability/12-auto-remediation.md` §3.1.
+/// `docs/observability/14-auto-remediation.md` §3.1.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActionStep {
@@ -184,6 +184,28 @@ pub enum ActionStep {
     /// Composite of two or more steps that all need to succeed.
     /// The inner `Vec` runs sequentially; first failure aborts.
     Sequence { steps: Vec<ActionStep> },
+}
+
+impl ActionStep {
+    /// The mode this step declares, if it declares one.
+    ///
+    /// The four "outside world" variants carry the `executor`
+    /// field; `RunCommand` and `Sequence` do not, and report
+    /// `None` so the engine falls back to its own mode. That is
+    /// the distinction the engine needs: a `Sequence` is a
+    /// container whose sub-steps each decide for themselves,
+    /// while a `RunCommand` is a bare side effect with no
+    /// per-step knob at all.
+    #[must_use]
+    pub fn executor(&self) -> Option<ExecutorMode> {
+        match self {
+            Self::HttpCall { executor, .. }
+            | Self::PgFunction { executor, .. }
+            | Self::NotifySlack { executor, .. }
+            | Self::PageOperator { executor, .. } => Some(*executor),
+            Self::RunCommand { .. } | Self::Sequence { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

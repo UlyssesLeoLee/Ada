@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1E88E5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B3D91" media="(prefers-color-scheme: dark)">
+  <title>Sign in — gm-console</title>
+  <meta name="description" content="Sign in to the gm-console operations console for the Ada data platform.">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="generator" content="gm-console shell v0.1.0">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231E88E5'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3Eg%3C/text%3E%3C/svg%3E">
+
+  <!-- Same token sheet as the shell, loaded synchronously so first paint
+       sees the canonical variables. Every colour, size and duration below
+       is a var() from here -- nothing is hardcoded. -->
+  <link rel="stylesheet" href="./tokens.css">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-family: var(--font-sans);
+      font-size: var(--type-body);
+      color: var(--text-body);
+      background: linear-gradient(180deg, var(--surface-bg) 0%, var(--surface-card) 100%);
+    }
+    h1 { color: var(--text-strong); }
+    :focus-visible {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
+    a { color: var(--brand-500); text-underline-offset: 2px; }
+    header.site {
+      border-bottom: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
+      padding: var(--space-3) var(--space-5);
+      display: flex;
+      align-items: center;
+      gap: var(--space-4);
+    }
+    header.site .brand-mark {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+      color: var(--text-strong);
+      text-decoration: none;
+    }
+    header.site .brand-mark .dot { color: var(--brand-500); }
+    main {
+      flex: 1;
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto;
+      padding: var(--space-8) var(--space-5) var(--space-6);
+    }
+    h1 {
+      font-size: var(--type-h2);
+      margin: 0 0 var(--space-2);
+      letter-spacing: -0.01em;
+    }
+    .sub { margin: 0 0 var(--space-5); color: var(--text-faint); font-size: var(--type-small); }
+    .field { margin-bottom: var(--space-4); }
+    label {
+      display: block;
+      margin-bottom: var(--space-1);
+      font-weight: 600;
+      font-size: var(--type-small);
+      color: var(--text-strong);
+    }
+    input {
+      width: 100%;
+      padding: var(--space-3);
+      font: inherit;
+      color: var(--text-strong);
+      background: var(--surface-card);
+      border: 1px solid color-mix(in srgb, var(--text-strong) 16%, transparent);
+      border-radius: var(--radius-md);
+      transition: border-color var(--dur-fast) var(--ease-standard);
+    }
+    input:hover { border-color: color-mix(in srgb, var(--brand-500) 45%, transparent); }
+    input:focus { border-color: var(--brand-500); }
+    button {
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      font: inherit;
+      font-weight: 600;
+      color: var(--surface-card);
+      background: var(--brand-500);
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: background var(--dur-fast) var(--ease-standard);
+    }
+    button:hover:not([disabled]) { background: var(--brand-600); }
+    button[disabled] { opacity: 0.6; cursor: progress; }
+    /* Status line. `hidden` is load-bearing: the attribute is removed by
+       script, and `[hidden]` keeps it from being a permanent empty gap. */
+    .status {
+      margin: var(--space-3) 0 0;
+      min-height: calc(var(--type-small) * 1.5);
+      font-size: var(--type-small);
+      color: var(--text-faint);
+    }
+    .status[data-state="ok"]  { color: var(--status-ok); }
+    .status[data-state="err"] { color: var(--status-err); }
+    footer.site {
+      border-top: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
+      padding: var(--space-4) var(--space-5);
+      font-size: var(--type-small);
+      color: var(--text-faint);
+      text-align: center;
+    }
+    footer.site a { color: inherit; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site" role="banner">
+    <a class="brand-mark" href="/" aria-label="gm-console home">
+      gm<span class="dot">·</span>console
+    </a>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <h1>Sign in</h1>
+    <p class="sub">Operations console for the Ada data platform.</p>
+
+    <!-- Novalidate: the browser's own bubbles are less informative than the
+         status line, and both agree on which field is wrong. -->
+    <form id="login-form" novalidate>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username"
+               inputmode="email" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password"
+               autocomplete="current-password" required>
+      </div>
+      <button id="submit" type="submit">Sign in</button>
+      <!-- role=status so the message is announced, aria-live for the same
+           reason; the token itself is never written here. -->
+      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
+    </form>
+  </main>
+
+  <footer class="site" role="contentinfo">
+    <a href="/">Home</a> ·
+    <a href="/terms">Terms</a> ·
+    <a href="/privacy">Privacy</a>
+  </footer>
+
+  <!-- Login. Static page, no framework and no bundler: the repo has no
+       package.json at all (see apps/gm-console-web/scripts/SPEC.md and the
+       note at the bottom of deploy/docker/gm-console.Dockerfile), so this
+       is hand-written against the same tokens as the shell.
+
+       The contract is the one the Flutter client already implements in
+       apps/gm-console-app/lib/api/endpoints/auth_api.dart:
+
+         POST /api/v1/auth/login   {"email": ..., "password": ...}
+         200                       {"token": "...", "expires_at": "..."}
+         401                       ApiUnauthorizedException -> re-auth
+
+       `token` is required and non-empty; a 200 without one is treated as a
+       failure rather than as a successful sign-in, because the client
+       treats it the same way.
+
+       ## Where the token is stored, and why that is a compromise
+
+       It goes in localStorage under `gm_console_token`. The Flutter client
+       uses SecureStorage, which this page cannot: there is no platform
+       secret store behind an HTTP response, and inventing a server-side
+       session would mean changing the gateway's contract, which is not
+       this page's call. localStorage is readable by any script on the
+       origin, so a token held here is only as safe as the console's own
+       pages. That is an accepted property of a shell that ships no
+       third-party script, not a solved problem, and it is the first thing
+       to revisit when this page grows a real bundle. -->
+  <script>
+    (function () {
+      'use strict';
+
+      var TOKEN_KEY = 'gm_console_token';
+      var EXPIRES_KEY = 'gm_console_token_expires_at';
+      var ENDPOINT = '/api/v1/auth/login';
+
+      var form = document.getElementById('login-form');
+      var emailEl = document.getElementById('email');
+      var passwordEl = document.getElementById('password');
+      var submitEl = document.getElementById('submit');
+      var statusEl = document.getElementById('status');
+
+      function say(message, state) {
+        statusEl.textContent = message;
+        if (state) {
+          statusEl.setAttribute('data-state', state);
+        } else {
+          statusEl.removeAttribute('data-state');
+        }
+        statusEl.hidden = false;
+      }
+
+      function busy(on) {
+        submitEl.disabled = on;
+        submitEl.textContent = on ? 'Signing in...' : 'Sign in';
+      }
+
+      // localStorage throws in a private-mode context and when a browser
+      // blocks storage for the origin. A sign-in that cannot persist its
+      // token would silently drop the user back to this page on the next
+      // request, so the failure is reported rather than swallowed.
+      function store(key, value) {
+        try {
+          window.localStorage.setItem(key, value);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+
+        var email = emailEl.value.trim();
+        var password = passwordEl.value;
+
+        if (!email || !password) {
+          say('Enter both an email address and a password.', 'err');
+          return;
+        }
+
+        busy(true);
+        say('Signing in...');
+
+        fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          // Same-origin and relative, so this goes through the console's
+          // own /api proxy and never needs a CORS preflight.
+          body: JSON.stringify({ email: email, password: password })
+        }).then(function (response) {
+          return response.json().catch(function () {
+            // A non-JSON body on a success status is still a contract
+            // violation; hand the status to the same check below.
+            return null;
+          }).then(function (body) {
+            return { status: response.status, body: body };
+          });
+        }).then(function (result) {
+          var body = result.body;
+
+          if (result.status === 401 || result.status === 403) {
+            // Matches ApiUnauthorizedException / ApiForbiddenException:
+            // credentials rejected, so re-auth rather than retry.
+            passwordEl.value = '';
+            passwordEl.focus();
+            say('That email and password combination was not accepted.', 'err');
+            return;
+          }
+
+          if (result.status < 200 || result.status >= 300) {
+            say('Sign-in failed: the service answered ' + result.status + '.', 'err');
+            return;
+          }
+
+          var token = body && typeof body.token === 'string' ? body.token : '';
+          if (!token) {
+            say('Sign-in failed: the response carried no token.', 'err');
+            return;
+          }
+
+          if (!store(TOKEN_KEY, token)) {
+            say('Signed in, but this browser refused to store the token.', 'err');
+            return;
+          }
+          // Optional in the client's contract (`DateTime? expiresAt`), so
+          // its absence is not an error.
+          if (body.expires_at && typeof body.expires_at === 'string') {
+            store(EXPIRES_KEY, body.expires_at);
+          }
+
+          passwordEl.value = '';
+          say('Signed in. Redirecting...', 'ok');
+          window.location.assign('/');
+        }).catch(function () {
+          say('Sign-in failed: the console could not reach the API.', 'err');
+        }).then(function () {
+          busy(false);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

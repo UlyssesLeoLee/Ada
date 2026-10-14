@@ -1,45 +1,75 @@
-# Demo / Production URL spec for gm-console
+# gm-console: how it is reached
 
-## Hosted preview (CI auto-deploys)
+This file describes **what this repository actually deploys**. An earlier
+version of this document described a hosted preview at
+`https://gm-console.kanvas.dev` with staging, Cloudflare-managed TLS,
+production DNS and a CI deploy lane. None of that existed: there is no
+deploy job in any workflow, no second Deployment for staging, no envoy
+manifest, and the document pointed readers at `docs/commercial/DEMO_DEPLOY.md`,
+which was never created. It is rewritten here rather than deleted, because
+the URL naming convention below is still the intended one -- it just is
+not live yet.
 
-| Tier        | URL                                | Backing                                |
-|-------------|------------------------------------|----------------------------------------|
-| Demo URL    | `https://gm-console.kanvas.dev`    | Cloudflare Workers → envoy → gm-console Deployment |
-| Staging URL | `https://staging.gm-console.kanvas.dev` | same path, separate Deployment       |
-| Local dev   | `http://localhost:8080`            | `cargo run -p gm-console-server`       |
+## What exists today
 
-## TLS / Cert
+| Tier          | URL                      | Backing                                          |
+|---------------|--------------------------|--------------------------------------------------|
+| Local dev     | `http://localhost:8080`  | `cargo run -p gm-console-server`                 |
+| In-cluster    | `http://gm-console`      | Service `gm-console`, ClusterIP, port 80 → 8080  |
 
-- TLS via Cloudflare edge — managed cert.
-- Production DNS `gm-console.kanvas.dev` → `104.21.x.x` (Cloudflare proxy).
-- Wildcard `*.gm-console.kanvas.dev` covers staging / preview tenants.
+`deploy/k8s/gm-console.yaml` is a ClusterIP Service with **no Ingress**.
+Nothing in this repository exposes it to the public Internet.
+
+### Namespaces
+
+Only `ada-remediation` declares a namespace (`observability`). The
+gateway and the console declare none, so they land in `default`. This
+matters when writing `kubectl` commands against the wrong one.
 
 ## Routing upstream contract
 
+This part is real, and is the reason cross-origin policy does not apply
+to the browser:
+
 - All `/api/*` requests are reverse-proxied by gm-console to
-  `ada-m13-api-gateway:8080` (cluster-internal Service).
-- Connection uses mTLS via envoy sidecar filter (see
-  `deploy/k8s/gm-console.yaml` for the production posture).
+  `ada-m13-api-gateway:8080`, the cluster-internal Service, configured
+  by `GM_CONSOLE_UPSTREAM` in `deploy/k8s/gm-console.yaml`.
+- The browser only ever issues **same-origin relative URLs**
+  (`/api/v1/auth/login`, `/api/v1/pipelines`), so it never makes a
+  cross-origin request and the CORS layer is not on the request path.
+- `GM_CONSOLE_ALLOWED_ORIGINS` is declared in the manifest rather than
+  left to the compiled-in default, so the deployed allow-list is stated
+  where the deployment can see it.
 
-## CI deploy lane
+## TLS and the edge tier
 
-`mobile-build.yml` (worker-G target) builds the binary and exposes it via:
+None of this is in this repository yet.
 
-```yaml
-- name: Run gm-console release binary in preview
-  run: |
-    ./target/release/gm-console-server &
-    sleep 3
-    curl -fsS http://127.0.0.1:8080/healthz
-```
+If an edge is added, the posture is fixed by
+`deploy/k8s/gm-console.yaml`: **envoy runs as its own Deployment, not as
+an istio sidecar.** A sidecar is specifically ruled out there. Do not
+add a sidecar to satisfy an ingress requirement without revisiting that
+decision.
 
-(no public-Internet publishes from CI directly; Cloudflare Tunnel or a similar CI launcher
-is out of scope for v0.3.0 — `docs/commercial/DEMO_DEPLOY.md` tracks that path).
+## What a hosted tier would still need
 
-## Failure modes documented
+None of the following exists, and each is a prerequisite rather than a
+detail:
 
-| Symptom                                    | Likely cause                              | Action                                 |
-|--------------------------------------------|-------------------------------------------|----------------------------------------|
-| `Bad Gateway` from `/api/*`                | upstream api-gateway down                 | check `kubectl get pods -n observability -l app=ada-api-gateway` |
-| TLS handshake fails on user browser        | cert pinned to wrong CN                   | see Cloudflare edge config             |
-| `405` on `/api/*`                          | method not forwarded by client lib         | ensure `gm_console_app` uses HTTP 1.1   |
+- an Ingress, or an envoy Deployment, in `deploy/k8s/`
+- a deploy job in CI -- there is none today in any workflow
+- a second manifest for a staging Deployment
+- TLS termination and a certificate source
+
+The `images` job in `ci.yml` is the closest thing that exists: it builds
+each image, runs the container and probes it with curl. That runs on the
+GitHub runner and is not a public URL.
+
+## Troubleshooting
+
+| Symptom                             | Likely cause                                  | Action |
+|-------------------------------------|-----------------------------------------------|--------|
+| `Bad Gateway` from `/api/*`         | upstream `ada-api-gateway` down               | `kubectl get pods -l app=ada-api-gateway` (namespace `default`) |
+| Console pod not Ready               | `gm-console` failing its `/healthz` probe     | `kubectl describe pod -l app=gm-console` |
+| `404` on a static asset             | `GM_CONSOLE_STATIC_DIR` does not match the mount | see `deploy/k8s/README.md` |
+| Any TLS problem                     | not applicable -- there is no TLS in this repo | n/a |

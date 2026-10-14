@@ -62,7 +62,26 @@ pub enum IdentityError {
     /// sessions reach their expiry.
     ///
     /// The number is a *ceiling*, not a target — see
-    /// [`crate::session::SessionStore::with_max_sessions`].
+    /// [`crate::session::DEFAULT_MAX_SESSIONS`].
     #[error("session store is full ({0} sessions)")]
     SessionStoreFull(usize),
+
+    /// A session storage operation could not be carried out at all: the
+    /// shared backend was unreachable, timed out, or returned something
+    /// this crate could not store.
+    ///
+    /// Deliberately distinct from a `None` lookup. A shared backend that
+    /// is down must **not** be reportable as "no such session": the two
+    /// are different facts and a caller that cannot tell them apart
+    /// either logs users out on a network blip or, worse, treats a
+    /// store failure as an authorization answer. `lookup` therefore
+    /// propagates this variant rather than collapsing it into
+    /// `Ok(None)`.
+    ///
+    /// Carries the backend's own message, so a
+    /// [`SharedSessionBackend`](crate::shared_session::SharedSessionBackend)
+    /// implementation must not format a session token into it — a token
+    /// in a log line is a live credential.
+    #[error("session backend unavailable: {0}")]
+    SessionBackend(String),
 }

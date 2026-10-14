@@ -25,10 +25,10 @@
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
 //! 設計書:
-//! - [`DOC-ARCH-001`](../docs/architecture/00-anatomy-model.md) — 仿生モデル + shared layer
-//! - [`DOC-ARCH-007`](../docs/architecture/06-rust-tech-selection.md) — Rust crate 選択
-//! - [`DOC-DEC-002 D-09`](../docs/decisions/02-design-adrs.md) — single workspace version
-//! - [`DOC-DEC-002 D-13`](../docs/decisions/02-design-adrs.md) — `ada-core` = MIT
+//! - [`DOC-ARCH-001`](../../../docs/architecture/00-anatomy-model.md) — 仿生モデル + shared layer
+//! - [`DOC-ARCH-007`](../../../docs/architecture/06-rust-tech-selection.md) — Rust crate 選択
+//! - [`DOC-DEC-002 D-09`](../../../docs/decisions/02-design-adrs.md) — single workspace version
+//! - [`DOC-DEC-002 D-13`](../../../docs/decisions/02-design-adrs.md) — `ada-core` = MIT
 //!
 //! License: MIT (D-13)
 

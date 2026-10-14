@@ -6,6 +6,31 @@
 > **ドキュメントID**：DOC-OBS-007
 > **上位文書**：[DOC-OBS-INDEX](README.md)
 
+> **⚠ 実装状況の注記（2026-10-06 追記）**
+>
+> 本ポリシーが中心として定める **SLO Burn Rate** をはじめ、HTTP メトリクスに
+> 依存するアラート群は、現時点では**ロードされていない**。該当ファイルは
+> `observability/prometheus/alerts-disabled/` に移動しており、
+> `prometheus.yml` の `rule_files`（`alerts/*.yml` / `rules/*.yml`）に
+> 一致しないため評価されない。
+>
+> 原因：これらのアラートが参照する `ada_app_requests_total` および
+> `ada_app_request_duration_seconds` は、リポジトリ内のどこからも
+> 生成されていない（`crates/` に定義が存在しない）。さらに Burn Rate
+> ルールは `service="m13-api-gateway"` 等の値を前提とするが、Prometheus
+> のスクレイプ設定は全ターゲットへ単一の静的ラベル `service: ada-app`
+> を付与するのみで、これらの値は出現しない。
+>
+> つまりエラー・バジェットが消費されても発報しない状態であり、
+> 「発報がない」を「異常なし」と誤読させる。本番監視として機能する
+> には、各サービスのメトリクス出力、スクレイプラベルの per-target 化、
+> runbook の実体整備が必要。
+>
+> 詳細と再有効化の条件は
+> [`alerts-disabled/README.md`](../../observability/prometheus/alerts-disabled/README.md)
+> を参照。現在実際に発報しうるのは `app_down` / `low_disk` /
+> `scaling_alert` の3本のみ。
+
 ---
 
 ## 改訂履歴

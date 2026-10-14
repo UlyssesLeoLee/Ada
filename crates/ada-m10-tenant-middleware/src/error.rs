@@ -16,7 +16,7 @@
 //! Production builds will map these to the canonical API error
 //! codes defined in `docs/api/error-codes.md`; the skeleton keeps
 //! the surface minimal. See
-//! [`DOC-MOD-010`](../docs/modules/M-10-tenant-middleware.md) §3.4
+//! [`DOC-MOD-010`](../../../docs/modules/M-10-tenant-middleware.md) §3.4
 //! for the full validation pipeline.
 
 use thiserror::Error;

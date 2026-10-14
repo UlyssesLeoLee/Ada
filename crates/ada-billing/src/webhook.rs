@@ -16,8 +16,41 @@
 //! * Malformed envelope → `BillingError::MalformedEnvelope`.
 //!
 //! No env var values appear in any log line.
+//!
+//! ## Idempotency retention
+//!
+//! The dedup table is the one piece of state on this path where
+//! "forget too early" and "never forget" are both money bugs, so its
+//! policy is spelled out here rather than left to a reader of
+//! [`IdempotencyStore`]:
+//!
+//! * **Durable, not process memory.** [`IdempotencyStore::new`] keeps
+//!   keys in memory only and is for tests and local wiring;
+//!   [`IdempotencyStore::open`] journals every key to disk and fsyncs
+//!   it, so a restart cannot re-allow a charge that was already
+//!   processed.
+//! * **TTL 72 h** ([`IDEMPOTENCY_TTL_SECS`]), which *equals* Stripe's
+//!   redelivery window ([`STRIPE_RETRY_WINDOW_SECS`]). Expiring a key
+//!   earlier re-admits a retry that Stripe is still entitled to send.
+//!   The TTL is measured inclusively of its last second: a key recorded
+//!   at `t` is held through `t + TTL` and dead from `t + TTL + 1`, so
+//!   the delivery at the exact end of the window is still deduplicated.
+//!   The boundary is closed towards the key rather than towards the
+//!   clock because the two costs are not comparable -- one extra map
+//!   entry, or a customer charged twice.
+//! * **A capacity ceiling** ([`DEFAULT_MAX_ENTRIES`]) that is an alarm
+//!   rather than a wall, plus an **aging sweep** on the write path that
+//!   reclaims every key past its TTL. Refusing a write because the
+//!   table is full would be fail-closed on a route that receives every
+//!   Stripe event, i.e. a permanent outage; evicting a key that is
+//!   still inside the retry window would be fail-open onto a double
+//!   charge. The store therefore reclaims what is expired, admits the
+//!   rest, and counts the admissions so the ceiling is alertable.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hmac::{Hmac, Mac};
@@ -82,34 +115,352 @@ pub struct BillingEvent {
     pub target_id: String,
 }
 
-/// Idempotency store. In-process; production wiring uses Postgres.
+/// Stripe's automatic webhook redelivery window, in seconds.
+///
+/// Stripe retries an undelivered event for up to three days after the
+/// first attempt. This is the number the retention TTL has to clear. A
+/// key forgotten while this window is still open is not *stale*, it is
+/// *missing*: the redelivery finds no key, is answered `Accepted`, and
+/// the same subscription change is applied a second time.
+///
+/// It is also the line the store will not evict across — a key inside
+/// this window is never dropped to make room, whatever the ceiling
+/// says.
+pub const STRIPE_RETRY_WINDOW_SECS: i64 = 3 * 24 * 60 * 60;
+
+/// Retention TTL for one idempotency key: 72 h.
+///
+/// 72 h is the product decision, not a derived number. Note that it is
+/// *equal* to [`STRIPE_RETRY_WINDOW_SECS`] rather than longer than it:
+/// it covers the whole automatic retry window, and the last delivery of
+/// that window lands on the expiry boundary, where the key is already
+/// gone. `retention_ttl_covers_the_stripe_retry_window` and
+/// `a_key_outlives_the_stripe_retry_window_and_then_expires` are the
+/// two tests that pin that relationship; if Stripe's window is ever
+/// measured as longer than three days, the TTL has to move with it.
+pub const IDEMPOTENCY_TTL_SECS: i64 = 72 * 60 * 60;
+
+/// One second past the TTL: the first instant at which a key is dead.
+///
+/// Named rather than written as `IDEMPOTENCY_TTL_SECS + 1` at each use,
+/// because the boundary is a decision and it should be visible in one
+/// place. A key recorded at `t` is alive for every instant from `t`
+/// through `t + IDEMPOTENCY_TTL_SECS` inclusive, and dead from
+/// `t + IDEMPOTENCY_TTL_SECS + 1`.
+///
+/// The inclusive end is not an off-by-one to be tidied away. Since the
+/// TTL equals Stripe's redelivery window, `t + TTL` is the exact instant
+/// of the final delivery Stripe is entitled to make; forgetting the key
+/// there re-admits that delivery and charges the customer twice.
+///
+/// `cfg(test)` because only the tests need the name. The behaviour it
+/// describes is production code, and it is stated there as well -- at the
+/// `>= now_unix` sweep in [`IdempotencyStore::record_at`] and in
+/// [`IdempotencyStore::has_seen_at`]. Left ungated it would be a dead
+/// constant in every real build, which `-D warnings` rejects; this keeps
+/// the explanation attached to the boundary while letting only the tests
+/// pay for it.
+#[cfg(test)]
+const PAST_TTL: i64 = IDEMPOTENCY_TTL_SECS + 1;
+
+/// Default capacity ceiling on held keys.
+///
+/// 250 k keys against a 72 h TTL is a sustained live-key rate of about
+/// one event per 78 seconds before the ceiling is reached, so it is
+/// sized to be a tripwire for a traffic spike or a mis-set TTL rather
+/// than a number the steady state reaches. Crossing it is observable
+/// through [`IdempotencyStore::is_over_capacity`] and
+/// [`IdempotencyStore::overflow_admissions`]; it is not a condition
+/// that rejects writes.
+pub const DEFAULT_MAX_ENTRIES: usize = 250_000;
+
+/// Retention and capacity policy for an [`IdempotencyStore`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdempotencyPolicy {
+    /// How long a recorded key is retained, in seconds.
+    pub ttl_secs: i64,
+    /// The number of held keys above which the store reports itself
+    /// over capacity. Expired keys are always reclaimed first, so this
+    /// is reached only when every held key is still inside
+    /// [`IDEMPOTENCY_TTL_SECS`].
+    pub max_entries: usize,
+}
+
+impl Default for IdempotencyPolicy {
+    fn default() -> Self {
+        Self {
+            ttl_secs: IDEMPOTENCY_TTL_SECS,
+            max_entries: DEFAULT_MAX_ENTRIES,
+        }
+    }
+}
+
+/// The answer [`IdempotencyStore::record`] gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordOutcome {
+    /// The key was not on file. The caller must dispatch the event.
+    Fresh,
+    /// The key was on file and is still inside its TTL. The event is a
+    /// replay and must be dropped.
+    Duplicate,
+}
+
+/// One journal line: the key, and the Unix second it expires at.
+#[derive(Debug, Deserialize)]
+struct JournalRecord {
+    e: String,
+    t: String,
+    x: i64,
+}
+
+/// Append-only on-disk journal of recorded keys.
+///
+/// One JSON object per line, fsynced on every append, so an append that
+/// returned `Ok` is a key that survives a crash. A line that does not
+/// parse is a torn tail from a crash *during* an append — that append
+/// never returned `Ok`, so nobody was told the event was processed, and
+/// skipping the line is the safe direction.
+///
+/// The file is a single-writer log: it is per-process/per-host. A
+/// multi-instance deployment still wants this table in the shared
+/// database; what this buys is that a restart on one host cannot
+/// re-admit a charge.
+#[derive(Debug)]
+struct Journal {
+    path: PathBuf,
+    /// Records in the file, live or not. Compared against the live
+    /// count to decide when the log has accumulated enough dead lines
+    /// to be worth rewriting.
+    lines: u64,
+}
+
+impl Journal {
+    /// Append one key and fsync it. `Ok` means the record is durable.
+    fn append(&mut self, key: &(String, String), expires_at_unix: i64) -> Result<()> {
+        let mut line = serde_json::to_vec(&serde_json::json!({
+            "e": key.0,
+            "t": key.1,
+            "x": expires_at_unix,
+        }))
+        .map_err(|e| persist_error("encode idempotency journal record", e))?;
+        line.push(b'\n');
+
+        // Opened per append rather than held open: the append is a
+        // write plus an fsync either way, and a short-lived handle
+        // means a rotation or an operator replacing the file cannot
+        // leave this process writing into an unlinked inode.
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|e| persist_error("open idempotency journal", e))?;
+        f.write_all(&line)
+            .map_err(|e| persist_error("write idempotency journal", e))?;
+        f.sync_data()
+            .map_err(|e| persist_error("fsync idempotency journal", e))?;
+        self.lines = self.lines.saturating_add(1);
+        Ok(())
+    }
+
+    /// Path the compacted log is staged at before it replaces the
+    /// journal.
+    fn compaction_path(&self) -> PathBuf {
+        self.path.with_extension("compacting")
+    }
+}
+
+/// Live state behind the store's lock.
+#[derive(Debug, Default)]
+struct Inner {
+    /// `(event.id, tenant_id)` -> the Unix second the key expires at.
+    entries: HashMap<(String, String), i64>,
+    /// `None` for an in-memory store.
+    journal: Option<Journal>,
+    policy: IdempotencyPolicy,
+    /// How many keys were admitted while the store was over capacity.
+    /// Never resets, so it is a counter and not a gauge.
+    overflow_admissions: u64,
+}
+
+/// Idempotency store: `(event.id, tenant_id)` -> expiry, with a TTL, a
+/// capacity ceiling, an aging sweep, and optional durability.
+///
+/// Built either in memory ([`IdempotencyStore::new`], for tests and
+/// local wiring) or over an fsynced journal
+/// ([`IdempotencyStore::open`], for anything that must survive a
+/// restart).
 #[derive(Debug, Default)]
 pub struct IdempotencyStore {
-    seen: RwLock<HashSet<(String, String)>>,
+    inner: RwLock<Inner>,
 }
 
 impl IdempotencyStore {
-    /// Create an empty store.
+    /// Create an empty **in-memory** store with the default policy.
+    ///
+    /// This does not survive a restart: every key is lost when the
+    /// process exits, so the first delivery of every event after a
+    /// restart is answered `Accepted` and dispatched again. That is
+    /// correct for a test and wrong for the money path — wire
+    /// [`IdempotencyStore::open`] there.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns `true` if this is the first time we've seen the key.
-    ///
-    /// This is the deduplication primitive, and it is deliberately the
-    /// *only* way to ask "have I seen this?". The answer and the insert
-    /// are decided under one write lock, so a caller that branches on the
-    /// return value cannot lose the race. See [`IdempotencyStore::has_seen`]
-    /// for why the read variant is not safe to pair with this.
-    pub fn record(&self, event_id: &str, tenant_id: &str) -> bool {
-        let key = (event_id.to_owned(), tenant_id.to_owned());
-        let mut w = self.seen.write();
-        w.insert(key)
+    /// Create an empty **in-memory** store with an explicit policy.
+    #[must_use]
+    pub fn with_policy(policy: IdempotencyPolicy) -> Self {
+        Self {
+            inner: RwLock::new(Inner {
+                policy,
+                ..Inner::default()
+            }),
+        }
     }
 
-    /// Returns `true` if the `(event_id, tenant_id)` key was already
-    /// recorded.
+    /// Open (or create) the journal at `path` and load the keys still
+    /// inside their TTL. Keys already past their TTL are dropped and
+    /// the file is compacted if it was mostly dead.
+    ///
+    /// The file is created if absent. An unreadable or unwritable path
+    /// is an error rather than a silently empty store: a store that
+    /// cannot be read would answer `Fresh` for keys that are on disk,
+    /// which is the double-charge direction.
+    pub fn open(path: impl AsRef<Path>, policy: IdempotencyPolicy) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let now = now_unix();
+
+        let mut entries: HashMap<(String, String), i64> = HashMap::new();
+        let mut lines = 0_u64;
+        let text = match fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(persist_error("read idempotency journal", e)),
+        };
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(rec) = serde_json::from_str::<JournalRecord>(line) else {
+                // Torn tail: the append that was in flight never
+                // returned Ok, so no caller was told the event had been
+                // processed. Skipping is fail-safe here.
+                continue;
+            };
+            lines = lines.saturating_add(1);
+            if rec.x > now {
+                entries.insert((rec.e, rec.t), rec.x);
+            }
+        }
+
+        let store = Self {
+            inner: RwLock::new(Inner {
+                entries,
+                journal: Some(Journal { path, lines }),
+                policy,
+                overflow_admissions: 0,
+            }),
+        };
+        {
+            let mut w = store.inner.write();
+            let live = w.entries.len() as u64;
+            let mostly_dead = w
+                .journal
+                .as_ref()
+                .is_some_and(|j| j.lines > live.saturating_add(8));
+            if mostly_dead {
+                compact_locked(&mut w, now)?;
+            }
+        }
+        Ok(store)
+    }
+
+    /// Record `key` at the current time. `Ok(Fresh)` means the caller
+    /// must dispatch; `Ok(Duplicate)` means it must not.
+    ///
+    /// Errors when the key could not be made durable. That is
+    /// deliberately fail-closed: the key is not admitted in memory
+    /// either, so nothing is dispatched and Stripe's retry is still
+    /// processable. The reverse order — admit, then fail to persist —
+    /// would hand out an `Accepted` for an event a restart would let
+    /// through again.
+    pub fn record(&self, event_id: &str, tenant_id: &str) -> Result<RecordOutcome> {
+        self.record_at(event_id, tenant_id, now_unix())
+    }
+
+    /// [`IdempotencyStore::record`] with the caller's clock. The
+    /// primitive the time-dependent tests drive.
+    pub fn record_at(
+        &self,
+        event_id: &str,
+        tenant_id: &str,
+        now_unix: i64,
+    ) -> Result<RecordOutcome> {
+        let key = (event_id.to_owned(), tenant_id.to_owned());
+        let mut w = self.inner.write();
+
+        // Aging sweep, before anything else: expired keys are the only
+        // ones that may be dropped without weakening dedup, so this is
+        // the single place the store reclaims. Sweeping on the write
+        // path is enough — writes are the only way the table grows.
+        //
+        // `>= now_unix`, not `> now_unix`: the boundary instant belongs
+        // to the key, not to the clock. Stripe may redeliver at exactly
+        // `recorded_at + STRIPE_RETRY_WINDOW_SECS`, and since the TTL is
+        // *equal* to that window, that instant is also `expires_at`.
+        // Reclaiming there forgets a key while its own retry window is
+        // still open, which is the double charge this whole table exists
+        // to prevent. Holding the key one second longer costs one map
+        // entry; dropping it one second early costs a customer money.
+        w.entries.retain(|_, expires_at| *expires_at >= now_unix);
+
+        // A key that survived the sweep is live, so answering Duplicate
+        // here is safe. The check and the insert are both under this one
+        // write lock, which is the property that stops two deliveries
+        // of one event from both being told `Fresh`.
+        if w.entries.contains_key(&key) {
+            return Ok(RecordOutcome::Duplicate);
+        }
+
+        let expires_at = now_unix.saturating_add(w.policy.ttl_secs);
+        if let Some(journal) = w.journal.as_mut() {
+            journal.append(&key, expires_at)?;
+        }
+        w.entries.insert(key, expires_at);
+
+        if w.entries.len() > w.policy.max_entries {
+            // Past the ceiling with nothing expired to reclaim. The
+            // alternatives are both worse: refusing is a permanent
+            // outage on the one route that receives every event, and
+            // evicting a live key re-admits a retry Stripe is still
+            // entitled to send. So admit, and make it visible.
+            w.overflow_admissions = w.overflow_admissions.saturating_add(1);
+        }
+
+        // Compaction is housekeeping, not part of admitting the key: the
+        // append above is already durable, so a compaction that fails
+        // must not turn a safe `Fresh` into an error. The log stays
+        // correct (extra dead lines are skipped on the next load) and
+        // `compact` reports the failure to whoever calls it.
+        let live = w.entries.len() as u64;
+        let mostly_dead = w
+            .journal
+            .as_ref()
+            .is_some_and(|j| j.lines > live.saturating_mul(2).saturating_add(64));
+        if mostly_dead {
+            if let Err(e) = compact_locked(&mut w, now_unix) {
+                tracing::warn!(error = %e, "idempotency journal compaction failed");
+            }
+        }
+        Ok(RecordOutcome::Fresh)
+    }
+
+    /// Returns `true` if the `(event_id, tenant_id)` key was recorded
+    /// and is still inside its TTL at the current time.
+    ///
+    /// A key is inside its TTL at the boundary second itself; see the
+    /// sweep in [`IdempotencyStore::record_at`] for why that boundary is
+    /// closed towards the key rather than towards the clock.
     ///
     /// **Not a safe way to deduplicate.** This takes the read lock and
     /// releases it before the caller does anything else, so
@@ -124,28 +475,136 @@ impl IdempotencyStore {
     /// tests use it.
     #[must_use]
     pub fn has_seen(&self, event_id: &str, tenant_id: &str) -> bool {
-        self.seen
-            .read()
-            .contains(&(event_id.to_owned(), tenant_id.to_owned()))
+        self.has_seen_at(event_id, tenant_id, now_unix())
     }
 
-    /// Number of keys currently held. Diagnostics only — see
+    /// [`IdempotencyStore::has_seen`] with the caller's clock. A key
+    /// that is on file but past its expiry reads as unseen, which is the
+    /// same answer [`IdempotencyStore::record_at`] would give.
+    #[must_use]
+    pub fn has_seen_at(&self, event_id: &str, tenant_id: &str, now_unix: i64) -> bool {
+        // `RwLock<Inner>`, so the guard derefs to `Inner` and the map is a
+        // *field* of that -- not the guard's own target. Both hops are
+        // needed: `self.inner.read().get(..)` and `held.get(..)` are both
+        // E0599, for different reasons.
+        let held = self.inner.read();
+        held.entries
+            .get(&(event_id.to_owned(), tenant_id.to_owned()))
+            .is_some_and(|expires_at| *expires_at >= now_unix)
+    }
+
+    /// Number of keys currently held, expired-but-unswept ones
+    /// included. Diagnostics only — see
     /// [`IdempotencyStore::has_seen`] for why this is not a dedup path.
     ///
-    /// Worth watching: the store has no retention policy, so this only ever
-    /// grows. It is the number to alert on before a long-running process
-    /// starts losing its dedup history (and, if a bound is added, the number
-    /// that bound applies to).
+    /// It is bounded by the arrival rate times the TTL, and the sweep
+    /// keeps the dead ones from accumulating; the ceiling it is compared
+    /// against is [`IdempotencyStore::capacity`].
     #[must_use]
     pub fn len(&self) -> usize {
-        self.seen.read().len()
+        self.inner.read().entries.len()
     }
 
     /// `true` when no keys are held. Pairs with [`IdempotencyStore::len`].
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.seen.read().is_empty()
+        self.inner.read().entries.is_empty()
     }
+
+    /// The configured ceiling. See [`IdempotencyPolicy::max_entries`].
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.inner.read().policy.max_entries
+    }
+
+    /// `true` when the live key count is above the ceiling. The
+    /// condition to alert on: it means the arrival rate against the TTL
+    /// is higher than the ceiling was sized for, not that writes are
+    /// being refused (they are not).
+    #[must_use]
+    pub fn is_over_capacity(&self) -> bool {
+        let w = self.inner.read();
+        w.entries.len() > w.policy.max_entries
+    }
+
+    /// How many keys have been admitted while over capacity since the
+    /// store was created. Monotonic, so a rate over an interval is the
+    /// difference of two readings.
+    #[must_use]
+    pub fn overflow_admissions(&self) -> u64 {
+        self.inner.read().overflow_admissions
+    }
+
+    /// Rewrite the journal with only the keys still inside their TTL,
+    /// and drop the expired ones. The write path calls this on its own
+    /// once the log is mostly dead lines; it is public so an operator
+    /// can force it and see the failure.
+    pub fn compact(&self) -> Result<()> {
+        let now = now_unix();
+        let mut w = self.inner.write();
+        compact_locked(&mut w, now)
+    }
+}
+
+/// Drop every expired key and rewrite the journal without them. A
+/// no-op for an in-memory store.
+fn compact_locked(inner: &mut Inner, now_unix: i64) -> Result<()> {
+    let Some(journal) = inner.journal.as_ref() else {
+        return Ok(());
+    };
+    // Same boundary as the write-path sweep, and for the same reason: a key
+    // is alive through `expires_at` and dead after it. Compaction that
+    // disagreed with the sweep would rewrite the journal without a key
+    // the sweep would still have kept, making an in-process decision
+    // unreproducible from disk.
+    inner
+        .entries
+        .retain(|_, expires_at| *expires_at >= now_unix);
+
+    let mut body: Vec<u8> = Vec::new();
+    for ((event_id, tenant_id), expires_at) in &inner.entries {
+        serde_json::to_writer(
+            &mut body,
+            &serde_json::json!({ "e": event_id, "t": tenant_id, "x": expires_at }),
+        )
+        .map_err(|e| persist_error("encode idempotency journal record", e))?;
+        body.push(b'\n');
+    }
+
+    let tmp = journal.compaction_path();
+    let mut staged = fs::File::create(&tmp)
+        .map_err(|e| persist_error("stage compacted idempotency journal", e))?;
+    staged
+        .write_all(&body)
+        .map_err(|e| persist_error("write compacted idempotency journal", e))?;
+    // fsync the staged copy before the rename, so the rename cannot
+    // publish a journal whose contents are still only in the page cache.
+    staged
+        .sync_all()
+        .map_err(|e| persist_error("fsync compacted idempotency journal", e))?;
+    drop(staged);
+    fs::rename(&tmp, &journal.path)
+        .map_err(|e| persist_error("publish compacted idempotency journal", e))?;
+
+    if let Some(journal) = inner.journal.as_mut() {
+        journal.lines = inner.entries.len() as u64;
+    }
+    Ok(())
+}
+
+/// Current wall clock in Unix seconds.
+fn now_unix() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// Map a persistence failure onto the crate error type.
+///
+/// The context says which step failed; the cause is the OS or serde
+/// message. Event ids and file paths are deliberately not echoed — this
+/// crate does not put request input into errors, and the caller can
+/// find both from the request it already holds.
+fn persist_error<E: std::fmt::Display>(context: &str, cause: E) -> BillingError {
+    BillingError::IdempotencyPersist(format!("{context}: {cause}"))
 }
 
 /// Trait alias for "something that can receive a `BillingEvent`".
@@ -286,8 +745,17 @@ impl WebhookHandler {
         // Note `has_seen` below is NOT the dedup path and must not be used
         // as one. It is a separate read lock, so pairing it with `record`
         // reintroduces the window this line removed.
-        if !self.idem.record(&event_id, &tenant_id) {
-            return Ok(WebhookOutcome::Duplicate);
+        //
+        // A persistence failure propagates as an error, and the event is
+        // NOT dispatched. The caller turns that into a 5xx, Stripe keeps
+        // retrying, and the key is still absent, so the retry is
+        // processed. Dispatching an event we could not record would be
+        // the worse of the two: nothing would stop the same event being
+        // processed again after a restart.
+        match self.idem.record(&event_id, &tenant_id) {
+            Ok(RecordOutcome::Duplicate) => return Ok(WebhookOutcome::Duplicate),
+            Ok(RecordOutcome::Fresh) => {}
+            Err(e) => return Err(e),
         }
         // Audit emission goes through ada-m11-rbac-collab in the
         // api-gateway wiring; here we only emit the BillingEvent.
@@ -454,12 +922,423 @@ mod tests {
     #[test]
     fn idempotency_store_basics() {
         let s = IdempotencyStore::new();
-        assert!(s.record("evt_a", "tenant_a"));
-        assert!(!s.record("evt_a", "tenant_a"));
+        assert_eq!(s.record("evt_a", "tenant_a").unwrap(), RecordOutcome::Fresh);
+        assert_eq!(
+            s.record("evt_a", "tenant_a").unwrap(),
+            RecordOutcome::Duplicate
+        );
         assert!(s.has_seen("evt_a", "tenant_a"));
         assert!(!s.has_seen("evt_b", "tenant_a"));
         assert!(!s.is_empty());
         assert_eq!(s.len(), 1);
+    }
+
+    // -----------------------------------------------------------------
+    // Retention
+    // -----------------------------------------------------------------
+
+    /// A scratch directory for the journal tests, removed on drop.
+    ///
+    /// Built by hand because `tempfile` is not a dependency of this
+    /// crate; `ada-m01-acquisition/tests/integration.rs` takes the same
+    /// trade-off for the same reason.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut dir = std::env::temp_dir();
+            dir.push(format!("ada-billing-idem-{tag}-{}-{n}", std::process::id()));
+            fs::create_dir_all(&dir).expect("scratch dir");
+            Self(dir)
+        }
+
+        fn journal(&self) -> PathBuf {
+            self.0.join("idempotency.jsonl")
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const T0: i64 = 1_700_000_000;
+
+    /// The TTL and the retry window are related by a number, and the
+    /// number is the whole safety argument: a key that expires while
+    /// Stripe is still entitled to redeliver the event is a
+    /// double charge. Pin both values, and pin that the TTL is exactly
+    /// the window.
+    ///
+    /// The TTL is 72 h and Stripe's automatic redelivery window is
+    /// three days, so the TTL is *equal* to the window, not longer. It
+    /// covers the window, and the last delivery inside the window lands
+    /// on the expiry boundary — which is the residual risk this test
+    /// documents rather than hides.
+    ///
+    /// Equality rather than "at least" is deliberate: a TTL longer than
+    /// the window would hold every key past the last moment Stripe can
+    /// redeliver within, which costs memory and buys nothing.
+    #[test]
+    fn retention_ttl_equals_the_stripe_retry_window() {
+        assert_eq!(
+            STRIPE_RETRY_WINDOW_SECS,
+            3 * 24 * 60 * 60,
+            "the retry window this code accounts for is Stripe's three days \
+             of automatic redelivery"
+        );
+        assert_eq!(
+            IDEMPOTENCY_TTL_SECS,
+            72 * 60 * 60,
+            "the TTL is the 72 h product decision; changing it is a product \
+             change, not a refactor"
+        );
+        // The relationship, asserted directly.
+        //
+        // This started life as `assert!(IDEMPOTENCY_TTL_SECS >=
+        // STRIPE_RETRY_WINDOW_SECS)`, which compares two `const`s, so the
+        // whole condition is a compile-time constant and clippy's
+        // `assertions_on_constants` rejects it. The two `assert_eq!`
+        // above already pin each constant's value on its own, so this
+        // third line exists purely as a tripwire: it fails if someone
+        // moves one constant without moving the other and breaks the
+        // safety argument between them.
+        //
+        // `assert_eq!` states the same relationship without asking clippy
+        // to evaluate a constant boolean, and it is the *stronger*
+        // claim -- equality, not merely ">=". That is what the module
+        // documents: the TTL is exactly Stripe's window, not longer than
+        // it. A TTL above the window would mean a key outliving the
+        // period Stripe can redeliver within, which is memory held for
+        // nothing and a discrepancy an operator would have to notice by
+        // reading two constants side by side.
+        assert_eq!(
+            IDEMPOTENCY_TTL_SECS, STRIPE_RETRY_WINDOW_SECS,
+            "a TTL that differs from the retry window re-admits or outlives \
+             Stripe retries: TTL {IDEMPOTENCY_TTL_SECS}s vs \
+             window {STRIPE_RETRY_WINDOW_SECS}s"
+        );
+    }
+
+    /// The behavioural half of the same claim: a key recorded at the
+    /// first attempt is still held at the last instant of Stripe's
+    /// retry window, and is gone once the TTL closes. The constants
+    /// test alone would still pass if the sweep were wrong.
+    #[test]
+    fn a_key_outlives_the_stripe_retry_window_and_then_expires() {
+        let s = IdempotencyStore::new();
+        assert_eq!(
+            s.record_at("evt_1", "t1", T0).unwrap(),
+            RecordOutcome::Fresh
+        );
+
+        // The final delivery Stripe is entitled to make.
+        assert_eq!(
+            s.record_at("evt_1", "t1", T0 + STRIPE_RETRY_WINDOW_SECS)
+                .unwrap(),
+            RecordOutcome::Duplicate,
+            "a key must not be forgotten while Stripe may still redeliver it"
+        );
+
+        // One second past the boundary. At exactly `expires_at` the key is
+        // still held -- see `PAST_TTL`.
+        assert_eq!(
+            s.record_at("evt_1", "t1", T0 + PAST_TTL).unwrap(),
+            RecordOutcome::Fresh,
+            "the key must be reclaimable once its TTL has closed"
+        );
+        assert_eq!(s.len(), 1, "the sweep must not leave the lapsed key behind");
+    }
+
+    /// Aging cleanup: keys past their TTL are reclaimed on the write
+    /// path, so a store that sees a steady stream of new events holds
+    /// one TTL's worth of keys and not all of them.
+    #[test]
+    fn the_sweep_reclaims_expired_keys() {
+        let s = IdempotencyStore::new();
+        for i in 0..3 {
+            assert_eq!(
+                s.record_at(&format!("evt_{i}"), "t", T0).unwrap(),
+                RecordOutcome::Fresh
+            );
+        }
+        assert_eq!(s.len(), 3, "precondition: three keys held");
+
+        // One new event, arriving after the three lapsed.
+        assert_eq!(
+            s.record_at("evt_new", "t", T0 + PAST_TTL).unwrap(),
+            RecordOutcome::Fresh
+        );
+
+        assert_eq!(
+            s.len(),
+            1,
+            "the three lapsed keys must be reclaimed, leaving only the new one"
+        );
+        for i in 0..3 {
+            assert!(
+                !s.has_seen_at(&format!("evt_{i}"), "t", T0 + PAST_TTL),
+                "a lapsed key must not be retained"
+            );
+        }
+    }
+
+    /// Capacity ceiling, first half: reaching it reclaims expired keys
+    /// rather than refusing. A store that answered `Err` here would
+    /// fail closed on the route that receives every Stripe event —
+    /// a permanent outage, not a degraded mode.
+    #[test]
+    fn at_capacity_the_store_reclaims_rather_than_refusing() {
+        let s = IdempotencyStore::with_policy(IdempotencyPolicy {
+            ttl_secs: IDEMPOTENCY_TTL_SECS,
+            max_entries: 2,
+        });
+        assert_eq!(s.record_at("evt_a", "t", T0).unwrap(), RecordOutcome::Fresh);
+        assert_eq!(s.record_at("evt_b", "t", T0).unwrap(), RecordOutcome::Fresh);
+        assert_eq!(s.len(), 2, "precondition: the ceiling is reached");
+        assert!(!s.is_over_capacity(), "at the ceiling is not over it");
+
+        // Both of the held keys have lapsed by now, so there is room
+        // again without dropping anything that is still in use.
+        for id in ["evt_c", "evt_d"] {
+            assert_eq!(
+                s.record_at(id, "t", T0 + PAST_TTL).unwrap(),
+                RecordOutcome::Fresh,
+                "a write at the ceiling must succeed once there is \
+                 something expired to reclaim"
+            );
+        }
+        assert_eq!(s.len(), 2, "the ceiling must be held by reclaiming");
+        assert!(!s.is_over_capacity());
+        assert_eq!(
+            s.overflow_admissions(),
+            0,
+            "nothing had to be admitted over it"
+        );
+    }
+
+    /// Capacity ceiling, second half: when every held key is still
+    /// inside the retry window there is nothing safe to reclaim, and
+    /// the store must still accept the event. Refusing would be a
+    /// permanent outage; evicting a live key would hand the same event
+    /// to the downstream sink twice. It admits, and counts.
+    #[test]
+    fn a_full_store_of_live_keys_admits_and_counts_rather_than_refusing() {
+        let s = IdempotencyStore::with_policy(IdempotencyPolicy {
+            ttl_secs: IDEMPOTENCY_TTL_SECS,
+            max_entries: 2,
+        });
+        assert_eq!(s.record_at("evt_a", "t", T0).unwrap(), RecordOutcome::Fresh);
+        assert_eq!(s.record_at("evt_b", "t", T0).unwrap(), RecordOutcome::Fresh);
+
+        assert_eq!(
+            s.record_at("evt_c", "t", T0).unwrap(),
+            RecordOutcome::Fresh,
+            "a full store must not fail closed on the webhook path"
+        );
+        assert!(s.is_over_capacity(), "the ceiling must be reportable");
+        assert_eq!(s.overflow_admissions(), 1);
+        assert_eq!(s.len(), 3, "the admission must actually be held");
+
+        // And the keys it kept are still doing their job.
+        for id in ["evt_a", "evt_b", "evt_c"] {
+            assert_eq!(
+                s.record_at(id, "t", T0 + STRIPE_RETRY_WINDOW_SECS - 1)
+                    .unwrap(),
+                RecordOutcome::Duplicate,
+                "{id} is still inside the retry window and must dedupe"
+            );
+        }
+    }
+
+    /// Durability: the reason the journal exists. A key written by one
+    /// store instance is read back by the next one over the same path,
+    /// so a restart cannot re-allow a charge.
+    #[test]
+    fn a_recorded_key_survives_a_restart() {
+        let scratch = Scratch::new("restart");
+        let journal = scratch.journal();
+        // Real time: `open` drops keys that are already past their TTL
+        // relative to the wall clock, so a synthetic T0 would be
+        // reclaimed on load and the test would pass for the wrong reason.
+        let t0 = now_unix();
+
+        {
+            let first = IdempotencyStore::open(&journal, IdempotencyPolicy::default()).unwrap();
+            assert_eq!(
+                first.record_at("evt_1", "t1", t0).unwrap(),
+                RecordOutcome::Fresh
+            );
+            assert!(journal.exists(), "the append must have created the file");
+        }
+
+        let reopened = IdempotencyStore::open(&journal, IdempotencyPolicy::default()).unwrap();
+        assert_eq!(reopened.len(), 1, "the key must be read back off disk");
+        assert_eq!(
+            reopened.record_at("evt_1", "t1", t0).unwrap(),
+            RecordOutcome::Duplicate,
+            "a restart must not re-allow a duplicate charge"
+        );
+    }
+
+    /// The journal does not grow without bound: compaction drops the
+    /// dead lines, so the file on disk tracks the live set.
+    #[test]
+    fn compaction_keeps_the_journal_to_the_live_set() {
+        let scratch = Scratch::new("compaction");
+        let journal = scratch.journal();
+        let s = IdempotencyStore::open(&journal, IdempotencyPolicy::default()).unwrap();
+        let t0 = now_unix();
+
+        for i in 0..10 {
+            s.record_at(&format!("evt_{i}"), "t", t0).unwrap();
+        }
+        // A later wave, long enough after the first that the write-path
+        // sweep has something to reclaim.
+        for i in 10..20 {
+            s.record_at(&format!("evt_{i}"), "t", t0 + PAST_TTL)
+                .unwrap();
+        }
+
+        assert_eq!(s.len(), 10, "only the second wave is live");
+        s.compact().unwrap();
+        let lines = fs::read_to_string(&journal)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count();
+        assert_eq!(
+            lines, 10,
+            "after compaction the journal must hold only the live keys"
+        );
+    }
+
+    /// Fail-closed on the write path. A journal that cannot be written
+    /// must produce an error and must not admit the key in memory
+    /// either — a key in memory that is not on disk is a key a restart
+    /// forgets, which is the double-charge direction.
+    #[test]
+    fn a_journal_that_cannot_be_written_fails_closed() {
+        let scratch = Scratch::new("unwritable");
+        let journal = scratch.journal();
+        let s = IdempotencyStore::open(&journal, IdempotencyPolicy::default()).unwrap();
+        let t0 = now_unix();
+        assert_eq!(
+            s.record_at("evt_ok", "t", t0).unwrap(),
+            RecordOutcome::Fresh
+        );
+
+        // Put a directory where the journal is. Opening it for append
+        // then fails, on every platform this runs on.
+        fs::remove_file(&journal).unwrap();
+        fs::create_dir(&journal).unwrap();
+
+        let err = s
+            .record_at("evt_2", "t", t0)
+            .expect_err("an unpersistable key must not be admitted");
+        assert!(
+            matches!(err, BillingError::IdempotencyPersist(_)),
+            "got {err}"
+        );
+        assert!(
+            !s.has_seen_at("evt_2", "t", t0),
+            "a key that failed to persist must not be held in memory"
+        );
+    }
+
+    /// The same fail-closed rule at the level that matters: a delivery
+    /// the store cannot record is not dispatched, and the retry is
+    /// still processable.
+    ///
+    /// The failing delivery uses a **second event id** on purpose. The
+    /// first version replayed `evt_1`, and that can never reach the
+    /// persistence path at all: `handle` calls `record`, the key is
+    /// already in the table from the first delivery, so it answers
+    /// `Duplicate` before the journal is ever touched. The test passed
+    /// CI for a whole run only because CI could not get past clippy --
+    /// and when it did run, it failed with `Duplicate` instead of the
+    /// `IdempotencyPersist` it was asserting.
+    ///
+    /// A duplicate short-circuiting a broken disk is not a bug: nothing
+    /// was dispatched, which is what this test cares about. But it
+    /// proves nothing about the rule being tested. A *new* event id is
+    /// what forces the store down the record path and makes the
+    /// journal write fail for real.
+    #[test]
+    fn a_delivery_that_cannot_be_recorded_is_not_dispatched() {
+        let scratch = Scratch::new("handle-fail");
+        let journal = scratch.journal();
+        let idem =
+            Arc::new(IdempotencyStore::open(&journal, IdempotencyPolicy::default()).unwrap());
+        let cfg = Arc::new(Config {
+            stripe_secret_key: "sk_test_dummy".into(),
+            stripe_webhook_secret: "whsec".into(),
+            stripe_api_version: "2025-08-27.basil".into(),
+            stripe_portal_return_url: None,
+            stripe_base_url: "https://api.stripe.com/v1".into(),
+        });
+        let h = WebhookHandler::new(cfg, Arc::clone(&idem));
+        let sink = Arc::new(CaptureSink(std::sync::Mutex::new(Vec::new())));
+        let first = serde_json::to_vec(&evt(
+            "evt_1",
+            "invoice.paid",
+            "018f0000-0000-4000-8000-000000000001",
+            "in_1",
+        ))
+        .unwrap();
+        let second = serde_json::to_vec(&evt(
+            "evt_2",
+            "invoice.paid",
+            "018f0000-0000-4000-8000-000000000002",
+            "in_2",
+        ))
+        .unwrap();
+
+        assert_eq!(h.handle(&first, &*sink).unwrap(), WebhookOutcome::Accepted);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+
+        // Replace the journal file with a directory of the same name, so
+        // opening it for append fails and no key can be made durable.
+        fs::remove_file(&journal).unwrap();
+        fs::create_dir(&journal).unwrap();
+
+        let err = h
+            .handle(&second, &*sink)
+            .expect_err("a delivery that cannot be recorded must not be accepted");
+        assert!(
+            matches!(err, BillingError::IdempotencyPersist(_)),
+            "got {err}"
+        );
+        assert_eq!(
+            sink.0.lock().unwrap().len(),
+            1,
+            "the undeliverable event must not have been dispatched"
+        );
+
+        // The second half of the rule, which the test used to claim in
+        // its doc comment and never assert: because the key was never
+        // recorded, the retry is still processable once the store works
+        // again. If `record` had inserted the key before the journal
+        // write failed, this delivery would come back `Duplicate` and
+        // the event would be silently lost forever.
+        fs::remove_dir(&journal).unwrap();
+        let recovered = h
+            .handle(&second, &*sink)
+            .expect("the retry must be processable once the store works");
+        assert_eq!(
+            recovered,
+            WebhookOutcome::Accepted,
+            "the retry of an event that was never recorded must be \
+             processed, not swallowed as a duplicate"
+        );
+        assert_eq!(
+            sink.0.lock().unwrap().len(),
+            2,
+            "the retry must reach the sink exactly once"
+        );
     }
 
     /// The dedup decision and the dispatch have to be serialized with each

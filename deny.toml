@@ -84,6 +84,22 @@ allow = [
   # ada-m12-canvas-editor's bevy_egui feature.
   "OFL-1.1",
   "LicenseRef-UFL-1.0",
+  # xxhash-rust 0.8, a non-optional dependency of redis 1.7 (it hashes
+  # `SCRIPT LOAD` payloads, so it cannot be feature-gated off), declares
+  # BSL-1.0 -- the Boost Software License 1.0. That is OSI-approved and
+  # permissive: it grants use, modification and redistribution, carries a
+  # patent grant, and imposes no copyleft, no source-disclosure and no
+  # network-use obligation. In obligation terms it sits with MIT, which
+  # this list already accepts.
+  #
+  # Listed rather than silenced, for the same reason as the two entries
+  # above it: an unfamiliar licence in a dependency is a decision to put
+  # on record, not a failure to be suppressed. This one arrived with
+  # `redis`, which is the shared session store the gateway's
+  # `AuthContext::bootstrap` connects to and refuses to start without --
+  # dropping it to avoid this entry would mean giving up the
+  # cross-replica session validity the whole change exists for.
+  "BSL-1.0",
 ]
 confidence-threshold = 0.8
 

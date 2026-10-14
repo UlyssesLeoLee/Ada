@@ -1,5 +1,12 @@
 # Privacy Policy — gm-console / Ada Platform
 
+> **DRAFT — NOT PUBLISHED.** This policy asserts an effective date of
+> 2026-09-19, but several of its claims are contradicted by the repository
+> itself (see §8 Security, corrected in this revision) and the contact
+> addresses below are not published anywhere in this repository. Do not
+> publish until a monitored contact route exists and §8 is re-derived from
+> what the software actually does.
+
 **Last updated**: 2026-09-19
 **Effective date**: 2026-09-19
 
@@ -63,13 +70,35 @@ To exercise any of these rights, contact: `privacy@kanvas.dev`
 
 ## 8. Security
 
-We implement industry-standard security controls:
+Controls this repository can evidence:
 
-- TLS 1.3 in transit
-- AES-256 at rest
-- Role-based access control + tenant middleware (RFC 8693)
-- Audit logs retained for 365 days
-- SOC 2 Type II controls (in progress)
+- Role-based access control with a tenant middleware layer
+- Audit logging (see `observability/`, and the per-run remediation audit trail)
+
+Controls this repository does **not** evidence, previously asserted here
+without qualification:
+
+- ~~TLS 1.3 in transit~~ — no TLS is configured anywhere in `deploy/`.
+  There is no Ingress and the Service is `ClusterIP`, so termination is
+  the operator's choice and outside this repository. The in-cluster Redis
+  link is documented as explicitly unauthenticated and unencrypted
+  (`deploy/infra/ada-session-redis.yaml`).
+- ~~AES-256 at rest~~ — no volume encryption is configured. This is an
+  operator/CSI concern, not something this repository sets.
+- ~~Audit logs retained for 365 days~~ — the shipped retention is **30
+  days** (`observability/loki/loki-config.yaml`). 365 days appears only
+  as an `Enterprise` plan entitlement in `crates/ada-billing/src/plan.rs`,
+  and there is no paid tier to grant it.
+- ~~SOC 2 Type II controls (in progress)~~ — there is no SOC 2 programme,
+  no auditor engagement, and no managed offering to audit.
+  `docs/commercial/PRESS_KIT.md` records the managed offering as roadmap,
+  which makes this line and that one mutually exclusive.
+
+The "RFC 8693" attribution on the access-control line was also wrong:
+RFC 8693 is *OAuth 2.0 Token Exchange*. Token exchange is explicitly
+unimplemented in this codebase (`crates/ada-identity/src/oidc.rs` returns
+`token exchange not implemented`). The same citation appears in
+`crates/ada-identity/src/session.rs` and should be reviewed separately.
 
 ## 9. Children
 

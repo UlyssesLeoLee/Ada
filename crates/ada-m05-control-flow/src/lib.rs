@@ -22,7 +22,7 @@
 //! - 5-variant [`ExecutorError`] (StepNotFound,
 //!   ConditionError, MaxRecursionExceeded, Timeout,
 //!   BackendError)
-//! - 10 unit tests + 4 integration tests
+//! - 36 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
@@ -37,11 +37,11 @@
 //!   written to a store)
 //! - Honor distributed-trace context propagation
 //!
-//! See `docs/modules/M-05-control-flow.md` (DOC-MOD-005)
+//! See `docs/modules/M-05-control-flow-executor.md` (DOC-MOD-005)
 //! for the full design.
 //!
 //! 関連 IPA フェーズ: 22-52 (基本設計/詳細設計), 53-58 (実装), 59-95 (試験)
-//! 設計書: docs/modules/M-05-control-flow.md (DOC-MOD-005)
+//! 設計書: docs/modules/M-05-control-flow-executor.md (DOC-MOD-005)
 
 #![allow(missing_docs)]
 #![allow(rust_2018_idioms)]

@@ -40,5 +40,7 @@ groups:
             {{ $value | humanizePercentage }}). Consider
             raising requests/limits or scaling out the
             deployment consuming this host.
-          runbook: "https://wiki.example/runbooks/cpu-high"
+          # See app_down.yml: `wiki.example` is an RFC 2606 reserved
+          # host and never resolves. No external runbook wiki exists.
+          runbook: "docs/observability/07-alert-policy.md"
           dashboard: "http://localhost:3000/d/app-overview"

@@ -50,4 +50,4 @@ poller, SQLx CDC connector, Kafka consumer, see
 
 ## 設計書
 
-`docs/modules/M-01-acquisition.md` (DOC-MOD-001)
+`docs/modules/M-01-acquisition-adapter.md` (DOC-MOD-001)

@@ -14,7 +14,7 @@
 //! |                      | registry policy chose to reject the update.             |
 //! | `BackendError`       | The optional event-bus publish failed.                  |
 //!
-//! See [`DOC-MOD-014`](../docs/modules/M-14-module-registry.md)
+//! See [`DOC-MOD-014`](../../../docs/modules/M-14-module-registry.md)
 //! §3.4 for the full validation pipeline.
 
 use thiserror::Error;

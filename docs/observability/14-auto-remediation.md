@@ -392,14 +392,15 @@ runbook で `channel: "#ada-ops"` と書くと、executor が `SLACK_WEBHOOK_OPS
 
 ### 8.3 PL/pgSQL テスト (`db/tests/V003__phase8_remediation_test.sql`)
 
-7 ケース (SAVEPOINT 単位):
+8 ケース (SAVEPOINT 単位):
 
 - t_tables_exist
 - t_record_success (succeeded → cooldown 行も書かれる)
 - t_record_failure (failed → cooldown 行は書かれない)
 - t_record_cooldown_idempotent (UPSERT で 1 行のみ)
 - t_record_invalid (空 / 非法 outcome / 負 retry / 0 cooldown)
-- t_check_cooldown_active / inactive
+- t_check_cooldown_active
+- t_check_cooldown_inactive
 - t_outcome_chk (CHECK 制約の挙動)
 
 `make -C db test` で実行。

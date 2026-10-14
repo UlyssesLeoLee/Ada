@@ -4,7 +4,7 @@
 //! ## v0.1.0 scope (B4)
 //!
 //! This crate is a **minimum skeleton** for the multi-tenant
-//! isolation layer defined in [`DOC-MOD-010`](../docs/modules/M-10-tenant-middleware.md).
+//! isolation layer defined in [`DOC-MOD-010`](../../../docs/modules/M-10-tenant-middleware.md).
 //! The v0.1.0 surface is:
 //!
 //! - [`TenantContext`] — per-request `(tenant_id, user_id, request_id)`
@@ -22,7 +22,7 @@
 //!   (実装着手判定) is approved.
 //! - 5-variant [`TenantError`] (MissingContext, InvalidTenant,
 //!   CrossTenantAccess, ContextNotInitialized, BackendError)
-//! - 8 unit tests + 4 integration tests
+//! - 28 unit tests + 4 integration tests
 //!
 //! ## What v0.1.0 explicitly does **not** do
 //!
