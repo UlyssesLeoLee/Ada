@@ -28,7 +28,7 @@ All three images are referenced, and none of them can be pulled:
 
 ```text
 ghcr.io/ulyssesleolee/ada-api-gateway:v0.1.0
-ghcr.io/ulyssesleolee/ada-remediation:v0.7.1
+ghcr.io/ulyssesleolee/ada-remediation:v0.1.0
 ghcr.io/ulyssesleolee/gm-console:v0.1.0
 ```
 

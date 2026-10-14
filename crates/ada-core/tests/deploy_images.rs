@@ -28,7 +28,7 @@
 //! An obvious alternative is to strip the registry from the manifests and
 //! let `images:` supply it, so there is literally one place naming the
 //! registry. That was rejected: `kubectl apply -f <file>` bypasses the
-//! kustomization entirely, and a bare `ada-remediation:v0.7.1` then
+//! kustomization entirely, and a bare `ada-remediation:v0.1.0` then
 //! resolves against the node's default registry — a *silently* wrong
 //! image rather than an obviously missing one. Keeping the full reference
 //! in the manifest keeps the direct-apply path correct, and the
@@ -38,13 +38,25 @@
 //!
 //! ## What is NOT checked here, and why
 //!
-//! Whether the images exist, or can be built, is not checked. There is no
-//! Dockerfile in this repository and no CI job that builds or pushes one,
-//! so all three references currently resolve to nothing and every pod
-//! lands in `ImagePullBackOff`. That is a real and separate defect; a
-//! gate that asserted it would be a gate that fails on every commit
-//! until someone writes three Dockerfiles, which trains people to ignore
-//! it. It is documented in `deploy/k8s/README.md` instead.
+//! Whether the images have ever been published is not checked. Each service
+//! does have a Dockerfile under `deploy/docker/`, and the `images` CI job
+//! builds each one and starts it against its probe path -- an earlier
+//! version of this comment said there was no Dockerfile in the repository
+//! at all, which stopped being true some time before the README was
+//! rewritten. What is genuinely missing is publication: that job runs with
+//! `push: false`, and `release.yml` cuts a release from a compiled
+//! `gm-console-server` binary rather than from an image. So
+//! `ghcr.io/ulyssesleolee/*` is empty and a fresh `kubectl apply` lands
+//! every pod in `ImagePullBackOff`.
+//!
+//! That is a real and separate defect. A gate asserting published images
+//! would be a gate that fails on every commit until someone configures a
+//! registry with credentials attached, which trains people to ignore it.
+//! It is documented in `deploy/k8s/README.md` instead.
+//!
+//! What *is* enforced here is that every tag names the workspace version,
+//! so the three manifests cannot disagree with the crate they deploy. See
+//! `image_tags_match_workspace.rs`.
 //!
 //! Everything checked here needs no external tool and no network, so it
 //! runs on every `cargo test`.

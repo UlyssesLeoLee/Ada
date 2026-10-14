@@ -107,16 +107,20 @@ labels:
 # `name:` deliberately omits the tag so it matches regardless of which tag
 # the manifest happens to carry.
 #
-# UNRESOLVED: no image here is buildable. There is no Dockerfile anywhere in
-# this repository, and no CI job that builds or pushes one, so all three
-# Deployments land in ImagePullBackOff. See deploy/k8s/README.md.
+# UNRESOLVED: all three images build and smoke-test, but none is ever
+# published. Each service has a Dockerfile under `deploy/docker/` and the
+# `images` CI job builds each one and starts it against its probe path --
+# that gap is closed. What is still open is publication: the job runs with
+# `push: false`, and `release.yml` cuts a release from a compiled binary
+# rather than from an image. So `ghcr.io/ulyssesleolee/*` is empty and a
+# fresh apply lands every pod in ImagePullBackOff. See deploy/k8s/README.md.
 images:
   - name: ada-api-gateway
     newName: ghcr.io/ulyssesleolee/ada-api-gateway
     newTag: v0.1.0
   - name: ada-remediation
     newName: ghcr.io/ulyssesleolee/ada-remediation
-    newTag: v0.7.1
+    newTag: v0.1.0
   - name: gm-console
     newName: ghcr.io/ulyssesleolee/gm-console
     newTag: v0.1.0
