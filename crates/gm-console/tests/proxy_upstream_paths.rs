@@ -45,6 +45,25 @@
 //! This is a separate file from `api_proxy.rs` rather than a section in it,
 //! because the stub is deliberately different and mixing them would make it
 //! easy to reintroduce a permissive catch-all.
+//!
+//! ## What the stub is not
+//!
+//! It is not the gateway's router, and this file does not start the gateway
+//! binary — `CARGO_BIN_EXE` and `Command::new` appear nowhere in it. The
+//! routing table in `GATEWAY_ROUTES` is a hand-transcribed copy of
+//! `build_router` in `crates/ada-m13-api-gateway/src/router.rs`, so:
+//!
+//! - what this pins is the **spelling** of the paths (`/api/v1/...`, prefix
+//!   included) and the console's forwarding of them. That is the defect
+//!   these tests exist for, and a transcription is enough to catch it.
+//! - what this does **not** pin is that the gateway still mounts those
+//!   routes. The table drifts: add a route to the gateway and nothing here
+//!   notices until someone copies the line across, and until then the stub
+//!   answers `404 no such route` with the confidence of a real gateway.
+//!
+//! `probe_paths` covers the manifest-probe half of that gap for probe paths
+//! only. Nothing covers the general case, and reading this file as if it did
+//! is the mistake worth avoiding.
 
 use axum::{
     body::Body,
