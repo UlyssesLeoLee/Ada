@@ -22,6 +22,60 @@ python crates/ada-mock/scripts/_lib_mock_switch_ada.py \
     --aci-config crates/ada-mock/.aci.json read-plugins
 ```
 
+## 5 分钟入门
+
+```bash
+# 跑全部测试 (含 server feature)
+cargo test -p ada-mock --all-features
+
+# 跑覆盖率 (需要 nightly + cargo-llvm-cov)
+pwsh scripts/coverage_report.ps1 -Threshold 80
+
+# 列 TDS 状态
+python scripts/list_tds.py
+```
+
+## 分層回歸 (ULYS-136)
+
+`run_regression.ps1` で UT/IT/ST を順次実行 + `summary.{json,md}` 出力:
+
+```bash
+# 全体回帰 (推奨エントリ)
+pwsh scripts/run_regression.ps1 -TargetDir .ada-mock-target
+
+# 各層を個別実行
+pwsh scripts/run_ut.ps1     # cargo test -p ada-mock --lib
+pwsh scripts/run_it.ps1     # cargo test -p ada-mock --test sample_mock_usage
+pwsh scripts/run_st.ps1     # cargo test -p ada-mock --test sample_mock_usage --features server
+
+# 集計のみ (既に各層 -latest.log がある状態で)
+python scripts/aggregate_results.py
+```
+
+出力: `test-results/regression-{ts}/summary.{json,md}` (各層 passed/failed + 失敗テスト名列挙).
+
+## 模块地图
+
+| 路径 | 说明 |
+|---|---|
+| `src/mocks/event_bus.rs` | `InMemoryEventBus` (精确-topic 扇出) |
+| `src/mocks/scheduler.rs` | `InMemoryScheduler` (6 状态状态机 + capacity) |
+| `src/mocks/connector.rs` | `StubConnector` (stdin/file/http 三合一) |
+| `src/server/mod.rs` *(feature)* | `FakeOtlpServer` (本地 TcpListener, 录 raw+body) |
+| `src/fixtures/` | `load_envelope` / `load_ndjson` + 黄金事件工厂 |
+| `src/builders.rs` | `EventBuilder` / `JobBuilder` / `fixed_now` / `fresh_id` |
+| `tests/fixtures/` | 真实黄金数据 (NDJSON + envelope JSON) |
+| `tests/sample_mock_usage.rs` | 4 能力层一站式 smoke |
+| `docs/tds/` | 测试设计书: 00-README + TEMPLATE + 3 实例 |
+| `scripts/` | coverage_report.ps1 / run_tests.ps1 / list_tds.py |
+
+## 与业务 crate 的边界
+
+- ✅ 可以: 改 mock 内部实现、改 fixture 路径、改 TDS 模板
+- ❌ 不可以: 在 `src/mocks/*` 里 `use ada_m09_exporter::*` 之类
+- ❌ 不可以: 把 mock 通过 `path = "../ada-mock"` 加进业务 crate 的 dev-dep
+- ❌ 不可以: 引入 tokio / axum / hyper / reqwest / tonic
+
 ## 模块地图
 
 | 路径 | 说明 |
