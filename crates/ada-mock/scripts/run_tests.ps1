@@ -5,6 +5,7 @@
 #   pwsh scripts/run_tests.ps1                  # 全测
 #   pwsh scripts/run_tests.ps1 -Feature server  # 开 server feature
 #   pwsh scripts/run_tests.ps1 -NoFailFast      # 失败也跑到底
+
 $ErrorActionPreference = 'Stop'
 
 param(

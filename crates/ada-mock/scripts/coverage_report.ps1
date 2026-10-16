@@ -13,6 +13,7 @@
 # 输出:
 #   target/coverage/html/index.html
 #   target/coverage/summary.txt   (本脚本附加生成)
+
 $ErrorActionPreference = 'Stop'
 
 param(
